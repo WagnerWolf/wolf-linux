@@ -1,0 +1,941 @@
+# Wolf Linux 1.0
+
+<p align="center">
+  <img src="wolf-linux-logo.png" alt="Wolf Linux" width="360">
+</p>
+
+**Wolf Linux** é um projeto pessoal baseado em **Arch Linux**, criado para automatizar uma instalação completa, reproduzível e personalizada para uso diário, desenvolvimento, jogos e multimídia.
+
+A distribuição usa o Arch Linux como base, `linux-zen` como kernel padrão, PipeWire como stack de áudio, SDDM como display manager e oferece escolha entre **MATE**, **Cinnamon** e **KDE Plasma** no momento da instalação.
+
+A versão 1.0 foi desenvolvida e validada em máquinas virtuais UEFI/BIOS e em hardware real, com especial atenção a detecção de GPU, preservação de `/home`, dual boot, múltiplos monitores, Bluetooth, NVIDIA e identidade visual própria.
+
+> **Aviso:** o instalador pode formatar discos e partições. Sempre confira o plano exibido antes de confirmar uma instalação real.
+
+---
+
+## Principais características
+
+### Base do sistema
+
+- Arch Linux rolling release.
+- Kernel `linux-zen` + headers.
+- Microcode AMD ou Intel selecionado automaticamente.
+- GRUB com suporte a UEFI e BIOS/Legacy.
+- `os-prober` para sistemas preservados, incluindo Windows.
+- `multilib` habilitado por padrão.
+- Chaotic-AUR configurado pelo instalador, com fallback para AUR via `yay`.
+- NetworkManager + suporte a OpenVPN e IWD.
+- SDDM nos três ambientes gráficos.
+- `sudo` com grupo `wheel` e feedback de senha por asteriscos (`pwfeedback`).
+- Conta `root` bloqueada após a instalação.
+
+### Ambientes gráficos
+
+O instalador pergunta qual ambiente deve ser instalado:
+
+1. **MATE**
+2. **Cinnamon**
+3. **KDE Plasma**
+
+O MATE é o ambiente mais personalizado do projeto e inclui:
+
+- painel inferior estilo Windows;
+- Brisk Menu;
+- Materia Dark;
+- bordas Wolf-Sunrise-Dark;
+- Papirus Dark;
+- cursor Breeze Dark;
+- notificações Coco;
+- wallpaper Wolf Linux;
+- integração do Caja com VS Code;
+- integração do Caja com formatação de mídias removíveis;
+- bandeja de dispositivos removíveis com `udiskie`;
+- barreiras inteligentes entre monitores;
+- gesto para mover janelas entre monitores;
+- mouse sem aceleração no X11/libinput.
+
+### Áudio e Bluetooth
+
+- PipeWire.
+- PipeWire Pulse.
+- PipeWire ALSA.
+- WirePlumber.
+- RTKit.
+- BlueZ / BlueZ Utils.
+- Blueman no MATE/Cinnamon.
+- `pavucontrol`.
+
+O uso de PipeWire foi escolhido também pensando em headsets Bluetooth e troca entre perfis A2DP/HFP.
+
+### Vídeo e Vulkan
+
+O instalador detecta automaticamente o perfil gráfico.
+
+Perfis atualmente previstos:
+
+- QEMU/VirtIO;
+- AMD;
+- Intel;
+- NVIDIA moderna;
+- NVIDIA legacy/Nouveau.
+
+Para NVIDIA moderna com `linux-zen`, o Wolf Linux utiliza `nvidia-open-dkms` e instala também:
+
+- `nvidia-utils`;
+- `lib32-nvidia-utils`;
+- `nvidia-settings`;
+- Vulkan 64/32-bit;
+- VA-API NVIDIA.
+
+Para placas antigas incompatíveis com os drivers NVIDIA atuais, o instalador pode optar pelo Nouveau.
+
+### Gaming
+
+Incluído por padrão:
+
+- Steam;
+- Lutris;
+- Wine;
+- Wine Mono / Gecko;
+- Winetricks;
+- Protontricks;
+- ProtonUp-Qt;
+- GameMode;
+- Vulkan 64/32-bit;
+- VKD3D.
+
+Não são instalados deliberadamente:
+
+- Bottles;
+- Gamescope;
+- MangoHUD.
+
+### Desenvolvimento
+
+Inclui entre outros:
+
+- Git;
+- GCC/base-devel;
+- CMake;
+- Ninja;
+- Clang;
+- Python;
+- OpenJDK 17 e 21;
+- Android Studio;
+- Android SDK / Build Tools / Platform Tools;
+- Android Udev;
+- VS Code;
+- Insomnia;
+- Flutter Stable instalado em `/opt/flutter`.
+
+O Android Emulator é pensado para utilizar KVM diretamente; VirtualBox e Genymotion não fazem parte da instalação padrão.
+
+### Internet
+
+- Google Chrome;
+- AB Download Manager;
+- JDownloader 2;
+- Transmission Qt.
+
+### Escritório e multimídia
+
+- LibreOffice Fresh + tradução pt-BR;
+- leitor PDF nativo do ambiente;
+- SMPlayer + MPV;
+- Audacious;
+- FFmpeg;
+- GIMP;
+- OBS Studio.
+
+### Miniaturas e previews
+
+O sistema instala suporte adicional de miniaturas para vários formatos, incluindo:
+
+- vídeo e áudio;
+- WebP;
+- HEIF/AVIF;
+- RAW de câmeras;
+- WMF/APM;
+- EPUB/MOBI;
+- documentos ODF;
+- PDF;
+- executáveis/ícones do Windows/Wine.
+
+### Terminal e shell
+
+- Zsh como shell do usuário.
+- Oh My Zsh.
+- Powerlevel10k.
+- zsh-autosuggestions.
+- zsh-completions.
+- zsh-history-substring-search.
+- zsh-syntax-highlighting.
+- Meslo Nerd Font.
+- Fastfetch automático ao abrir o terminal.
+- arte própria Wolf Linux no Fastfetch.
+
+O terminal gráfico abre com largura ampliada para acomodar melhor o Fastfetch e o Powerlevel10k.
+
+Nos TTYs (`Ctrl+Alt+F2`, `F3` etc.) é utilizado um perfil separado:
+
+- Terminus `ter-v16n`;
+- logo ASCII simplificada;
+- Fastfetch reduzido;
+- prompt Zsh simples;
+- sem Powerlevel10k/Nerd Font.
+
+### Identidade visual
+
+O Wolf Linux possui identidade própria em:
+
+- GRUB;
+- Plymouth;
+- SDDM;
+- wallpaper;
+- Fastfetch;
+- tema MATE.
+
+O tema SDDM utiliza o framework do projeto **sddm-astronaut-theme**, com configuração e arte Wolf Linux.
+
+Consulte [`THIRD-PARTY-LICENSES.md`](THIRD-PARTY-LICENSES.md) para créditos e licenças de componentes visuais de terceiros.
+
+---
+
+# Estrutura do projeto
+
+Após preparar o ambiente, o projeto principal fica por padrão em:
+
+```text
+~/wolf-linux/
+```
+
+Estrutura relevante:
+
+```text
+wolf-linux/
+├── install/
+│   └── wolf-install.sh
+├── package-profiles/
+│   └── packages.conf
+├── assets/
+│   ├── grub/
+│   ├── plymouth/
+│   ├── sddm/
+│   ├── wallpapers/
+│   └── zsh/
+├── iso-profile/
+├── tests/
+├── vm/
+├── work/
+└── out/
+```
+
+### Diretórios
+
+| Caminho | Função |
+|---|---|
+| `install/` | instalador principal |
+| `package-profiles/` | manifesto de pacotes |
+| `assets/` | branding e configurações visuais |
+| `iso-profile/` | perfil ArchISO baseado no `releng` |
+| `tests/` | build, smoke test, VM, SSH e utilitários |
+| `vm/` | discos QCOW2 e NVRAM das VMs |
+| `work/` | diretório temporário do `mkarchiso` |
+| `out/` | ISOs geradas |
+
+---
+
+# Preparando o ambiente de desenvolvimento
+
+O host de build deve ser um sistema Arch Linux ou derivado com acesso aos repositórios do Arch.
+
+O DevKit instala automaticamente as ferramentas principais:
+
+- `archiso`;
+- `qemu-desktop`;
+- `edk2-ovmf`;
+- `shellcheck`;
+- `git`;
+- `python`.
+
+Extraia o DevKit e execute:
+
+```bash
+chmod +x preparar_ambiente_wolf_linux.sh
+./preparar_ambiente_wolf_linux.sh
+```
+
+O script cria `~/wolf-linux`, copia o perfil `releng` do ArchISO, instala os scripts, manifesto e assets e personaliza o perfil da ISO.
+
+Se já existir uma logo do Plymouth validada em:
+
+```text
+~/wolf-linux/assets/plymouth/logo.png
+```
+
+ela é preservada pelo preparador.
+
+---
+
+# Atualizando um projeto existente para 1.0
+
+Se `~/wolf-linux` já existe e contém seus assets validados, prefira:
+
+```bash
+chmod +x wolf-upgrade-project-to-1.0.sh
+./wolf-upgrade-project-to-1.0.sh
+```
+
+Esse script atualiza o instalador, manifesto e scripts de teste **sem sobrescrever `assets/`**.
+
+Ao final ele também executa o smoke test.
+
+---
+
+# Testes rápidos
+
+Antes de gerar uma ISO:
+
+```bash
+cd ~/wolf-linux
+./tests/wolf-smoke-test.sh
+```
+
+O smoke test verifica, entre outras coisas:
+
+- sintaxe Bash com `bash -n`;
+- `shellcheck` quando disponível;
+- manifesto de pacotes;
+- estrutura do perfil ArchISO;
+- teclado `br-abnt2` na ISO live;
+- Terminus `ter-v16n` no console live;
+- identidade `Wolf Linux Live`;
+- permissões executáveis do `wolf-install` dentro da ISO.
+
+Resultado esperado:
+
+```text
+[OK] Testes rápidos concluídos.
+```
+
+---
+
+# Dry-run do instalador
+
+Antes de qualquer instalação real, o instalador pode ser executado no sistema atual sem alterar discos:
+
+```bash
+cd ~/wolf-linux
+./install/wolf-install.sh --dry-run
+```
+
+O dry-run faz a detecção de:
+
+- modo UEFI/BIOS;
+- CPU;
+- GPUs;
+- perfil gráfico;
+- teclado;
+- conectividade;
+- desktop escolhido;
+- hostname e usuário;
+- instalação Linux existente;
+- layout de discos, LVM, `/home` e ESP.
+
+No final ele mostra o **PLANO WOLF LINUX** e encerra sem formatar, montar ou instalar nada.
+
+Também existe:
+
+```bash
+./install/wolf-install.sh --plan-only
+```
+
+---
+
+# Gerando a ISO
+
+Execute:
+
+```bash
+cd ~/wolf-linux
+./tests/wolf-build-iso.sh
+```
+
+O script:
+
+1. executa novamente a customização do perfil;
+2. limpa `~/wolf-linux/work`;
+3. executa `mkarchiso`;
+4. grava a ISO em `~/wolf-linux/out/`.
+
+A ISO é identificada como **Wolf Linux Live/Installer** e inicia com teclado BR-ABNT2.
+
+---
+
+# Testando a ISO em QEMU/KVM
+
+## UEFI
+
+```bash
+cd ~/wolf-linux
+./tests/wolf-run-arch-test.sh uefi
+```
+
+## BIOS/Legacy
+
+```bash
+./tests/wolf-run-arch-test.sh bios
+```
+
+Quando o caminho da ISO não é informado, o script usa automaticamente a ISO mais recente em:
+
+```text
+~/wolf-linux/out/
+```
+
+Cada execução via `wolf-run-arch-test.sh` utiliza `--fresh`, recriando o disco da VM para garantir um teste limpo.
+
+Configuração padrão da VM:
+
+- QEMU/KVM;
+- chipset Q35;
+- CPU host;
+- 4 vCPUs;
+- 8 GiB RAM;
+- disco QCOW2 de 80 GiB;
+- VirtIO VGA;
+- VirtIO Network;
+- áudio HDA;
+- OVMF em UEFI;
+- boot tradicional em BIOS.
+
+### Critério recomendado para validação final
+
+Faça uma instalação completa em UEFI e outra em BIOS:
+
+1. iniciar a ISO;
+2. executar `wolf-install`;
+3. concluir toda a instalação;
+4. reiniciar a VM;
+5. confirmar o boot pelo disco instalado;
+6. entrar no SDDM;
+7. iniciar a sessão gráfica;
+8. conferir tema, painel, áudio e aplicações principais.
+
+---
+
+# SSH na VM live
+
+A VM redireciona:
+
+```text
+127.0.0.1:2222 -> guest:22
+```
+
+Dentro da ISO live, como root:
+
+```bash
+/root/wolf-linux/tests/wolf-enable-ssh-live.sh
+```
+
+Defina uma senha temporária para `root`.
+
+No host:
+
+```bash
+~/wolf-linux/tests/wolf-vm-ssh.sh
+```
+
+ou:
+
+```bash
+ssh -p 2222 root@127.0.0.1
+```
+
+A senha é apenas da sessão live e desaparece ao reiniciar a VM.
+
+---
+
+# Instalando o Wolf Linux
+
+Na ISO live:
+
+```bash
+wolf-install
+```
+
+Sem argumentos, o wrapper detecta o ambiente:
+
+- QEMU/KVM → usa `--vm-install`;
+- hardware físico → usa `--install`.
+
+Também é possível chamar explicitamente:
+
+```bash
+wolf-install --dry-run
+wolf-install --vm-install
+wolf-install --install
+```
+
+## Proteções do instalador
+
+O instalador possui travas deliberadas:
+
+- `--vm-install` é recusado fora de QEMU/KVM;
+- `--install` é recusado dentro de QEMU/KVM;
+- instalação real precisa ser executada como root;
+- o plano completo é mostrado antes das operações destrutivas;
+- para prosseguir é necessário digitar exatamente:
+
+```text
+INSTALAR-WOLF
+```
+
+---
+
+# Armazenamento
+
+O instalador tenta detectar automaticamente uma instalação Linux existente.
+
+Quando encontra uma estrutura reconhecível, pode propor algo como:
+
+```text
+/          /dev/...          SERÁ FORMATADO
+/boot/efi  /dev/...          SERÁ PRESERVADO
+/home      /dev/mapper/...   SERÁ PRESERVADO
+```
+
+Outras partições fora desse plano, como Windows ou Recovery, não são alteradas no modo de reutilização.
+
+Caso a detecção automática não seja aceita, existem três modos:
+
+```text
+1) Apagar um disco e instalar automaticamente
+2) Escolher/reutilizar partições existentes manualmente
+3) Configuração manual/avançada
+```
+
+## Apagar disco inteiro
+
+No modo `erase`:
+
+### UEFI
+
+O instalador cria:
+
+- ESP de 1 GiB;
+- partição raiz usando o restante do disco.
+
+### BIOS
+
+Cria uma tabela MBR/MS-DOS e uma partição ext4 bootável ocupando o disco.
+
+**Todo o disco selecionado é apagado nesse modo.**
+
+## Preservando `/home`
+
+Quando `/home` está em uma partição ou LV separado, o instalador pode preservá-lo.
+
+Ele pergunta separadamente se deve remover apenas os arquivos e diretórios ocultos diretamente dentro de:
+
+```text
+/home/USUARIO/
+```
+
+Exemplos removíveis:
+
+```text
+.config
+.cache
+.local
+.mozilla
+.zshrc
+.p10k.zsh
+```
+
+Arquivos e pastas visíveis, como `Documentos`, `Downloads`, `Projetos` e `Imagens`, são preservados.
+
+A própria partição/LV `/home` **não é formatada** nesse fluxo.
+
+---
+
+# Fluxo de instalação
+
+As principais etapas são registradas como checkpoints:
+
+```text
+10-preparar-disco
+20-formatar-montar
+22-limpar-home
+25-repositorios-live
+27-validar-pacotes
+30-pacstrap
+40-fstab
+50-multilib
+55-completar-pacotes-base
+60-sistema-base
+61-identidade-wolf
+62-usuario-sudo
+63-chaotic-aur
+64-apps-oficiais
+65-yay
+66-apps-terceiros
+66b-octopi-notifier
+67-servicos
+67b-tema-mate
+68-estilo-base
+68a-mate-session
+68b-flutter
+68c-zsh
+68d-terminal
+68e-mate-layout
+68f-desktop-extras
+69-video
+69b-validar-video
+69c-gaming
+69d-branding
+70-bootloader
+72-validar-boot
+80-finalizar
+```
+
+Em caso de falha, o instalador exibe:
+
+- etapa;
+- código de saída;
+- linha;
+- último comando;
+- mounts ativos;
+- checkpoints concluídos;
+- caminho do log.
+
+Log padrão:
+
+```text
+/tmp/wolf-linux-installer/wolf-install.log
+```
+
+---
+
+# Chaotic-AUR e falhas temporárias de mirror
+
+O instalador valida os pacotes de bootstrap antes de instalá-los.
+
+Ele também detecta respostas inválidas como:
+
+```text
+mirror unhealthy
+```
+
+mesmo quando o servidor responde HTTP 200.
+
+Quando o mirror está indisponível, o instalador pergunta:
+
+```text
+Tentar novamente agora? [S/n]
+```
+
+Portanto não é necessário reiniciar toda a instalação apenas por uma falha temporária do Chaotic-AUR.
+
+---
+
+# Tema escuro em aplicações GNOME
+
+No MATE, além do tema GTK, o Wolf Linux configura:
+
+```text
+org.gnome.desktop.interface color-scheme = prefer-dark
+```
+
+com:
+
+- `xdg-desktop-portal`;
+- `xdg-desktop-portal-gtk`.
+
+O valor esperado no portal é `uint32 1`:
+
+```bash
+gdbus call --session \
+  --dest org.freedesktop.portal.Desktop \
+  --object-path /org/freedesktop/portal/desktop \
+  --method org.freedesktop.portal.Settings.Read \
+  org.freedesktop.appearance \
+  color-scheme
+```
+
+Resposta esperada:
+
+```text
+(<<uint32 1>>,)
+```
+
+Isso permite que aplicações como GNOME Disks respeitem o modo escuro mesmo dentro da sessão MATE.
+
+---
+
+# Múltiplos monitores no MATE
+
+## Barreiras de borda
+
+No MATE/X11 o Wolf Linux cria pequenas barreiras nas divisas entre monitores:
+
+- 36 px no canto superior;
+- 36 px no canto inferior;
+- região central livre para passagem normal.
+
+Isso facilita atingir rapidamente os cantos para fechar janelas ou acionar elementos no canto inferior sem o ponteiro escapar imediatamente para o outro monitor.
+
+## Mover janela para o próximo monitor
+
+Gesto padrão:
+
+```text
+Super + botão do meio
+```
+
+Em janelas tradicionais do Marco, use o gesto sobre a barra de título.
+
+Em Chrome/Electron/CSD, use nos primeiros 64 px do topo da janela.
+
+O daemon:
+
+- escolhe sempre a janela topmost;
+- preserva aproximadamente a posição relativa;
+- suporta coordenadas negativas do XRandR;
+- tenta preservar maximização;
+- utiliza `flock` para manter somente uma instância por usuário.
+
+Log:
+
+```text
+~/.cache/wolf-titlebar-monitor-move.log
+```
+
+---
+
+# Mouse sem aceleração
+
+Essa configuração é específica para o perfil MATE/X11 do Wolf Linux.
+
+Arquivo persistente:
+
+```text
+/etc/X11/xorg.conf.d/50-wolf-mouse-no-accel.conf
+```
+
+Configuração esperada:
+
+```text
+Option "AccelProfile" "flat"
+Option "AccelSpeed" "0"
+```
+
+Touchpads são excluídos dessa regra.
+
+Além do arquivo Xorg, existe um reforço no autostart do MATE para impedir que uma preferência antiga devolva o mouse ao perfil adaptativo.
+
+## Como confirmar que a aceleração está realmente desativada
+
+Liste os dispositivos:
+
+```bash
+xinput list --short
+```
+
+Identifique o ID do mouse e execute, por exemplo:
+
+```bash
+xinput list-props ID_DO_MOUSE | grep -E \
+  'libinput Accel Profile Enabled|libinput Accel Speed'
+```
+
+No Wolf Linux, o resultado efetivo esperado é equivalente a:
+
+```text
+libinput Accel Profile Enabled (...): 0, 1, 0
+libinput Accel Speed (...): 0.000000
+```
+
+O ponto mais importante é o **perfil flat**. `AccelSpeed=0` sozinho não significa necessariamente ausência de aceleração; o perfil flat é o que remove a curva adaptativa de aceleração.
+
+Também é possível verificar a configuração persistente:
+
+```bash
+cat /etc/X11/xorg.conf.d/50-wolf-mouse-no-accel.conf
+```
+
+Se quiser verificar todos os dispositivos que expõem propriedades de aceleração:
+
+```bash
+for id in $(xinput list --id-only); do
+    props="$(xinput list-props "$id" 2>/dev/null || true)"
+    if grep -q 'libinput Accel Profile Enabled' <<<"$props"; then
+        echo "============================================================"
+        xinput list --name-only "$id" 2>/dev/null || echo "ID $id"
+        grep -E \
+          'libinput Accel Profile Enabled|libinput Accel Speed' \
+          <<<"$props"
+    fi
+done
+```
+
+---
+
+# Mídias removíveis
+
+## Bandeja
+
+O Wolf Linux usa `udiskie` em modo smart tray:
+
+```text
+udiskie --smart-tray --no-automount --no-notify --file-manager=/usr/bin/caja
+```
+
+O automount permanece sob responsabilidade do Caja/GVfs, evitando dois automounters concorrentes.
+
+A bandeja permite montar, desmontar e ejetar/remover mídias com segurança.
+
+## Formatar pendrive pelo Caja
+
+Quando o usuário está na raiz de um filesystem montado em dispositivo removível/USB/MMC, o Caja oferece:
+
+```text
+Formatar mídia removível…
+```
+
+A ação abre o GNOME Disks para o dispositivo detectado. A formatação continua exigindo confirmação gráfica; o plugin não executa uma formatação destrutiva silenciosa.
+
+---
+
+# Bluetooth
+
+Dispositivos pareados podem ser marcados como **Trusted** pelo BlueZ.
+
+Para verificar:
+
+```bash
+bluetoothctl devices
+bluetoothctl info XX:XX:XX:XX:XX:XX
+```
+
+Para headsets que não reconectam automaticamente, confira também a opção de conexão automática no Blueman.
+
+---
+
+# Aplicativos padrão e integração do desktop
+
+No perfil MATE, o Wolf Linux configura defaults e integrações para o fluxo de uso diário, incluindo:
+
+- Audacious para áudio;
+- SMPlayer para vídeo;
+- leitor PDF do ambiente;
+- abertura de pasta no VS Code via menu de contexto do Caja;
+- miniaturas adicionais;
+- GNOME Keyring / libsecret para aplicações como VS Code;
+- Octopi + Octopi Notifier após login.
+
+---
+
+# Checklist de validação da ISO 1.0
+
+Antes de publicar uma nova ISO, recomenda-se validar:
+
+- [ ] `wolf-smoke-test.sh` passa sem erros;
+- [ ] ISO é gerada com `wolf-build-iso.sh`;
+- [ ] ISO inicia em UEFI;
+- [ ] instalação completa UEFI termina sem erros;
+- [ ] sistema UEFI instalado reinicia pelo disco;
+- [ ] ISO inicia em BIOS/Legacy;
+- [ ] instalação completa BIOS termina sem erros;
+- [ ] sistema BIOS instalado reinicia pelo disco;
+- [ ] SDDM carrega corretamente;
+- [ ] Plymouth exibe logo transparente sem fundo quadrado;
+- [ ] ambiente selecionado inicia;
+- [ ] PipeWire/WirePlumber estão ativos;
+- [ ] RTKit está disponível;
+- [ ] rede funciona;
+- [ ] tema escuro está aplicado;
+- [ ] Fastfetch aparece automaticamente no terminal gráfico;
+- [ ] TTY usa Terminus e prompt simplificado;
+- [ ] mouse usa perfil `flat` no MATE/X11;
+- [ ] gesto `Super + botão do meio` funciona entre monitores;
+- [ ] `udiskie` aparece quando necessário;
+- [ ] formatação pelo Caja abre GNOME Disks corretamente;
+- [ ] GRUB, Plymouth, SDDM e wallpaper exibem o branding Wolf Linux.
+
+---
+
+# Comandos rápidos
+
+## Preparar ambiente do zero
+
+```bash
+./preparar_ambiente_wolf_linux.sh
+```
+
+## Atualizar projeto existente
+
+```bash
+./wolf-upgrade-project-to-1.0.sh
+```
+
+## Smoke test
+
+```bash
+cd ~/wolf-linux
+./tests/wolf-smoke-test.sh
+```
+
+## Dry-run do instalador
+
+```bash
+./install/wolf-install.sh --dry-run
+```
+
+## Gerar ISO
+
+```bash
+./tests/wolf-build-iso.sh
+```
+
+## Testar UEFI
+
+```bash
+./tests/wolf-run-arch-test.sh uefi
+```
+
+## Testar BIOS
+
+```bash
+./tests/wolf-run-arch-test.sh bios
+```
+
+## Instalar pela ISO
+
+```bash
+wolf-install
+```
+
+---
+
+# Créditos
+
+Wolf Linux é construído sobre o ecossistema Arch Linux e utiliza diversos projetos livres.
+
+Componentes visuais de terceiros utilizados diretamente pelo projeto são documentados em:
+
+[`THIRD-PARTY-LICENSES.md`](THIRD-PARTY-LICENSES.md)
+
+Entre eles:
+
+- sddm-astronaut-theme;
+- Sunrise GTK Themes.
+
+---
+
+# Estado do projeto
+
+**Wolf Linux 1.0** representa a primeira versão consolidada do instalador e da ISO personalizada.
+
+A partir desta base, correções pequenas podem seguir versionamento `1.0.x`, enquanto mudanças maiores de comportamento, desktop ou arquitetura podem seguir para `1.1` ou superior.
