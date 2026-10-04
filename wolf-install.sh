@@ -7,7 +7,7 @@ fi
 
 set -Eeuo pipefail
 
-WOLF_VERSION="0.33-desktop-extras"
+WOLF_VERSION="1.0"
 DRY_RUN=0
 PLAN_ONLY=0
 RESET_STATE=0
@@ -1396,7 +1396,7 @@ configure_system_base() {
     printf 'LANG=pt_BR.UTF-8\n' > /mnt/etc/locale.conf
 
     # Console/TTY continua no mapa ABNT2. A variante ThinkPad é XKB gráfica.
-    printf 'KEYMAP=br-abnt2\n' > /mnt/etc/vconsole.conf
+    printf 'KEYMAP=br-abnt2\nFONT=ter-v16n\n' > /mnt/etc/vconsole.conf
 
     mkdir -p /mnt/etc/X11/xorg.conf.d
 
@@ -2175,10 +2175,154 @@ install_oh_my_zsh_and_profile() {
 
     fetch_wolf_asset "zsh/p10k.zsh" /mnt/etc/skel/.p10k.zsh
 
+    mkdir -p /mnt/usr/share/wolf-linux/fastfetch
+    mkdir -p /mnt/etc/skel/.config/fastfetch
+
+    cat > /mnt/usr/share/wolf-linux/fastfetch/wolf-linux.txt <<'EOF'
+             ⣀ ⣠ ⢀
+         ⣀⠄  ⢧⡀⢩⢀⡼  ⠠⣀
+       ⣠⠞⠁⣀⣤⢶⣾⣿⠟⣿⣿⣶⣦⣀ ⠙⢦⡀
+     ⢠⡾⠁⣠⠞⣿⠟⢛⣿⣿⣿⣿⣿⣿⣿⢿⣷⣄⠈⢻⣄
+    ⢠⣿⠁⣰⠋⡰⣯⣶⣿⣿⣿⣿⣿⡿⣿⣷⡎⣿⣿⣧ ⣿⡆
+    ⢻⡏⢠⡯⣤⣿⣿⣟⠻⢿⡿⠋⣴⣻⣿⡿⣠⣿⣟⣿⡆⢸⣿⡀
+    ⣼⣇⢸⡇⣕⣿⣿⣿⣠⡟⠁⢰⢿⣿⣿⢣⣿⣿⣿⣿⡇⢸⣿⠁
+  ⢀⡌ ⣿⡈⣿⣽⣿⣆⢀⣞⣅⡐⢠⠟⣿⠁⢠⣿⣿⣧⣿⢃⣿⠇⢱⡀
+   ⠹⡀⠘⢷⡜⢿⡿⠡⠛⠉⠉⣻⣾ ⠈⠻⣄⢻⣿⣿⢏⣾⠃⢀⡞
+    ⠙⣴⠃⠛⠮⠵⢊⣀⣀ ⠙⡟⣷⣦ ⢙⣯⠻⣵⢛⠊⣦⠎
+    ⠉⠙⣄⠤⣁⠚⠋⠉⠹⣷⡄ ⢨⢿⣾ ⢹⠃⣈⡠⢢⠏⠉
+      ⠚⢧ ⣽⠷⢦⣄ ⠙⣰⠈⠸⢋⡴⠾⣯⠁⡰⠛
+        ⠑⠻⣄ ⠙⢷⡀⠹⢀⡼⠛ ⣠⠾⠊
+              ⠱ ⠘
+
+              WOLF LINUX
+EOF
+
+    cat > /mnt/etc/skel/.config/fastfetch/config.jsonc <<'EOF'
+{
+    "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+    "logo": {
+        "type": "file-raw",
+        "source": "/usr/share/wolf-linux/fastfetch/wolf-linux.txt",
+        "padding": { "left": 1, "right": 3 }
+    },
+    "display": {
+        "separator": "  ",
+        "color": { "keys": "white", "title": "white" },
+        "key": { "width": 11 }
+    },
+    "modules": [
+        "title", "separator", "os", "host", "kernel", "uptime",
+        "packages", "shell", "display", "de", "wm", "wmtheme",
+        "theme", "icons", "terminal", "cpu", "gpu", "memory",
+        "disk", "localip"
+    ]
+}
+EOF
+
+    cat > /mnt/usr/share/wolf-linux/fastfetch/wolf-linux-ascii.txt <<'EOF'
+             /\        /\
+            /  \______/  \
+           /              \
+          /   /\      /\   \
+         |   /  \____/  \   |
+         |       _  _        |
+         |      / \/ \       |
+          \     \_/\_/      /
+           \      /\       /
+            '._  /  \  _.'
+               '-.__.-'
+
+              WOLF LINUX
+EOF
+
+    cat > /mnt/etc/skel/.config/fastfetch/config-tty.jsonc <<'EOF'
+{
+    "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+    "logo": {
+        "type": "file-raw",
+        "source": "/usr/share/wolf-linux/fastfetch/wolf-linux-ascii.txt",
+        "padding": {
+            "left": 1,
+            "right": 3
+        }
+    },
+    "display": {
+        "separator": " : ",
+        "color": {
+            "keys": "white",
+            "title": "white"
+        },
+        "key": {
+            "width": 10
+        }
+    },
+    "modules": [
+        "title",
+        "separator",
+        "os",
+        "host",
+        "kernel",
+        "uptime",
+        "packages",
+        "shell",
+        "cpu",
+        "gpu",
+        "memory",
+        "disk",
+        "localip"
+    ]
+}
+EOF
+
     cat > /mnt/etc/skel/.zshrc <<EOF
 # ============================================================
 # Wolf Linux - Zsh / Oh My Zsh / Powerlevel10k
 # ============================================================
+
+# ------------------------------------------------------------
+# Console virtual Linux (Ctrl+Alt+F2/F3/F4...)
+# ------------------------------------------------------------
+# O TTY não usa Meslo Nerd Font. Usamos Terminus + logo ASCII e
+# um prompt simples para evitar glifos quebrados do Powerlevel10k.
+if [[ -z "\${DISPLAY:-}" &&
+      -z "\${WAYLAND_DISPLAY:-}" &&
+      "\${TTY:-}" == /dev/tty* ]]; then
+
+    export ANDROID_HOME=/opt/android-sdk
+    export ANDROID_SDK_ROOT=/opt/android-sdk
+    export PATH="/opt/flutter/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/cmdline-tools/latest/bin:\$PATH"
+
+    if [[ -t 1 && "\${WOLF_FASTFETCH:-1}" != "0" ]] &&
+       command -v fastfetch >/dev/null 2>&1; then
+        fastfetch --config "\$HOME/.config/fastfetch/config-tty.jsonc"
+        echo
+    fi
+
+    PROMPT='%F{white}%n@%m%f:%F{cyan}%~%f %# '
+    RPROMPT=''
+    bindkey -e
+
+    [[ -r /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh ]] &&
+        source /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh
+
+    [[ -r /usr/share/zsh/plugins/zsh-history-substring-search/zsh-history-substring-search.zsh ]] &&
+        source /usr/share/zsh/plugins/zsh-history-substring-search/zsh-history-substring-search.zsh
+
+    [[ -r /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]] &&
+        source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+
+    return
+fi
+
+# Wolf Linux Fastfetch startup v2
+# .zshrc já é carregado apenas em shells interativos.
+# Mantemos a saída ANTES do instant prompt do Powerlevel10k.
+# Para desativar: export WOLF_FASTFETCH=0
+if [[ -t 1 && "${WOLF_FASTFETCH:-1}" != "0" ]] &&
+   command -v fastfetch >/dev/null 2>&1; then
+    fastfetch
+    echo
+fi
 
 # Powerlevel10k instant prompt. Deve permanecer próximo ao topo.
 if [[ -r "\${XDG_CACHE_HOME:-\$HOME/.cache}/p10k-instant-prompt-\${(%):-%n}.zsh" ]]; then
@@ -2216,6 +2360,7 @@ export ANDROID_SDK_ROOT=/opt/android-sdk
 export PATH="/opt/flutter/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/cmdline-tools/latest/bin:\$PATH"
 
 [[ -f ~/.p10k.zsh ]] && source ~/.p10k.zsh
+
 EOF
 
     mkdir -p "$user_home"
@@ -2226,10 +2371,23 @@ EOF
     cp -f /mnt/etc/skel/.zshrc "$user_home/.zshrc"
     cp -f /mnt/etc/skel/.p10k.zsh "$user_home/.p10k.zsh"
 
+    mkdir -p "$user_home/.config/fastfetch"
+    cp -f \
+        /mnt/etc/skel/.config/fastfetch/config.jsonc \
+        "$user_home/.config/fastfetch/config.jsonc"
+
+    cp -f \
+        /mnt/etc/skel/.config/fastfetch/config-tty.jsonc \
+        "$user_home/.config/fastfetch/config-tty.jsonc"
+
     arch-chroot /mnt chown \
         "$USERNAME_VALUE:$USERNAME_VALUE" \
         "/home/$USERNAME_VALUE/.zshrc" \
         "/home/$USERNAME_VALUE/.p10k.zsh"
+
+    arch-chroot /mnt chown -R \
+        "$USERNAME_VALUE:$USERNAME_VALUE" \
+        "/home/$USERNAME_VALUE/.config/fastfetch"
 
     arch-chroot /mnt chsh -s /bin/zsh "$USERNAME_VALUE"
 
@@ -2244,7 +2402,7 @@ install_terminal_defaults() {
 #!/usr/bin/env bash
 set -u
 
-MARKER="$HOME/.config/wolf-linux/terminal-v1.done"
+MARKER="$HOME/.config/wolf-linux/terminal-v2.done"
 
 [[ -f "$MARKER" ]] && exit 0
 mkdir -p "$(dirname "$MARKER")"
@@ -2255,23 +2413,34 @@ DESKTOP="${XDG_CURRENT_DESKTOP:-${XDG_SESSION_DESKTOP:-}}"
 configure_mate_terminal() {
     command -v gsettings >/dev/null 2>&1 || return 0
 
-    if ! gsettings list-schemas | grep -Fxq 'org.mate.terminal.profiles-list'; then
+    if ! gsettings list-schemas | grep -Fxq 'org.mate.terminal.global'; then
         return 0
     fi
 
-    local uuid
+    if ! gsettings list-schemas | grep -Fxq 'org.mate.terminal.profile'; then
+        return 0
+    fi
+
+    local profile
     local schema
 
-    uuid="$(gsettings get org.mate.terminal.profiles-list default 2>/dev/null | tr -d "'")"
-    [[ -n "$uuid" ]] || return 0
+    profile="$(
+        gsettings get org.mate.terminal.global default-profile 2>/dev/null \
+            | tr -d "'"
+    )"
+    [[ -n "$profile" ]] || profile="default"
 
-    schema="org.mate.terminal.profile:/org/mate/terminal/profiles/$uuid/"
+    schema="org.mate.terminal.profile:/org/mate/terminal/profiles/$profile/"
 
     gsettings set "$schema" use-theme-colors false 2>/dev/null || true
     gsettings set "$schema" background-color '#000000' 2>/dev/null || true
     gsettings set "$schema" foreground-color '#FFFFFF' 2>/dev/null || true
     gsettings set "$schema" use-system-font false 2>/dev/null || true
     gsettings set "$schema" font "$FONT" 2>/dev/null || true
+
+    # Wolf Linux: largura padrão maior para acomodar Fastfetch + Powerlevel10k.
+    gsettings set "$schema" use-custom-default-size true 2>/dev/null || true
+    gsettings set "$schema" default-size-columns 120 2>/dev/null || true
 }
 
 configure_gnome_terminal() {
@@ -2294,6 +2463,9 @@ configure_gnome_terminal() {
     gsettings set "$schema" foreground-color '#FFFFFF' 2>/dev/null || true
     gsettings set "$schema" use-system-font false 2>/dev/null || true
     gsettings set "$schema" font "$FONT" 2>/dev/null || true
+
+    gsettings set "$schema" use-custom-default-size true 2>/dev/null || true
+    gsettings set "$schema" default-size-columns 120 2>/dev/null || true
 }
 
 configure_konsole() {
@@ -3223,6 +3395,1595 @@ class WolfVSCodeExtension(GObject.GObject, Caja.MenuProvider):
 PY
 
     # --------------------------------------------------------
+    # Preferência de tema escuro também para aplicações GNOME/libhandy.
+    #
+    # O MATE usa org.mate.interface, mas aplicações GNOME modernas podem
+    # consultar org.gnome.desktop.interface/color-scheme. Mantemos ambos
+    # alinhados com a identidade visual Wolf Linux.
+    # --------------------------------------------------------
+    cat > /mnt/usr/local/bin/wolf-apply-dark-preference <<'EOF'
+#!/usr/bin/env bash
+set -u
+
+set_if_available() {
+    local schema="$1"
+    local key="$2"
+    local value="$3"
+
+    gsettings list-schemas 2>/dev/null | grep -Fxq "$schema" || return 0
+    gsettings list-keys "$schema" 2>/dev/null | grep -Fxq "$key" || return 0
+
+    gsettings set "$schema" "$key" "$value" 2>/dev/null || true
+}
+
+set_if_available org.mate.interface gtk-theme "'Materia-dark'"
+set_if_available org.mate.interface icon-theme "'Papirus-Dark'"
+
+set_if_available org.gnome.desktop.interface gtk-theme "'Materia-dark'"
+set_if_available org.gnome.desktop.interface icon-theme "'Papirus-Dark'"
+set_if_available org.gnome.desktop.interface color-scheme "'prefer-dark'"
+
+# Em MATE, aplicações GNOME/libhandy consultam a preferência publicada
+# pelo XDG Desktop Portal. Reiniciar os portais após gravar o GSettings
+# garante que org.freedesktop.appearance/color-scheme reflita prefer-dark.
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl --user restart \
+        xdg-desktop-portal-gtk.service \
+        xdg-desktop-portal.service \
+        >/dev/null 2>&1 || true
+fi
+EOF
+
+    chmod 755 /mnt/usr/local/bin/wolf-apply-dark-preference
+
+    cat > /mnt/etc/xdg/autostart/wolf-dark-preference.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Wolf Linux - Preferência de tema escuro
+Comment=Mantém aplicações MATE/GNOME alinhadas com o tema escuro Wolf Linux
+Exec=/usr/local/bin/wolf-apply-dark-preference
+OnlyShowIn=MATE;
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+
+    # --------------------------------------------------------
+    # Mídias removíveis
+    #
+    # udiskie fica responsável SOMENTE pela bandeja/ações manuais.
+    # O automount continua com Caja/GVfs para evitar disputa entre dois
+    # automounters na mesma sessão.
+    # --------------------------------------------------------
+    cat > /mnt/etc/xdg/autostart/wolf-udiskie.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Wolf Linux - Mídias removíveis
+Comment=Bandeja para montar, desmontar e ejetar mídias removíveis
+Exec=/usr/bin/udiskie --smart-tray --no-automount --no-notify --file-manager=/usr/bin/caja
+OnlyShowIn=MATE;
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+
+    # Helper centralizado para a integração "Formatar mídia removível".
+    # Ele só libera o GNOME Disks para o DIRETÓRIO RAIZ de um filesystem
+    # montado em um dispositivo removível/USB/MMC.
+    cat > /mnt/usr/local/bin/wolf-format-removable <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+usage() {
+    echo "Uso:"
+    echo "  wolf-format-removable --check CAMINHO"
+    echo "  wolf-format-removable --format CAMINHO"
+}
+
+resolve_device() {
+    local input="$1"
+    local real_path
+    local source
+    local target
+    local real_target
+    local parent=""
+    local disk=""
+    local rm_flag=""
+    local transport=""
+
+    real_path="$(readlink -f -- "$input" 2>/dev/null || true)"
+    [[ -n "$real_path" && -d "$real_path" ]] || return 1
+
+    source="$(
+        findmnt \
+            --noheadings \
+            --output SOURCE \
+            --target "$real_path" \
+            2>/dev/null \
+            | head -n1 \
+            | xargs
+    )"
+
+    target="$(
+        findmnt \
+            --noheadings \
+            --output TARGET \
+            --target "$real_path" \
+            2>/dev/null \
+            | head -n1 \
+            | xargs
+    )"
+
+    [[ -n "$source" && -n "$target" ]] || return 1
+
+    # Btrfs/subvolume pode aparecer como /dev/...[/subvolume].
+    source="${source%%\\[*}"
+
+    [[ "$source" == /dev/* ]] || return 1
+
+    real_target="$(readlink -f -- "$target" 2>/dev/null || true)"
+    [[ "$real_path" == "$real_target" ]] || return 1
+
+    parent="$(
+        lsblk \
+            --noheadings \
+            --output PKNAME \
+            "$source" \
+            2>/dev/null \
+            | head -n1 \
+            | xargs
+    )"
+
+    if [[ -n "$parent" ]]; then
+        disk="/dev/$parent"
+    else
+        disk="$source"
+    fi
+
+    rm_flag="$(
+        lsblk \
+            --nodeps \
+            --noheadings \
+            --output RM \
+            "$disk" \
+            2>/dev/null \
+            | head -n1 \
+            | xargs
+    )"
+
+    transport="$(
+        lsblk \
+            --nodeps \
+            --noheadings \
+            --output TRAN \
+            "$disk" \
+            2>/dev/null \
+            | head -n1 \
+            | xargs
+    )"
+
+    case "$transport" in
+        usb|mmc)
+            ;;
+        *)
+            [[ "$rm_flag" == "1" ]] || return 1
+            ;;
+    esac
+
+    printf '%s\n' "$source"
+}
+
+[[ $# -eq 2 ]] || {
+    usage
+    exit 2
+}
+
+mode="$1"
+path="$2"
+
+device="$(resolve_device "$path")" || exit 1
+
+case "$mode" in
+    --check)
+        printf '%s\n' "$device"
+        ;;
+
+    --format)
+        command -v gnome-disks >/dev/null 2>&1 || {
+            echo "[ERRO] gnome-disks não encontrado." >&2
+            exit 1
+        }
+
+        # GNOME Disks abre o diálogo "Formatar volume" e exige confirmação
+        # do usuário; nenhuma formatação é feita silenciosamente.
+        exec gnome-disks \
+            --block-device "$device" \
+            --format-device
+        ;;
+
+    *)
+        usage
+        exit 2
+        ;;
+esac
+EOF
+
+    chmod 755 /mnt/usr/local/bin/wolf-format-removable
+
+    cat > /mnt/usr/share/caja-python/extensions/wolf_removable_media.py <<'PY'
+import os
+import subprocess
+
+from gi.repository import Caja, GObject
+
+
+HELPER = "/usr/local/bin/wolf-format-removable"
+
+
+class WolfRemovableMediaExtension(GObject.GObject, Caja.MenuProvider):
+    def _path(self, file_info):
+        if file_info is None:
+            return None
+
+        if file_info.get_uri_scheme() != "file":
+            return None
+
+        location = file_info.get_location()
+        if location is None:
+            return None
+
+        path = location.get_path()
+
+        if not path or not os.path.isdir(path):
+            return None
+
+        return path
+
+    def _is_removable_root(self, path):
+        if not path or not os.path.exists(HELPER):
+            return False
+
+        try:
+            result = subprocess.run(
+                [HELPER, "--check", path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=1.5,
+                check=False,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def _format(self, _menu, path):
+        try:
+            subprocess.Popen(
+                [HELPER, "--format", path],
+                start_new_session=True,
+            )
+        except Exception:
+            pass
+
+    def _item(self, path):
+        item = Caja.MenuItem(
+            name="WolfLinux::FormatRemovable",
+            label="Formatar mídia removível…",
+            tip="Abrir o diálogo seguro de formatação para esta mídia",
+        )
+        item.connect("activate", self._format, path)
+        return item
+
+    def get_file_items(self, window, files):
+        if len(files) != 1:
+            return
+
+        path = self._path(files[0])
+
+        if not self._is_removable_root(path):
+            return
+
+        return [self._item(path)]
+
+    def get_background_items(self, window, current_folder):
+        path = self._path(current_folder)
+
+        if not self._is_removable_root(path):
+            return
+
+        return [self._item(path)]
+PY
+
+    # --------------------------------------------------------
+    # Mouse sem aceleração no X11/libinput.
+    # Touchpads ficam fora desta regra.
+    # --------------------------------------------------------
+    mkdir -p /mnt/etc/X11/xorg.conf.d
+
+    cat > /mnt/etc/X11/xorg.conf.d/50-wolf-mouse-no-accel.conf <<'EOF'
+Section "InputClass"
+    Identifier "Wolf Linux - Mouse sem aceleracao"
+    MatchIsPointer "on"
+    MatchIsTouchpad "off"
+    MatchDriver "libinput"
+
+    Option "AccelProfile" "flat"
+    Option "AccelSpeed" "0"
+EndSection
+EOF
+
+    # Reforço na sessão: executa depois que o MATE/settings-daemon inicia.
+    # Assim uma preferência antiga do usuário não devolve o perfil adaptive.
+    cat > /mnt/usr/local/bin/wolf-disable-mouse-accel.sh <<'EOF'
+#!/usr/bin/env bash
+set -u
+
+sleep 2
+
+command -v xinput >/dev/null 2>&1 || exit 0
+
+while IFS= read -r id; do
+    [[ "$id" =~ ^[0-9]+$ ]] || continue
+
+    props="$(xinput list-props "$id" 2>/dev/null || true)"
+
+    # Não altera touchpads.
+    if grep -q 'libinput Tapping Enabled' <<<"$props"; then
+        continue
+    fi
+
+    if grep -q 'libinput Accel Profile Enabled' <<<"$props"; then
+        xinput set-prop "$id" 'libinput Accel Profile Enabled' 0 1 0 \
+            >/dev/null 2>&1 || true
+    fi
+
+    if grep -q 'libinput Accel Speed' <<<"$props"; then
+        xinput set-prop "$id" 'libinput Accel Speed' 0 \
+            >/dev/null 2>&1 || true
+    fi
+done < <(xinput list --id-only 2>/dev/null || true)
+EOF
+
+    chmod 755 /mnt/usr/local/bin/wolf-disable-mouse-accel.sh
+
+    cat > /mnt/etc/xdg/autostart/wolf-disable-mouse-accel.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Wolf Linux - Mouse sem aceleração
+Comment=Força perfil flat do libinput para mice no MATE/X11
+Exec=/usr/local/bin/wolf-disable-mouse-accel.sh
+OnlyShowIn=MATE;
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+
+    # --------------------------------------------------------
+    # MATE/Marco: botão do meio na barra de título envia a janela
+    # para o próximo monitor.
+    #
+    # XI2 RawButtonPress apenas observa o clique: não sequestra cliques
+    # do meio usados dentro de aplicações. No Marco neutralizamos a ação
+    # padrão do botão 2 na barra (lower).
+    # --------------------------------------------------------
+    cat > /mnt/usr/local/src/wolf-titlebar-monitor-move.c <<'C'
+#define _POSIX_C_SOURCE 200809L
+
+#include <X11/Xatom.h>
+#include <X11/Xlib.h>
+#include <X11/Xutil.h>
+#include <X11/keysym.h>
+
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+
+#define MAX_MONITORS 16
+#define MAX_CLIENTS 4096
+#define CSD_TOP_HEIGHT 64
+
+typedef struct {
+    int x;
+    int y;
+    int w;
+    int h;
+} Monitor;
+
+typedef struct {
+    Window window;
+    int frame_x;
+    int frame_y;
+    int frame_w;
+    int frame_h;
+} HitWindow;
+
+static volatile sig_atomic_t keep_running = 1;
+
+static void handle_signal(int sig) {
+    (void)sig;
+    keep_running = 0;
+}
+
+static void sleep_ms(long milliseconds) {
+    struct timespec req;
+    req.tv_sec = milliseconds / 1000;
+    req.tv_nsec = (milliseconds % 1000) * 1000000L;
+
+    while (nanosleep(&req, &req) == -1) {
+        if (!keep_running) {
+            break;
+        }
+    }
+}
+
+static int parse_geometry_token(
+    const char *token,
+    int *w,
+    int *h,
+    int *x,
+    int *y
+) {
+    char *end = NULL;
+    char *next = NULL;
+
+    long lw = strtol(token, &end, 10);
+
+    if (end == token || *end != 'x') {
+        return 0;
+    }
+
+    long lh = strtol(end + 1, &next, 10);
+
+    if (next == end + 1 || (*next != '+' && *next != '-')) {
+        return 0;
+    }
+
+    long lx = strtol(next, &end, 10);
+
+    if (end == next || (*end != '+' && *end != '-')) {
+        return 0;
+    }
+
+    long ly = strtol(end, &next, 10);
+
+    if (next == end || *next != '\0') {
+        return 0;
+    }
+
+    *w = (int)lw;
+    *h = (int)lh;
+    *x = (int)lx;
+    *y = (int)ly;
+
+    return 1;
+}
+
+static int compare_monitors(const void *a, const void *b) {
+    const Monitor *ma = (const Monitor *)a;
+    const Monitor *mb = (const Monitor *)b;
+
+    if (ma->x < mb->x) {
+        return -1;
+    }
+
+    if (ma->x > mb->x) {
+        return 1;
+    }
+
+    if (ma->y < mb->y) {
+        return -1;
+    }
+
+    if (ma->y > mb->y) {
+        return 1;
+    }
+
+    return 0;
+}
+
+static int read_monitors(Monitor *out, int max_count) {
+    FILE *fp = popen("xrandr --query 2>/dev/null", "r");
+
+    if (!fp) {
+        return 0;
+    }
+
+    char line[2048];
+    int count = 0;
+
+    while (fgets(line, sizeof(line), fp) && count < max_count) {
+        if (strstr(line, " connected ") == NULL) {
+            continue;
+        }
+
+        char copy[2048];
+        snprintf(copy, sizeof(copy), "%s", line);
+
+        char *save = NULL;
+        char *token = strtok_r(copy, " \t\r\n", &save);
+
+        while (token) {
+            int w = 0;
+            int h = 0;
+            int x = 0;
+            int y = 0;
+
+            if (parse_geometry_token(token, &w, &h, &x, &y)) {
+                out[count].x = x;
+                out[count].y = y;
+                out[count].w = w;
+                out[count].h = h;
+                count++;
+                break;
+            }
+
+            token = strtok_r(NULL, " \t\r\n", &save);
+        }
+    }
+
+    pclose(fp);
+
+    qsort(out, (size_t)count, sizeof(Monitor), compare_monitors);
+    return count;
+}
+
+static int get_frame_extents(
+    Display *display,
+    Window window,
+    unsigned long *left,
+    unsigned long *right,
+    unsigned long *top,
+    unsigned long *bottom
+) {
+    Atom prop = XInternAtom(display, "_NET_FRAME_EXTENTS", False);
+
+    Atom actual_type = None;
+    int actual_format = 0;
+    unsigned long nitems = 0;
+    unsigned long bytes_after = 0;
+    unsigned char *data = NULL;
+
+    int status = XGetWindowProperty(
+        display,
+        window,
+        prop,
+        0,
+        4,
+        False,
+        XA_CARDINAL,
+        &actual_type,
+        &actual_format,
+        &nitems,
+        &bytes_after,
+        &data
+    );
+
+    if (
+        status != Success ||
+        actual_type != XA_CARDINAL ||
+        actual_format != 32 ||
+        nitems < 4 ||
+        data == NULL
+    ) {
+        if (data) {
+            XFree(data);
+        }
+        return 0;
+    }
+
+    unsigned long *values = (unsigned long *)data;
+
+    *left = values[0];
+    *right = values[1];
+    *top = values[2];
+    *bottom = values[3];
+
+    XFree(data);
+    return 1;
+}
+
+static int get_client_stack(
+    Display *display,
+    Window root,
+    Window **windows,
+    unsigned long *count
+) {
+    Atom prop = XInternAtom(display, "_NET_CLIENT_LIST_STACKING", False);
+
+    Atom actual_type = None;
+    int actual_format = 0;
+    unsigned long nitems = 0;
+    unsigned long bytes_after = 0;
+    unsigned char *data = NULL;
+
+    int status = XGetWindowProperty(
+        display,
+        root,
+        prop,
+        0,
+        MAX_CLIENTS,
+        False,
+        XA_WINDOW,
+        &actual_type,
+        &actual_format,
+        &nitems,
+        &bytes_after,
+        &data
+    );
+
+    if (
+        status != Success ||
+        actual_type != XA_WINDOW ||
+        actual_format != 32 ||
+        data == NULL
+    ) {
+        if (data) {
+            XFree(data);
+        }
+        return 0;
+    }
+
+    *windows = (Window *)data;
+    *count = nitems;
+    return 1;
+}
+
+static int window_is_normal_type(
+    Display *display,
+    Window window
+) {
+    Atom prop = XInternAtom(display, "_NET_WM_WINDOW_TYPE", False);
+    Atom normal = XInternAtom(display, "_NET_WM_WINDOW_TYPE_NORMAL", False);
+
+    Atom actual_type = None;
+    int actual_format = 0;
+    unsigned long nitems = 0;
+    unsigned long bytes_after = 0;
+    unsigned char *data = NULL;
+
+    int status = XGetWindowProperty(
+        display,
+        window,
+        prop,
+        0,
+        16,
+        False,
+        XA_ATOM,
+        &actual_type,
+        &actual_format,
+        &nitems,
+        &bytes_after,
+        &data
+    );
+
+    if (
+        status != Success ||
+        actual_type != XA_ATOM ||
+        actual_format != 32 ||
+        data == NULL
+    ) {
+        if (data) {
+            XFree(data);
+        }
+
+        /* Sem hint: não rejeitamos automaticamente uma janela comum. */
+        return 1;
+    }
+
+    Atom *types = (Atom *)data;
+    int found = 0;
+
+    for (unsigned long i = 0; i < nitems; i++) {
+        if (types[i] == normal) {
+            found = 1;
+            break;
+        }
+    }
+
+    XFree(data);
+    return found;
+}
+
+static int string_contains_case_insensitive(
+    const char *haystack,
+    const char *needle
+) {
+    if (!haystack || !needle) {
+        return 0;
+    }
+
+    size_t needle_len = strlen(needle);
+
+    if (needle_len == 0) {
+        return 1;
+    }
+
+    for (const char *p = haystack; *p; p++) {
+        size_t i = 0;
+
+        while (
+            i < needle_len &&
+            p[i] &&
+            (
+                p[i] == needle[i] ||
+                (
+                    p[i] >= 'A' && p[i] <= 'Z' &&
+                    p[i] - 'A' + 'a' == needle[i]
+                ) ||
+                (
+                    needle[i] >= 'A' && needle[i] <= 'Z' &&
+                    needle[i] - 'A' + 'a' == p[i]
+                )
+            )
+        ) {
+            i++;
+        }
+
+        if (i == needle_len) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static int class_looks_like_csd_app(
+    Display *display,
+    Window window
+) {
+    XClassHint hint;
+
+    if (!XGetClassHint(display, window, &hint)) {
+        return 0;
+    }
+
+    const char *candidates[] = {
+        "google-chrome",
+        "chromium",
+        "brave",
+        "microsoft-edge",
+        "code",
+        "vscodium",
+        "electron"
+    };
+
+    int matched = 0;
+
+    for (
+        unsigned long i = 0;
+        i < sizeof(candidates) / sizeof(candidates[0]);
+        i++
+    ) {
+        if (
+            string_contains_case_insensitive(
+                hint.res_name,
+                candidates[i]
+            ) ||
+            string_contains_case_insensitive(
+                hint.res_class,
+                candidates[i]
+            )
+        ) {
+            matched = 1;
+            break;
+        }
+    }
+
+    if (hint.res_name) {
+        XFree(hint.res_name);
+    }
+
+    if (hint.res_class) {
+        XFree(hint.res_class);
+    }
+
+    return matched;
+}
+
+static int has_gtk_frame_extents(
+    Display *display,
+    Window window
+) {
+    Atom prop = XInternAtom(display, "_GTK_FRAME_EXTENTS", False);
+
+    Atom actual_type = None;
+    int actual_format = 0;
+    unsigned long nitems = 0;
+    unsigned long bytes_after = 0;
+    unsigned char *data = NULL;
+
+    int status = XGetWindowProperty(
+        display,
+        window,
+        prop,
+        0,
+        4,
+        False,
+        XA_CARDINAL,
+        &actual_type,
+        &actual_format,
+        &nitems,
+        &bytes_after,
+        &data
+    );
+
+    int found =
+        status == Success &&
+        actual_type == XA_CARDINAL &&
+        actual_format == 32 &&
+        nitems >= 4 &&
+        data != NULL;
+
+    if (data) {
+        XFree(data);
+    }
+
+    return found;
+}
+
+static int find_super_move_window(
+    Display *display,
+    Window root,
+    int pointer_x,
+    int pointer_y,
+    HitWindow *hit
+) {
+    Window *clients = NULL;
+    unsigned long count = 0;
+
+    if (!get_client_stack(display, root, &clients, &count)) {
+        return 0;
+    }
+
+    /*
+     * _NET_CLIENT_LIST_STACKING vai de baixo para cima.
+     * O primeiro frame atingido ao percorrer ao contrário é a janela
+     * topmost real naquele ponto. Nunca procuramos uma janela abaixo.
+     */
+    for (long i = (long)count - 1; i >= 0; i--) {
+        Window window = clients[i];
+        XWindowAttributes attr;
+
+        if (!XGetWindowAttributes(display, window, &attr)) {
+            continue;
+        }
+
+        if (attr.map_state != IsViewable) {
+            continue;
+        }
+
+        unsigned long left = 0;
+        unsigned long right = 0;
+        unsigned long top = 0;
+        unsigned long bottom = 0;
+
+        int have_extents = get_frame_extents(
+            display,
+            window,
+            &left,
+            &right,
+            &top,
+            &bottom
+        );
+
+        if (!have_extents) {
+            left = 0;
+            right = 0;
+            top = 0;
+            bottom = 0;
+        }
+
+        int client_x = 0;
+        int client_y = 0;
+        Window child = None;
+
+        if (!XTranslateCoordinates(
+            display,
+            window,
+            root,
+            0,
+            0,
+            &client_x,
+            &client_y,
+            &child
+        )) {
+            continue;
+        }
+
+        int frame_x = client_x - (int)left;
+        int frame_y = client_y - (int)top;
+        int frame_w = attr.width + (int)left + (int)right;
+        int frame_h = attr.height + (int)top + (int)bottom;
+
+        if (
+            pointer_x < frame_x ||
+            pointer_x >= frame_x + frame_w ||
+            pointer_y < frame_y ||
+            pointer_y >= frame_y + frame_h
+        ) {
+            continue;
+        }
+
+        /*
+         * ESTA é a janela topmost. O gesto só é aceito:
+         *
+         * - janela Marco tradicional: na barra de título real;
+         * - Chrome/Electron/CSD: nos primeiros CSD_TOP_HEIGHT px do frame.
+         *
+         * Se o ponteiro estiver em outra região, ReplayPointer devolverá
+         * o clique ao aplicativo. Não há fallback para janelas inferiores.
+         */
+        int looks_csd =
+            top == 0 ||
+            has_gtk_frame_extents(display, window) ||
+            class_looks_like_csd_app(display, window);
+
+        int valid_region = 0;
+
+        if (looks_csd) {
+            int top_limit = frame_y + CSD_TOP_HEIGHT;
+
+            if (top_limit > frame_y + frame_h) {
+                top_limit = frame_y + frame_h;
+            }
+
+            valid_region =
+                pointer_y >= frame_y &&
+                pointer_y < top_limit;
+        } else if (top > 0) {
+            valid_region =
+                pointer_y >= frame_y &&
+                pointer_y < client_y;
+        }
+
+        if (!valid_region) {
+            XFree(clients);
+            return 0;
+        }
+
+        if (!window_is_normal_type(display, window)) {
+            XFree(clients);
+            return 0;
+        }
+
+        hit->window = window;
+        hit->frame_x = frame_x;
+        hit->frame_y = frame_y;
+        hit->frame_w = frame_w;
+        hit->frame_h = frame_h;
+
+        XClassHint hint;
+        memset(&hint, 0, sizeof(hint));
+
+        if (XGetClassHint(display, window, &hint)) {
+            fprintf(
+                stderr,
+                "wolf-titlebar-monitor-move: Super+Middle hit window=0x%lx class=%s/%s mode=%s frame=%dx%d%+d%+d\n",
+                window,
+                hint.res_name ? hint.res_name : "?",
+                hint.res_class ? hint.res_class : "?",
+                looks_csd ? "csd" : "marco",
+                frame_w,
+                frame_h,
+                frame_x,
+                frame_y
+            );
+
+            if (hint.res_name) {
+                XFree(hint.res_name);
+            }
+
+            if (hint.res_class) {
+                XFree(hint.res_class);
+            }
+        } else {
+            fprintf(
+                stderr,
+                "wolf-titlebar-monitor-move: Super+Middle hit window=0x%lx mode=%s frame=%dx%d%+d%+d\n",
+                window,
+                looks_csd ? "csd" : "marco",
+                frame_w,
+                frame_h,
+                frame_x,
+                frame_y
+            );
+        }
+
+        fflush(stderr);
+        XFree(clients);
+        return 1;
+    }
+
+    XFree(clients);
+    return 0;
+}
+
+static long intersection_area(
+    int ax,
+    int ay,
+    int aw,
+    int ah,
+    const Monitor *m
+) {
+    int x1 = ax > m->x ? ax : m->x;
+    int y1 = ay > m->y ? ay : m->y;
+
+    int ax2 = ax + aw;
+    int ay2 = ay + ah;
+    int mx2 = m->x + m->w;
+    int my2 = m->y + m->h;
+
+    int x2 = ax2 < mx2 ? ax2 : mx2;
+    int y2 = ay2 < my2 ? ay2 : my2;
+
+    if (x2 <= x1 || y2 <= y1) {
+        return 0;
+    }
+
+    return (long)(x2 - x1) * (long)(y2 - y1);
+}
+
+static int find_source_monitor(
+    const Monitor *monitors,
+    int count,
+    const HitWindow *hit
+) {
+    long best_area = -1;
+    int best = 0;
+
+    for (int i = 0; i < count; i++) {
+        long area = intersection_area(
+            hit->frame_x,
+            hit->frame_y,
+            hit->frame_w,
+            hit->frame_h,
+            &monitors[i]
+        );
+
+        if (area > best_area) {
+            best_area = area;
+            best = i;
+        }
+    }
+
+    return best;
+}
+
+static int clamp_int(int value, int minimum, int maximum) {
+    if (maximum < minimum) {
+        return minimum;
+    }
+
+    if (value < minimum) {
+        return minimum;
+    }
+
+    if (value > maximum) {
+        return maximum;
+    }
+
+    return value;
+}
+
+static int project_axis(
+    int position,
+    int source_origin,
+    int source_size,
+    int target_origin,
+    int target_size,
+    int window_size
+) {
+    int source_available = source_size - window_size;
+    int target_available = target_size - window_size;
+
+    if (target_available <= 0) {
+        return target_origin;
+    }
+
+    if (source_available <= 0) {
+        return target_origin + target_available / 2;
+    }
+
+    int relative = position - source_origin;
+    relative = clamp_int(relative, 0, source_available);
+
+    long projected =
+        (long)relative * (long)target_available / (long)source_available;
+
+    return target_origin + (int)projected;
+}
+
+static int window_has_state(
+    Display *display,
+    Window window,
+    Atom wanted
+) {
+    Atom state_prop = XInternAtom(display, "_NET_WM_STATE", False);
+
+    Atom actual_type = None;
+    int actual_format = 0;
+    unsigned long nitems = 0;
+    unsigned long bytes_after = 0;
+    unsigned char *data = NULL;
+
+    int status = XGetWindowProperty(
+        display,
+        window,
+        state_prop,
+        0,
+        64,
+        False,
+        XA_ATOM,
+        &actual_type,
+        &actual_format,
+        &nitems,
+        &bytes_after,
+        &data
+    );
+
+    if (
+        status != Success ||
+        actual_type != XA_ATOM ||
+        actual_format != 32 ||
+        data == NULL
+    ) {
+        if (data) {
+            XFree(data);
+        }
+        return 0;
+    }
+
+    Atom *states = (Atom *)data;
+    int found = 0;
+
+    for (unsigned long i = 0; i < nitems; i++) {
+        if (states[i] == wanted) {
+            found = 1;
+            break;
+        }
+    }
+
+    XFree(data);
+    return found;
+}
+
+static void send_wm_state(
+    Display *display,
+    Window root,
+    Window window,
+    long action,
+    Atom first,
+    Atom second
+) {
+    Atom state_prop = XInternAtom(display, "_NET_WM_STATE", False);
+
+    XEvent event;
+    memset(&event, 0, sizeof(event));
+
+    event.xclient.type = ClientMessage;
+    event.xclient.window = window;
+    event.xclient.message_type = state_prop;
+    event.xclient.format = 32;
+    event.xclient.data.l[0] = action;
+    event.xclient.data.l[1] = (long)first;
+    event.xclient.data.l[2] = (long)second;
+    event.xclient.data.l[3] = 2; /* pager/taskbar */
+    event.xclient.data.l[4] = 0;
+
+    XSendEvent(
+        display,
+        root,
+        False,
+        SubstructureRedirectMask | SubstructureNotifyMask,
+        &event
+    );
+}
+
+static void move_window(
+    Display *display,
+    Window root,
+    const HitWindow *hit,
+    const Monitor *source,
+    const Monitor *target
+) {
+    int new_x = project_axis(
+        hit->frame_x,
+        source->x,
+        source->w,
+        target->x,
+        target->w,
+        hit->frame_w
+    );
+
+    int new_y = project_axis(
+        hit->frame_y,
+        source->y,
+        source->h,
+        target->y,
+        target->h,
+        hit->frame_h
+    );
+
+    Atom max_h =
+        XInternAtom(display, "_NET_WM_STATE_MAXIMIZED_HORZ", False);
+    Atom max_v =
+        XInternAtom(display, "_NET_WM_STATE_MAXIMIZED_VERT", False);
+
+    int was_max_h = window_has_state(display, hit->window, max_h);
+    int was_max_v = window_has_state(display, hit->window, max_v);
+
+    if (was_max_h || was_max_v) {
+        send_wm_state(
+            display,
+            root,
+            hit->window,
+            0, /* REMOVE */
+            was_max_h ? max_h : None,
+            was_max_v ? max_v : None
+        );
+
+        XSync(display, False);
+        sleep_ms(120);
+    }
+
+    Atom moveresize =
+        XInternAtom(display, "_NET_MOVERESIZE_WINDOW", False);
+
+    XEvent event;
+    memset(&event, 0, sizeof(event));
+
+    event.xclient.type = ClientMessage;
+    event.xclient.window = hit->window;
+    event.xclient.message_type = moveresize;
+    event.xclient.format = 32;
+
+    /*
+     * StaticGravity permite posicionar exatamente a janela incluindo
+     * decoração. Bits 8/9 indicam x/y; source=2 identifica um pager.
+     */
+    event.xclient.data.l[0] =
+        StaticGravity |
+        (1L << 8) |
+        (1L << 9) |
+        (2L << 12);
+
+    event.xclient.data.l[1] = new_x;
+    event.xclient.data.l[2] = new_y;
+    event.xclient.data.l[3] = 0;
+    event.xclient.data.l[4] = 0;
+
+    XSendEvent(
+        display,
+        root,
+        False,
+        SubstructureRedirectMask | SubstructureNotifyMask,
+        &event
+    );
+
+    XSync(display, False);
+
+    if (was_max_h || was_max_v) {
+        sleep_ms(140);
+
+        send_wm_state(
+            display,
+            root,
+            hit->window,
+            1, /* ADD */
+            was_max_h ? max_h : None,
+            was_max_v ? max_v : None
+        );
+
+        XSync(display, False);
+    }
+}
+
+static int move_hit_to_next_monitor(
+    Display *display,
+    Window root,
+    const HitWindow *hit
+) {
+    Monitor monitors[MAX_MONITORS];
+    int monitor_count = read_monitors(monitors, MAX_MONITORS);
+
+    if (monitor_count < 2) {
+        return 0;
+    }
+
+    int source_index = find_source_monitor(
+        monitors,
+        monitor_count,
+        hit
+    );
+
+    int target_index = (source_index + 1) % monitor_count;
+
+    move_window(
+        display,
+        root,
+        hit,
+        &monitors[source_index],
+        &monitors[target_index]
+    );
+
+    return 1;
+}
+
+static int handle_super_middle(
+    Display *display,
+    Window root,
+    int root_x,
+    int root_y
+) {
+    HitWindow hit;
+
+    if (!find_super_move_window(
+        display,
+        root,
+        root_x,
+        root_y,
+        &hit
+    )) {
+        return 0;
+    }
+
+    return move_hit_to_next_monitor(display, root, &hit);
+}
+
+static int grab_error_count = 0;
+
+static int record_grab_error(
+    Display *display,
+    XErrorEvent *event
+) {
+    (void)display;
+
+    if (event->error_code == BadAccess) {
+        grab_error_count++;
+    }
+
+    return 0;
+}
+
+static unsigned int modifier_mask_for_keysym(
+    Display *display,
+    KeySym keysym
+) {
+    KeyCode keycode = XKeysymToKeycode(display, keysym);
+
+    if (keycode == 0) {
+        return 0;
+    }
+
+    XModifierKeymap *map = XGetModifierMapping(display);
+
+    if (!map) {
+        return 0;
+    }
+
+    unsigned int mask = 0;
+
+    for (int modifier = 0; modifier < 8; modifier++) {
+        for (int index = 0; index < map->max_keypermod; index++) {
+            int offset =
+                modifier * map->max_keypermod + index;
+
+            if (map->modifiermap[offset] == keycode) {
+                mask |= (1U << modifier);
+            }
+        }
+    }
+
+    XFreeModifiermap(map);
+    return mask;
+}
+
+static unsigned int detect_super_mask(Display *display) {
+    unsigned int left =
+        modifier_mask_for_keysym(display, XK_Super_L);
+    unsigned int right =
+        modifier_mask_for_keysym(display, XK_Super_R);
+
+    unsigned int mask = left | right;
+
+    if (mask == 0) {
+        mask = Mod4Mask;
+    }
+
+    return mask;
+}
+
+static unsigned int detect_numlock_mask(Display *display) {
+    return modifier_mask_for_keysym(display, XK_Num_Lock);
+}
+
+static void grab_super_middle(
+    Display *display,
+    Window root,
+    unsigned int super_mask,
+    unsigned int numlock_mask
+) {
+    unsigned int modifiers[4];
+    modifiers[0] = super_mask;
+    modifiers[1] = super_mask | LockMask;
+    modifiers[2] = super_mask | numlock_mask;
+    modifiers[3] = super_mask | LockMask | numlock_mask;
+
+    grab_error_count = 0;
+
+    int (*old_handler)(Display *, XErrorEvent *) =
+        XSetErrorHandler(record_grab_error);
+
+    for (int i = 0; i < 4; i++) {
+        int duplicate = 0;
+
+        for (int j = 0; j < i; j++) {
+            if (modifiers[i] == modifiers[j]) {
+                duplicate = 1;
+                break;
+            }
+        }
+
+        if (duplicate) {
+            continue;
+        }
+
+        XGrabButton(
+            display,
+            Button2,
+            modifiers[i],
+            root,
+            False,
+            ButtonPressMask,
+            GrabModeSync,
+            GrabModeAsync,
+            None,
+            None
+        );
+    }
+
+    XSync(display, False);
+    XSetErrorHandler(old_handler);
+
+    fprintf(
+        stderr,
+        "wolf-titlebar-monitor-move: SuperMask=0x%x NumLockMask=0x%x grab_errors=%d\n",
+        super_mask,
+        numlock_mask,
+        grab_error_count
+    );
+    fflush(stderr);
+}
+
+int main(void) {
+    Display *display = XOpenDisplay(NULL);
+
+    if (!display) {
+        fprintf(stderr, "wolf-titlebar-monitor-move: DISPLAY indisponível\n");
+        return 1;
+    }
+
+    Window root = DefaultRootWindow(display);
+
+    unsigned int super_mask = detect_super_mask(display);
+    unsigned int numlock_mask = detect_numlock_mask(display);
+
+    /*
+     * Gesto universal do Wolf Linux:
+     * Super + botão do meio na barra/topo da janela.
+     *
+     * O passive grab permite CONSUMIR o clique quando a área é válida,
+     * evitando que o Chrome interprete Button2 como "fechar aba".
+     * Fora de uma CSD válida, ReplayPointer devolve o clique ao app.
+     */
+    grab_super_middle(
+        display,
+        root,
+        super_mask,
+        numlock_mask
+    );
+
+    XFlush(display);
+
+    signal(SIGINT, handle_signal);
+    signal(SIGTERM, handle_signal);
+    signal(SIGHUP, handle_signal);
+
+    while (keep_running) {
+        XEvent xevent;
+        XNextEvent(display, &xevent);
+
+        if (
+            xevent.type == ButtonPress &&
+            xevent.xbutton.button == Button2 &&
+            (
+                xevent.xbutton.state & super_mask
+            ) == super_mask
+        ) {
+            int moved = handle_super_middle(
+                display,
+                root,
+                xevent.xbutton.x_root,
+                xevent.xbutton.y_root
+            );
+
+            /*
+             * Se movemos uma CSD, o clique é consumido.
+             * Caso contrário ele é replayado para o aplicativo original.
+             */
+            XAllowEvents(
+                display,
+                moved ? AsyncPointer : ReplayPointer,
+                xevent.xbutton.time
+            );
+
+            XFlush(display);
+            continue;
+        }
+
+    }
+
+    XCloseDisplay(display);
+    return 0;
+}
+C
+
+    arch-chroot /mnt cc \
+        -O2 \
+        -Wall \
+        -Wextra \
+        -std=c11 \
+        /usr/local/src/wolf-titlebar-monitor-move.c \
+        -o /usr/local/bin/wolf-titlebar-monitor-move \
+        -lX11
+
+    chmod 755 /mnt/usr/local/bin/wolf-titlebar-monitor-move
+
+    cat > /mnt/usr/local/bin/wolf-titlebar-monitor-move-start <<'EOF'
+#!/usr/bin/env bash
+set -u
+
+# Uma única instância por sessão/usuário. O lock permanece aberto no daemon
+# depois do exec, evitando instâncias antigas concorrendo pelos X11 grabs.
+LOCK_DIR="${XDG_RUNTIME_DIR:-/tmp}"
+LOCK_FILE="$LOCK_DIR/wolf-titlebar-monitor-move-${UID}.lock"
+
+exec 9>"$LOCK_FILE"
+flock -n 9 || exit 0
+
+# O botão do meio SEM Super volta ao comportamento nativo do Marco.
+if gsettings list-schemas 2>/dev/null | grep -Fxq 'org.mate.Marco.general'; then
+    if gsettings list-keys org.mate.Marco.general 2>/dev/null \
+        | grep -Fxq 'action-middle-click-titlebar'; then
+        gsettings set \
+            org.mate.Marco.general \
+            action-middle-click-titlebar \
+            'lower' \
+            2>/dev/null || true
+    fi
+fi
+
+exec /usr/local/bin/wolf-titlebar-monitor-move
+
+EOF
+
+    chmod 755 /mnt/usr/local/bin/wolf-titlebar-monitor-move-start
+
+    cat > /mnt/etc/xdg/autostart/wolf-titlebar-monitor-move.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Wolf Linux - Mover janela entre monitores
+Comment=Super+botão do meio na barra de título envia a janela ao próximo monitor
+Exec=/usr/local/bin/wolf-titlebar-monitor-move-start
+OnlyShowIn=MATE;
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+
+    # --------------------------------------------------------
     # Wolf Edge Barrier
     #
     # Uma pequena barreira XFixes nos primeiros 36 px da divisa vertical
@@ -3405,40 +5166,59 @@ static void rebuild_barriers(
                 continue;
             }
 
-            int barrier_bottom = overlap_top + barrier_size;
+            int top_end = overlap_top + barrier_size;
 
-            if (barrier_bottom > overlap_bottom) {
-                barrier_bottom = overlap_bottom;
+            if (top_end > overlap_bottom) {
+                top_end = overlap_bottom;
             }
 
-            if (barrier_bottom <= overlap_top) {
-                continue;
+            if (top_end > overlap_top) {
+                if (*barrier_count >= MAX_BARRIERS) {
+                    fprintf(stderr, "wolf-edge-barrier: limite de barreiras atingido\n");
+                    XSync(display, False);
+                    return;
+                }
+
+                barriers[*barrier_count] = XFixesCreatePointerBarrier(
+                    display,
+                    root,
+                    boundary_x,
+                    overlap_top,
+                    boundary_x,
+                    top_end,
+                    0,
+                    0,
+                    NULL
+                );
+                (*barrier_count)++;
             }
 
-            if (*barrier_count >= MAX_BARRIERS) {
-                fprintf(stderr, "wolf-edge-barrier: limite de barreiras atingido\n");
-                XSync(display, False);
-                return;
+            int bottom_start = overlap_bottom - barrier_size;
+
+            if (bottom_start < top_end) {
+                bottom_start = top_end;
             }
 
-            /*
-             * directions=0 bloqueia a travessia nos dois sentidos.
-             * A barreira cobre apenas o topo da divisa; abaixo dela,
-             * a passagem entre monitores continua completamente normal.
-             */
-            barriers[*barrier_count] = XFixesCreatePointerBarrier(
-                display,
-                root,
-                boundary_x,
-                overlap_top,
-                boundary_x,
-                barrier_bottom,
-                0,
-                0,
-                NULL
-            );
+            if (bottom_start < overlap_bottom) {
+                if (*barrier_count >= MAX_BARRIERS) {
+                    fprintf(stderr, "wolf-edge-barrier: limite de barreiras atingido\n");
+                    XSync(display, False);
+                    return;
+                }
 
-            (*barrier_count)++;
+                barriers[*barrier_count] = XFixesCreatePointerBarrier(
+                    display,
+                    root,
+                    boundary_x,
+                    bottom_start,
+                    boundary_x,
+                    overlap_bottom,
+                    0,
+                    0,
+                    NULL
+                );
+                (*barrier_count)++;
+            }
         }
     }
 
@@ -3543,7 +5323,7 @@ C
 [Desktop Entry]
 Type=Application
 Name=Wolf Linux - Barreira entre monitores
-Comment=Protege os cantos superiores entre monitores no MATE/X11
+Comment=Protege os cantos superiores e inferiores entre monitores no MATE/X11
 Exec=/usr/local/bin/wolf-edge-barrier --size 36
 OnlyShowIn=MATE;
 Hidden=false
@@ -3555,7 +5335,7 @@ EOF
     mkdir -p /mnt/etc/wolf-linux
     cat > /mnt/etc/wolf-linux/edge-barrier.conf <<'EOF'
 # Wolf Linux - edge barrier
-# O autostart atual usa 36 pixels.
+# O autostart atual usa 36 pixels no topo e 36 pixels na base.
 # Para alterar, edite:
 # /etc/xdg/autostart/wolf-edge-barrier.desktop
 TOP_BARRIER_PIXELS=36

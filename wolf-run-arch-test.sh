@@ -9,14 +9,25 @@ MODE="${1:-uefi}"
 ISO="${2:-}"
 
 if [[ -z "$ISO" ]]; then
-    cat <<'EOF'
-Uso:
-  wolf-run-arch-test.sh [uefi|bios] /caminho/archlinux.iso
+    ISO="$(
+        find "$PROJECT/out" -maxdepth 1 -type f -name '*.iso'             -printf '%T@ %p\n' 2>/dev/null             | sort -nr             | head -n1             | cut -d' ' -f2-
+    )"
 
-Exemplo:
-  ~/wolf-linux/tests/wolf-run-arch-test.sh uefi ~/Downloads/archlinux-x86_64.iso
+    if [[ -z "$ISO" ]]; then
+        cat <<'EOF'
+Nenhuma ISO foi encontrada em ~/wolf-linux/out.
+
+Gere primeiro:
+  ~/wolf-linux/tests/wolf-build-iso.sh
+
+Ou informe manualmente:
+  wolf-run-arch-test.sh [uefi|bios] /caminho/wolf-linux.iso
 EOF
-    exit 2
+        exit 2
+    fi
+
+    echo "[INFO] ISO mais recente selecionada automaticamente:"
+    echo "  $ISO"
 fi
 
 [[ -f "$ISO" ]] || {

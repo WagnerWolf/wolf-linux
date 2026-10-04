@@ -51,6 +51,8 @@ if [[ -d "$PROJECT/iso-profile" ]]; then
     [[ -f "$PROJECT/iso-profile/airootfs/etc/vconsole.conf" ]] \
         && grep -Fxq 'KEYMAP=br-abnt2' \
             "$PROJECT/iso-profile/airootfs/etc/vconsole.conf" \
+        && grep -Fxq 'FONT=ter-v16n' \
+            "$PROJECT/iso-profile/airootfs/etc/vconsole.conf" \
         || ISO_FAIL=1
 
     [[ -x "$PROJECT/iso-profile/airootfs/usr/local/bin/wolf-install" ]] \

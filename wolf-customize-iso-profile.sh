@@ -41,6 +41,7 @@ mkdir -p \
 # ------------------------------------------------------------
 cat > "$AIROOT/etc/vconsole.conf" <<'EOF'
 KEYMAP=br-abnt2
+FONT=ter-v16n
 EOF
 
 cat > "$AIROOT/etc/systemd/system/wolf-loadkeys.service" <<'EOF'
@@ -171,6 +172,7 @@ LIVE_PACKAGES=(
     networkmanager
     parted
     pciutils
+    terminus-font
 )
 
 for pkg in "${LIVE_PACKAGES[@]}"; do
