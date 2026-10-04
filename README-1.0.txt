@@ -54,3 +54,13 @@ wolf-run-arch-test.sh now automatically selects the newest ISO from out/.
 For an additional legacy BIOS test:
 
   ./tests/wolf-run-arch-test.sh bios
+
+1.0.5:
+- Corrige condição de corrida do Chrome/CSD ao mover janelas maximizadas entre monitores.
+- Reenvia _NET_MOVERESIZE_WINDOW até confirmar o monitor de destino.
+
+1.0.6:
+- Remove o daemon experimental Super+botão do meio para mover janelas.
+- Restaura o comportamento nativo do Marco para middle-click na barra.
+- Mantém as barreiras de borda entre monitores.
+- Mantém correções do mouse flat e do fundo GRUB BIOS da ISO.

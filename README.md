@@ -52,7 +52,6 @@ O MATE é o ambiente mais personalizado do projeto e inclui:
 - integração do Caja com formatação de mídias removíveis;
 - bandeja de dispositivos removíveis com `udiskie`;
 - barreiras inteligentes entre monitores;
-- gesto para mover janelas entre monitores;
 - mouse sem aceleração no X11/libinput.
 
 ### Áudio e Bluetooth
@@ -686,32 +685,6 @@ No MATE/X11 o Wolf Linux cria pequenas barreiras nas divisas entre monitores:
 
 Isso facilita atingir rapidamente os cantos para fechar janelas ou acionar elementos no canto inferior sem o ponteiro escapar imediatamente para o outro monitor.
 
-## Mover janela para o próximo monitor
-
-Gesto padrão:
-
-```text
-Super + botão do meio
-```
-
-Em janelas tradicionais do Marco, use o gesto sobre a barra de título.
-
-Em Chrome/Electron/CSD, use nos primeiros 64 px do topo da janela.
-
-O daemon:
-
-- escolhe sempre a janela topmost;
-- preserva aproximadamente a posição relativa;
-- suporta coordenadas negativas do XRandR;
-- tenta preservar maximização;
-- utiliza `flock` para manter somente uma instância por usuário.
-
-Log:
-
-```text
-~/.cache/wolf-titlebar-monitor-move.log
-```
-
 ---
 
 # Mouse sem aceleração
@@ -753,7 +726,7 @@ xinput list-props ID_DO_MOUSE | grep -E \
 No Wolf Linux, o resultado efetivo esperado é equivalente a:
 
 ```text
-libinput Accel Profile Enabled (...): 0, 1, 0
+libinput Accel Profile Enabled (...): 0, 1  (ou 0, 1, 0 em dispositivos com 3 perfis)
 libinput Accel Speed (...): 0.000000
 ```
 
@@ -859,7 +832,6 @@ Antes de publicar uma nova ISO, recomenda-se validar:
 - [ ] Fastfetch aparece automaticamente no terminal gráfico;
 - [ ] TTY usa Terminus e prompt simplificado;
 - [ ] mouse usa perfil `flat` no MATE/X11;
-- [ ] gesto `Super + botão do meio` funciona entre monitores;
 - [ ] `udiskie` aparece quando necessário;
 - [ ] formatação pelo Caja abre GNOME Disks corretamente;
 - [ ] GRUB, Plymouth, SDDM e wallpaper exibem o branding Wolf Linux.
@@ -939,3 +911,25 @@ Entre eles:
 **Wolf Linux 1.0** representa a primeira versão consolidada do instalador e da ISO personalizada.
 
 A partir desta base, correções pequenas podem seguir versionamento `1.0.x`, enquanto mudanças maiores de comportamento, desktop ou arquitetura podem seguir para `1.1` ou superior.
+
+
+## Wolf Linux 1.0.2
+
+A revisão 1.0.2 acrescenta duas correções finais:
+
+- aplicação correta do perfil de mouse `flat` tanto em dispositivos que expõem 2 valores quanto 3 valores em `libinput Accel Profile Enabled`;
+- branding do GRUB da própria mídia live/ISO no boot BIOS usando `assets/grub/background.png`.
+
+## Wolf Linux 1.0.6 — estabilidade
+
+A revisão 1.0.6 remove o experimento `Super + botão do meio` para mover janelas entre monitores. Embora funcionasse em várias janelas do Marco, aplicações CSD/maximizadas como Google Chrome apresentaram condições de corrida e encerramentos do daemon X11.
+
+A decisão para a linha 1.0 é priorizar estabilidade. Permanecem as **barreiras inteligentes de borda** entre monitores, que foram validadas e não apresentaram problemas. O comportamento normal do botão do meio na barra de título do Marco é restaurado para `lower`.
+
+Para remover o recurso de uma instalação que recebeu versões experimentais anteriores:
+
+```bash
+./wolf-remove-window-mover-1.0.6.sh
+```
+
+Uma solução de movimentação entre monitores pode ser reavaliada futuramente em outra versão, sem fazer parte da base estável 1.0.x.

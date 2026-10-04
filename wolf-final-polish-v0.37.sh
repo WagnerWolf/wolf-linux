@@ -115,7 +115,14 @@ while IFS= read -r id; do
     grep -q 'libinput Tapping Enabled' <<<"$props" && continue
 
     if grep -q 'libinput Accel Profile Enabled' <<<"$props"; then
-        xinput set-prop "$id" 'libinput Accel Profile Enabled' 0 1 0 >/dev/null 2>&1 || true
+        profile_line="$(grep -m1 'libinput Accel Profile Enabled (' <<<"$props" || true)"
+        values="${profile_line##*:}"
+        values="$(tr -d '[:space:]' <<<"$values")"
+
+        case "$values" in
+            *,*,*) xinput set-prop "$id" 'libinput Accel Profile Enabled' 0 1 0 >/dev/null 2>&1 || true ;;
+            *,*)   xinput set-prop "$id" 'libinput Accel Profile Enabled' 0 1   >/dev/null 2>&1 || true ;;
+        esac
     fi
 
     if grep -q 'libinput Accel Speed' <<<"$props"; then
@@ -142,7 +149,14 @@ while IFS= read -r id; do
     props="$(xinput list-props "$id" 2>/dev/null || true)"
     grep -q 'libinput Tapping Enabled' <<<"$props" && continue
     if grep -q 'libinput Accel Profile Enabled' <<<"$props"; then
-        xinput set-prop "$id" 'libinput Accel Profile Enabled' 0 1 0 >/dev/null 2>&1 || true
+        profile_line="$(grep -m1 'libinput Accel Profile Enabled (' <<<"$props" || true)"
+        values="${profile_line##*:}"
+        values="$(tr -d '[:space:]' <<<"$values")"
+
+        case "$values" in
+            *,*,*) xinput set-prop "$id" 'libinput Accel Profile Enabled' 0 1 0 >/dev/null 2>&1 || true ;;
+            *,*)   xinput set-prop "$id" 'libinput Accel Profile Enabled' 0 1   >/dev/null 2>&1 || true ;;
+        esac
     fi
     if grep -q 'libinput Accel Speed' <<<"$props"; then
         xinput set-prop "$id" 'libinput Accel Speed' 0 >/dev/null 2>&1 || true

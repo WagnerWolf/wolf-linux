@@ -136,6 +136,61 @@ EOF
 
 chmod 755 "$AIROOT/usr/local/bin/wolf-install"
 
+
+# ------------------------------------------------------------
+# 3b. Branding do GRUB da mídia live (principalmente boot BIOS)
+# ------------------------------------------------------------
+if [[ -f "$PROJECT/assets/grub/background.png" ]]; then
+    mkdir -p "$PROFILE/grub"
+
+    cp -f \
+        "$PROJECT/assets/grub/background.png" \
+        "$PROFILE/grub/wolf-linux-background.png"
+
+    for grub_cfg in \
+        "$PROFILE/grub/grub.cfg" \
+        "$PROFILE/grub/loopback.cfg"
+    do
+        [[ -f "$grub_cfg" ]] || continue
+
+        python - "$grub_cfg" <<'PYGRUB'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+
+begin = "# WOLF-LINUX-GRUB-BRANDING-BEGIN"
+end = "# WOLF-LINUX-GRUB-BRANDING-END"
+
+block = """# WOLF-LINUX-GRUB-BRANDING-BEGIN
+insmod png
+if background_image /grub/wolf-linux-background.png; then
+  set color_normal=light-gray/black
+  set color_highlight=white/dark-gray
+fi
+# WOLF-LINUX-GRUB-BRANDING-END
+
+"""
+
+# Idempotência: substitui um bloco Wolf antigo, caso exista.
+if begin in text and end in text:
+    before, rest = text.split(begin, 1)
+    _, after = rest.split(end, 1)
+    text = before + block + after.lstrip("\n")
+else:
+    # Preferimos inserir depois do carregamento da fonte do GRUB.
+    marker = "loadfont unicode\n"
+    if marker in text:
+        text = text.replace(marker, marker + block, 1)
+    else:
+        text = block + text
+
+path.write_text(text, encoding="utf-8")
+PYGRUB
+    done
+fi
+
 # Mensagem de boas-vindas no shell da ISO. Não sobrescreve .zshrc do releng.
 cat > "$AIROOT/root/.zprofile" <<'EOF'
 loadkeys br-abnt2 2>/dev/null || true
@@ -292,3 +347,6 @@ echo "  Live OS .......: Wolf Linux Live"
 echo "  Teclado .......: br-abnt2"
 echo "  Instalador ....: wolf-install"
 echo "  Permissões ....: wolf-install=755 / instalador=755"
+if [[ -f "$PROFILE/grub/wolf-linux-background.png" ]]; then
+    echo "  GRUB BIOS .....: fundo Wolf Linux aplicado"
+fi

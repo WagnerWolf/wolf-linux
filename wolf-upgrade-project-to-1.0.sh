@@ -8,7 +8,7 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="${1:-${WOLF_PROJECT:-$HOME/wolf-linux}}"
 
 echo "============================================================"
-echo "         WOLF LINUX - UPGRADE DO PROJETO PARA 1.0"
+echo "         WOLF LINUX - UPGRADE DO PROJETO PARA 1.0.5.5"
 echo "============================================================"
 echo
 echo "Projeto:"
@@ -45,7 +45,8 @@ for helper in \
     wolf-enable-ssh-live.sh \
     wolf-vm-ssh.sh \
     wolf-customize-iso-profile.sh \
-    wolf-finalize-1.0.sh
+    wolf-finalize-1.0.sh \
+    wolf-fix-mouse-no-accel-1.0.2.sh
 do
     cp -f "$SELF_DIR/$helper" "$PROJECT/tests/$helper"
     chmod 755 "$PROJECT/tests/$helper"
@@ -61,7 +62,7 @@ echo "[3/3] Smoke test..."
 
 echo
 echo "============================================================"
-echo "              PROJETO WOLF LINUX 1.0 PRONTO"
+echo "              PROJETO WOLF LINUX 1.0.5 PRONTO"
 echo "============================================================"
 echo
 echo "A logo existente foi preservada:"

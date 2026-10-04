@@ -76,6 +76,15 @@ if [[ -d "$PROJECT/iso-profile" ]]; then
             "$PROJECT/iso-profile/profiledef.sh" \
         || ISO_FAIL=1
 
+    # Fundo Wolf Linux no GRUB da mídia live (usado no boot BIOS).
+    [[ -f "$PROJECT/iso-profile/grub/wolf-linux-background.png" ]] \
+        || ISO_FAIL=1
+
+    [[ -f "$PROJECT/iso-profile/grub/grub.cfg" ]] \
+        && grep -Fq 'background_image /grub/wolf-linux-background.png' \
+            "$PROJECT/iso-profile/grub/grub.cfg" \
+        || ISO_FAIL=1
+
     if (( ISO_FAIL == 0 )); then
         echo "[OK] perfil ISO"
     else
