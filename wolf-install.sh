@@ -3210,7 +3210,7 @@ install_desktop_productivity_extras() {
 #!/usr/bin/env bash
 set -u
 
-MARKER="$HOME/.config/wolf-linux/default-apps-v2.done"
+MARKER="$HOME/.config/wolf-linux/default-apps-v3.done"
 mkdir -p "$(dirname "$MARKER")"
 
 [[ -f "$MARKER" ]] && exit 0
@@ -3224,6 +3224,40 @@ set_default() {
         xdg-mime default "$desktop" "$mime" >/dev/null 2>&1 || true
     done
 }
+
+# Editor de texto simples por ambiente.
+DESKTOP="${XDG_CURRENT_DESKTOP:-${XDG_SESSION_DESKTOP:-}}"
+TEXT_EDITOR_DESKTOP=""
+
+case "$DESKTOP" in
+    *MATE*)
+        TEXT_EDITOR_DESKTOP="pluma.desktop"
+        ;;
+    *X-Cinnamon*|*Cinnamon*)
+        TEXT_EDITOR_DESKTOP="xed.desktop"
+        ;;
+    *KDE*|*Plasma*)
+        TEXT_EDITOR_DESKTOP="org.kde.kwrite.desktop"
+        ;;
+esac
+
+if [[ -n "$TEXT_EDITOR_DESKTOP" ]] \
+   && [[ -f "/usr/share/applications/$TEXT_EDITOR_DESKTOP" ]]; then
+    set_default "$TEXT_EDITOR_DESKTOP" \
+        text/plain \
+        text/markdown \
+        text/x-readme \
+        text/x-log \
+        application/x-shellscript \
+        application/json \
+        application/xml \
+        text/xml \
+        text/x-python \
+        text/x-csrc \
+        text/x-c++src \
+        text/x-java \
+        text/x-cmake
+fi
 
 # SMPlayer para vídeo.
 set_default smplayer.desktop \
@@ -3297,6 +3331,82 @@ touch "$MARKER"
 EOF
 
     chmod 755 /mnt/usr/local/bin/wolf-apply-default-apps.sh
+
+    cat > /mnt/usr/local/bin/wolf-plasma-panel-cleanup.sh <<'EOF'
+#!/usr/bin/env bash
+set -u
+
+DESKTOP="${XDG_CURRENT_DESKTOP:-${XDG_SESSION_DESKTOP:-}}"
+case "$DESKTOP" in
+    *KDE*|*Plasma*) ;;
+    *) exit 0 ;;
+esac
+
+MARKER="$HOME/.config/wolf-linux/plasma-panel-cleanup-v1.done"
+CONFIG="$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc"
+
+[[ -f "$MARKER" ]] && exit 0
+mkdir -p "$(dirname "$MARKER")"
+
+for _ in $(seq 1 20); do
+    [[ -s "$CONFIG" ]] && break
+    sleep 1
+done
+
+[[ -s "$CONFIG" ]] || exit 0
+
+cp -n "$CONFIG" "$CONFIG.wolf-backup" 2>/dev/null || true
+
+python - "$CONFIG" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+lines = path.read_text(encoding="utf-8").splitlines()
+out = []
+
+for line in lines:
+    if line.startswith("launchers="):
+        prefix, value = line.split("=", 1)
+        items = [item for item in value.split(",") if item]
+        items = [item for item in items if "discover" not in item.lower()]
+        line = prefix + "=" + ",".join(items)
+    out.append(line)
+
+path.write_text("\n".join(out) + "\n", encoding="utf-8")
+PY
+
+if grep -Ei '^launchers=.*discover' "$CONFIG" >/dev/null 2>&1; then
+    exit 0
+fi
+
+touch "$MARKER"
+
+if systemctl --user restart plasma-plasmashell.service >/dev/null 2>&1; then
+    exit 0
+fi
+
+if command -v kquitapp6 >/dev/null 2>&1; then
+    kquitapp6 plasmashell >/dev/null 2>&1 || true
+fi
+
+nohup plasmashell --replace >/dev/null 2>&1 &
+disown || true
+EOF
+
+    chmod 755 /mnt/usr/local/bin/wolf-plasma-panel-cleanup.sh
+
+    cat > /mnt/etc/xdg/autostart/wolf-plasma-panel-cleanup.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Wolf Linux - Limpar painel Plasma
+Comment=Remove o atalho do Discover do painel padrão
+Exec=/usr/local/bin/wolf-plasma-panel-cleanup.sh
+OnlyShowIn=KDE;
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
 
     cat > /mnt/etc/xdg/autostart/wolf-default-apps.desktop <<'EOF'
 [Desktop Entry]
@@ -4790,11 +4900,61 @@ gsettings set org.mate.interface gtk-theme 'Materia-dark' || true
         ;;
 
     *X-Cinnamon*|*Cinnamon*)
+        # Cinnamon reconhece o tema Breeze pelo diretório "breeze_cursors".
+        # O alias "breeze-dark" funciona em outros ambientes, mas pode gerar
+        # fallback parcial/inconsistente no Cinnamon.
+        CINNAMON_CURSOR_THEME="breeze_cursors"
+
+        if [[ ! -d "/usr/share/icons/$CINNAMON_CURSOR_THEME/cursors" ]]; then
+            if [[ -d /usr/share/icons/Breeze_Snow/cursors ]]; then
+                CINNAMON_CURSOR_THEME="Breeze_Snow"
+            else
+                CINNAMON_CURSOR_THEME="Adwaita"
+            fi
+        fi
+
         if gsettings list-schemas | grep -Fxq 'org.cinnamon.desktop.interface'; then
             gsettings set org.cinnamon.desktop.interface gtk-theme 'Adwaita-dark' || true
             gsettings set org.cinnamon.desktop.interface icon-theme 'Papirus-Dark' || true
-            gsettings set org.cinnamon.desktop.interface cursor-theme 'breeze-dark' || true
+            gsettings set org.cinnamon.desktop.interface cursor-theme "$CINNAMON_CURSOR_THEME" || true
             gsettings set org.cinnamon.desktop.interface cursor-size 24 || true
+        fi
+
+        # Alguns aplicativos GTK consultam o schema GNOME mesmo no Cinnamon.
+        if gsettings list-schemas | grep -Fxq 'org.gnome.desktop.interface'; then
+            gsettings set org.gnome.desktop.interface cursor-theme "$CINNAMON_CURSOR_THEME" 2>/dev/null || true
+            gsettings set org.gnome.desktop.interface cursor-size 24 2>/dev/null || true
+        fi
+
+        # Alinha os fallbacks XCursor/GTK com o mesmo nome real do tema.
+        sed -i \
+            "s/^gtk-cursor-theme-name=.*/gtk-cursor-theme-name=$CINNAMON_CURSOR_THEME/" \
+            "$HOME/.config/gtk-3.0/settings.ini" \
+            "$HOME/.config/gtk-4.0/settings.ini" \
+            2>/dev/null || true
+
+        mkdir -p "$HOME/.local/share/icons/default" "$HOME/.icons/default"
+
+        cat > "$HOME/.local/share/icons/default/index.theme" <<EOF
+[Icon Theme]
+Inherits=$CINNAMON_CURSOR_THEME
+EOF
+
+        cat > "$HOME/.icons/default/index.theme" <<EOF
+[Icon Theme]
+Inherits=$CINNAMON_CURSOR_THEME
+EOF
+
+        {
+            grep -vE '^Xcursor\.(theme|size):' "$HOME/.Xresources" 2>/dev/null || true
+            echo "Xcursor.theme: $CINNAMON_CURSOR_THEME"
+            echo "Xcursor.size: 24"
+        } > "$HOME/.Xresources.wolf"
+
+        mv -f "$HOME/.Xresources.wolf" "$HOME/.Xresources"
+
+        if command -v xrdb >/dev/null 2>&1; then
+            xrdb -merge "$HOME/.Xresources" 2>/dev/null || true
         fi
 
         if [[ -d /usr/share/themes/Cinnamon-Dark ]]; then

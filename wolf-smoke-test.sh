@@ -76,6 +76,14 @@ if [[ -d "$PROJECT/iso-profile" ]]; then
             "$PROJECT/iso-profile/profiledef.sh" \
         || ISO_FAIL=1
 
+    [[ -f "$PROJECT/iso-profile/syslinux/archiso_head.cfg" ]] \
+        && grep -Fxq 'MENU TITLE Wolf Linux' \
+            "$PROJECT/iso-profile/syslinux/archiso_head.cfg" \
+        && grep -Fxq 'MENU BACKGROUND boot/syslinux/splash.png' \
+            "$PROJECT/iso-profile/syslinux/archiso_head.cfg" \
+        && [[ -f "$PROJECT/iso-profile/syslinux/splash.png" ]] \
+        || ISO_FAIL=1
+
     # Fundo Wolf Linux no GRUB da mídia live (usado no boot BIOS).
     [[ -f "$PROJECT/iso-profile/grub/wolf-linux-background.png" ]] \
         || ISO_FAIL=1

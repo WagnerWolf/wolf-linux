@@ -933,3 +933,44 @@ Para remover o recurso de uma instalação que recebeu versões experimentais an
 ```
 
 Uma solução de movimentação entre monitores pode ser reavaliada futuramente em outra versão, sem fazer parte da base estável 1.0.x.
+
+
+## Notas da versão 1.0.7
+
+### Boot Legacy BIOS
+
+O boot Legacy da mídia Archiso usa **Syslinux/vesamenu**, não o GRUB.
+O Wolf Linux agora substitui explicitamente:
+
+- `iso-profile/syslinux/splash.png`
+- `MENU TITLE Arch Linux` → `MENU TITLE Wolf Linux`
+
+A imagem dedicada fica em:
+
+```text
+assets/syslinux/splash.png
+```
+
+Ela é preparada em 800×600 para o menu VESA do Syslinux.
+
+### Cursor no Cinnamon
+
+O Cinnamon passa a usar o nome real do tema Breeze disponível em seu
+seletor de cursores:
+
+```text
+breeze_cursors
+```
+
+O primeiro login também sincroniza o mesmo tema em GSettings, GTK3/GTK4,
+XCursor e nos fallbacks `~/.icons/default` e
+`~/.local/share/icons/default`, evitando cursores misturados ou corrompidos.
+
+
+## Notas da versão 1.0.8
+
+- MATE: Pluma e MATE Calculator instalados explicitamente.
+- Cinnamon: Xed definido como editor padrão de texto e Galculator adicionado.
+- KDE Plasma: KWrite (pacote `kate`) definido como editor padrão e KCalc adicionado.
+- KDE Plasma: o launcher fixado do Discover é removido do painel no primeiro login.
+- O fundo preto do Syslinux em alguns boots Legacy é aceito; o menu continua funcional.

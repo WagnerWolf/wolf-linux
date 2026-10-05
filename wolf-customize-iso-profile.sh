@@ -138,7 +138,7 @@ chmod 755 "$AIROOT/usr/local/bin/wolf-install"
 
 
 # ------------------------------------------------------------
-# 3b. Branding do GRUB da mídia live (principalmente boot BIOS)
+# 3b. Branding do GRUB da mídia live (UEFI/loopback)
 # ------------------------------------------------------------
 if [[ -f "$PROJECT/assets/grub/background.png" ]]; then
     mkdir -p "$PROFILE/grub"
@@ -189,6 +189,46 @@ else:
 path.write_text(text, encoding="utf-8")
 PYGRUB
     done
+fi
+
+# ------------------------------------------------------------
+# 3c. Branding do Syslinux da mídia live (boot Legacy BIOS)
+# ------------------------------------------------------------
+# O Archiso releng usa Syslinux/vesamenu no boot BIOS. O arquivo
+# archiso_head.cfg aponta para boot/syslinux/splash.png.
+if [[ -d "$PROFILE/syslinux" ]]; then
+    if [[ -f "$PROJECT/assets/syslinux/splash.png" ]]; then
+        cp -f \
+            "$PROJECT/assets/syslinux/splash.png" \
+            "$PROFILE/syslinux/splash.png"
+    elif [[ -f "$PROJECT/assets/grub/background.png" ]]; then
+        # Fallback: mantém a identidade mesmo se o asset dedicado faltar.
+        cp -f \
+            "$PROJECT/assets/grub/background.png" \
+            "$PROFILE/syslinux/splash.png"
+    fi
+
+    if [[ -f "$PROFILE/syslinux/archiso_head.cfg" ]]; then
+        sed -i \
+            -e 's/^MENU TITLE .*/MENU TITLE Wolf Linux/' \
+            -e 's|^MENU BACKGROUND .*|MENU BACKGROUND boot/syslinux/splash.png|' \
+            "$PROFILE/syslinux/archiso_head.cfg"
+    fi
+
+    # Ajusta os rótulos mais visíveis do menu BIOS.
+    while IFS= read -r -d '' sys_cfg; do
+        sed -i \
+            -e 's/Boot Arch Linux/Boot Wolf Linux/g' \
+            -e 's/Arch Linux install medium/Wolf Linux Installer/g' \
+            -e 's/Arch Linux Install Medium/Wolf Linux Installer/g' \
+            "$sys_cfg"
+    done < <(
+        find "$PROFILE/syslinux" \
+            -maxdepth 1 \
+            -type f \
+            -name '*.cfg' \
+            -print0
+    )
 fi
 
 # Mensagem de boas-vindas no shell da ISO. Não sobrescreve .zshrc do releng.
@@ -348,5 +388,8 @@ echo "  Teclado .......: br-abnt2"
 echo "  Instalador ....: wolf-install"
 echo "  Permissões ....: wolf-install=755 / instalador=755"
 if [[ -f "$PROFILE/grub/wolf-linux-background.png" ]]; then
-    echo "  GRUB BIOS .....: fundo Wolf Linux aplicado"
+    echo "  GRUB live .....: fundo Wolf Linux aplicado"
+fi
+if [[ -f "$PROFILE/syslinux/splash.png" ]]    && grep -Fq 'MENU TITLE Wolf Linux' "$PROFILE/syslinux/archiso_head.cfg" 2>/dev/null; then
+    echo "  Legacy BIOS ...: Syslinux Wolf Linux aplicado"
 fi
