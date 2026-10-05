@@ -44,7 +44,8 @@ fi
 
 echo "[4/6] Instalando arquivos do DevKit..."
 
-for helper in wolf-build-iso.sh wolf-test-iso.sh wolf-smoke-test.sh wolf-serve.sh wolf-run-arch-test.sh wolf-enable-ssh-live.sh wolf-vm-ssh.sh wolf-fix-mate-v0.27.sh wolf-fix-mate-panel-v0.28.sh wolf-restore-known-good-panel-v0.29.sh wolf-theme-lab-v0.30.sh wolf-theme-lab-v0.31.sh wolf-fix-numlock-coco-v0.31.sh wolf-theme-bases-v0.32.sh wolf-apply-final-mate-theme-v0.33.sh wolf-customize-iso-profile.sh wolf-desktop-extras-v0.36.sh wolf-final-polish-v0.37.sh wolf-fix-fastfetch-startup-v0.38.sh wolf-fix-terminal-width-v0.39.sh wolf-fix-terminal-width-v0.40.sh wolf-fix-tty-v0.41.sh wolf-finalize-1.0.sh wolf-fix-mouse-no-accel-1.0.2.sh wolf-remove-window-mover-1.0.6.sh wolf-fix-cinnamon-cursor-1.0.7.sh wolf-fix-desktop-essentials-1.0.8.sh wolf-fix-cinnamon-apps-1.0.9.sh wolf-fix-nemo-integrations-1.0.11.sh; do    cp -f "$SELF_DIR/$helper" "$PROJECT/tests/$helper"
+for helper in wolf-build-iso.sh wolf-test-iso.sh wolf-smoke-test.sh wolf-serve.sh wolf-run-arch-test.sh wolf-enable-ssh-live.sh wolf-vm-ssh.sh wolf-fix-mate-v0.27.sh wolf-fix-mate-panel-v0.28.sh wolf-restore-known-good-panel-v0.29.sh wolf-theme-lab-v0.30.sh wolf-theme-lab-v0.31.sh wolf-fix-numlock-coco-v0.31.sh wolf-theme-bases-v0.32.sh wolf-apply-final-mate-theme-v0.33.sh wolf-customize-iso-profile.sh wolf-desktop-extras-v0.36.sh wolf-final-polish-v0.37.sh wolf-fix-fastfetch-startup-v0.38.sh wolf-fix-terminal-width-v0.39.sh wolf-fix-terminal-width-v0.40.sh wolf-fix-tty-v0.41.sh wolf-finalize-1.0.sh wolf-fix-mouse-no-accel-1.0.2.sh wolf-remove-window-mover-1.0.6.sh wolf-fix-cinnamon-cursor-1.0.7.sh wolf-fix-desktop-essentials-1.0.8.sh wolf-fix-cinnamon-apps-1.0.9.sh wolf-fix-nemo-integrations-1.0.11.sh wolf-fix-cinnamon-polish-1.0.17.sh; do
+    cp -f "$SELF_DIR/$helper" "$PROJECT/tests/$helper"
     chmod 755 "$PROJECT/tests/$helper"
 done
 

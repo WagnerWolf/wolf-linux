@@ -113,6 +113,135 @@ if [[ -f "$PROJECT/package-profiles/packages.conf" ]]; then
     fi
 fi
 
+# Regressões que já apareceram durante a estabilização do Cinnamon.
+# Estes checks falham cedo antes de gerar uma ISO se algum dos fixes
+# consolidados desaparecer do instalador ou do manifesto de pacotes.
+INSTALLER="$PROJECT/install/wolf-install.sh"
+PACKAGES="$PROJECT/package-profiles/packages.conf"
+
+if [[ -f "$INSTALLER" && -f "$PACKAGES" ]]; then
+    echo
+    echo ">> Validando perfil Cinnamon consolidado..."
+    CINNAMON_FAIL=0
+
+    CINNAMON_BLOCK="$(
+        sed -n '/^CINNAMON_PACKAGES=(/,/^)/p' "$PACKAGES" 2>/dev/null || true
+    )"
+
+    for pkg in cinnamon xarchiver flameshot gnome-keyring libsecret seahorse; do
+        grep -Eq "^[[:space:]]*${pkg}([[:space:]]|$)" <<<"$CINNAMON_BLOCK" \
+            || CINNAMON_FAIL=1
+    done
+
+    grep -Fq 'wolf-disable-cinnamon-wayland' "$INSTALLER" \
+        || CINNAMON_FAIL=1
+    grep -Fq 'wolf-cinnamon-x11-only.hook' "$INSTALLER" \
+        || CINNAMON_FAIL=1
+    grep -Fq '/usr/share/wayland-sessions/cinnamon*.desktop' "$INSTALLER" \
+        || CINNAMON_FAIL=1
+
+    grep -Fq 'pam_gnome_keyring.so' "$INSTALLER" \
+        || CINNAMON_FAIL=1
+    grep -Fq '"password-store": "gnome-libsecret"' "$INSTALLER" \
+        || CINNAMON_FAIL=1
+
+    grep -Fq 'parser.optionxform = str' "$INSTALLER" \
+        || CINNAMON_FAIL=1
+    for key in \
+        contrastopacity \
+        autocloseidledaemon \
+        disabledtrayicon \
+        showstartuplaunchmessage
+    do
+        grep -Fq "\"$key\"" "$INSTALLER" || CINNAMON_FAIL=1
+    done
+
+    if (( CINNAMON_FAIL == 0 )); then
+        echo "[OK] Cinnamon X11-only + Flameshot + Keyring/Seahorse + VS Code"
+    else
+        echo "[ERRO] perfil Cinnamon perdeu um ou mais fixes consolidados."
+        FAIL=1
+    fi
+fi
+
+# Toolchain Flutter/Android/Web deve ser igual nos três desktops.
+if [[ -f "$INSTALLER" && -f "$PACKAGES" ]]; then
+    echo
+    echo ">> Validando Flutter / Android / Chrome..."
+    DEV_FAIL=0
+
+    DEV_THIRD_BLOCK="$(
+        sed -n '/^DEV_THIRD_PARTY_PACKAGES=(/,/^)/p' "$PACKAGES" 2>/dev/null || true
+    )"
+
+    for pkg in \
+        android-sdk \
+        android-sdk-build-tools \
+        android-sdk-platform-tools \
+        android-platform; do
+        grep -Eq "^[[:space:]]*${pkg}([[:space:]]|$)" <<<"$DEV_THIRD_BLOCK" \
+            || DEV_FAIL=1
+    done
+
+    DEV_BLOCK="$(
+        sed -n '/^DEV_PACKAGES=(/,/^)/p' "$PACKAGES" 2>/dev/null || true
+    )"
+    grep -Eq '^[[:space:]]*acl([[:space:]]|$)' <<<"$DEV_BLOCK" \
+        || DEV_FAIL=1
+
+    # Um único adb: o fornecido pelo Android SDK em /opt/android-sdk/platform-tools.
+    if grep -Eq '^[[:space:]]*android-tools[[:space:]]*$' "$PACKAGES"; then
+        echo "[ERRO] android-tools voltou ao manifesto e duplicará /usr/bin/adb."
+        DEV_FAIL=1
+    fi
+
+    # Flutter 3.47 ainda não entende o fluxo de licenças do cmdline-tools 23+.
+    if grep -Eq '^[[:space:]]*android-sdk-cmdline-tools-latest[[:space:]]*$' "$PACKAGES"; then
+        echo "[ERRO] cmdline-tools-latest voltou ao manifesto; Flutter 3.47 perde a checagem de licenças com 23+."
+        DEV_FAIL=1
+    fi
+    grep -Fq 'commandlinetools-linux-15859902_latest.zip' "$INSTALLER" || DEV_FAIL=1
+    grep -Fq '4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583' "$INSTALLER" || DEV_FAIL=1
+    grep -Fq 'Pkg.Revision' "$INSTALLER" || DEV_FAIL=1
+
+    grep -Fq 'google-chrome-stable /mnt/usr/local/bin/google-chrome' "$INSTALLER" \
+        || grep -Fq 'ln -sfn /usr/bin/google-chrome-stable /mnt/usr/local/bin/google-chrome' "$INSTALLER" \
+        || DEV_FAIL=1
+    grep -Fq 'CHROME_EXECUTABLE=/usr/bin/google-chrome-stable' "$INSTALLER" \
+        || DEV_FAIL=1
+    grep -Fq 'wolf-android-licenses' "$INSTALLER" \
+        || DEV_FAIL=1
+    grep -Fq 'groupadd -f android-sdk' "$INSTALLER" \
+        || DEV_FAIL=1
+    grep -Fq 'usermod -aG android-sdk' "$INSTALLER" \
+        || DEV_FAIL=1
+    grep -Fq 'wolf-fix-android-sdk-permissions' "$INSTALLER" \
+        || DEV_FAIL=1
+    grep -Fq 'setfacl -R -m' "$INSTALLER" \
+        || DEV_FAIL=1
+    grep -Fq "d:g:\${SDK_GROUP}:rwx" "$INSTALLER" \
+        || DEV_FAIL=1
+    grep -Fq 'wolf-android-sdk-permissions.hook' "$INSTALLER" \
+        || DEV_FAIL=1
+    grep -Fq 'flutter doctor --android-licenses' "$INSTALLER" \
+        || DEV_FAIL=1
+    if grep -Fq "exec sudo \"\$SDKMANAGER\"" "$INSTALLER"; then
+        echo "[ERRO] helper de licenças voltou a depender de sudo."
+        DEV_FAIL=1
+    fi
+    grep -Fq "chown -R \"\$USERNAME_VALUE:\$USERNAME_VALUE\" \"\$target_flutter\"" "$INSTALLER" \
+        || DEV_FAIL=1
+    grep -Fq "platforms/android-*" "$INSTALLER" \
+        || DEV_FAIL=1
+
+    if (( DEV_FAIL == 0 )); then
+        echo "[OK] Android SDK + ACL/grupo + ADB único + cmdline-tools 22.0 + Chrome Web + licenças"
+    else
+        echo "[ERRO] toolchain Flutter/Android/Web perdeu um ou mais fixes."
+        FAIL=1
+    fi
+fi
+
 echo
 if (( FAIL == 0 )); then
     echo "[OK] Testes rápidos concluídos."

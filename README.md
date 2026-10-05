@@ -1028,3 +1028,234 @@ As integrações do Nemo permanecem:
 - **Formatar mídia removível…** via GNOME Disks
 
 O MATE continua usando `udiskie`, pois nele essa integração continua sendo útil.
+
+
+## Notas da versão 1.0.14 — Cinnamon
+
+O perfil Cinnamon passa a priorizar **Cinnamon X11**. A sessão Wayland continua
+instalada, mas não é a sessão padrão do Wolf Linux.
+
+Motivos práticos observados no hardware real:
+
+- aceleração de mouse mais previsível com libinput/XInput;
+- Flameshot mais previsível;
+- drag-and-drop do gerenciador de arquivos compactados;
+- redução de artefatos/piscadas observados no Chrome em Wayland.
+
+### Multimídia
+
+- SMPlayer deixa de ser instalado por padrão.
+- VLC + `vlc-plugins-all` passam a ser instalados.
+- VLC é o player padrão para vídeo.
+- Audacious continua como player padrão de áudio.
+
+### Arquivos compactados
+
+- File Roller/Nemo-Fileroller deixam o perfil Cinnamon.
+- Xarchiver passa a ser o gerenciador padrão de arquivos compactados.
+- Em X11, Xarchiver suporta drag-and-drop de arquivos a partir do arquivo
+  compactado.
+
+### Dark mode e portais
+
+O Cinnamon instala e roteia:
+
+- `xdg-desktop-portal-xapp`
+- `xdg-desktop-portal-gtk`
+- `org.freedesktop.impl.portal.Settings` → XApp/GTK
+- `org.freedesktop.impl.portal.Secret` → GNOME Keyring
+
+### GNOME Keyring / VS Code
+
+O SDDM recebe reforço de PAM apenas quando as linhas de GNOME Keyring estiverem
+ausentes. O VS Code usa `password-store=gnome-libsecret`.
+
+### Flameshot
+
+- instalado por padrão;
+- sem ícone permanente na tray;
+- daemon fecha quando fica ocioso;
+- `Print` é configurado para `flameshot gui`.
+
+
+## Notas da versão 1.0.15 — Cinnamon
+
+### Flameshot
+
+Corrigida a gravação de `~/.config/flameshot/flameshot.ini`.
+
+O Python `ConfigParser` converte nomes de opções para minúsculas por padrão.
+Como o Flameshot diferencia maiúsculas/minúsculas, opções válidas como
+`contrastOpacity`, `disabledTrayIcon`, `autoCloseIdleDaemon` e
+`showStartupLaunchMessage` acabavam sendo regravadas como nomes inválidos.
+
+A configuração agora usa `optionxform = str` e `interpolation=None`, preservando
+o case original das chaves existentes e das opções adicionadas pelo Wolf Linux.
+
+### GNOME Keyring / VS Code
+
+A integração foi simplificada para acompanhar o comportamento atual do Arch:
+
+- o PAM fornecido pelo SDDM é reconhecido tanto com quanto sem o prefixo `-`,
+  evitando duplicar linhas de `pam_gnome_keyring.so`;
+- o Wolf Linux passa a confiar no autostart nativo do pacote Arch do
+  `gnome-keyring`, que já inclui Cinnamon;
+- o Wolf Linux não inicia mais socket/daemon do GNOME Keyring manualmente
+  durante o login, evitando uma segunda inicialização redundante;
+- o VS Code continua configurado com `password-store=gnome-libsecret`;
+- o script de correção passa a informar se o Secret Service está ativo e se a
+  coleção `login` está desbloqueada.
+
+### Estado dos demais ajustes do Cinnamon
+
+- Xarchiver permanece como gerenciador padrão de arquivos compactados;
+- o modo escuro permanece aplicado aos aplicativos GTK/portais;
+- Cinnamon X11 continua sendo a sessão padrão recomendada pelo Wolf Linux.
+
+
+## 1.0.16 — Cinnamon: limpeza definitiva do Flameshot e diagnóstico do Login Keyring
+
+### Flameshot
+
+A 1.0.15 passou a preservar maiúsculas/minúsculas ao gravar `flameshot.ini`,
+mas entradas inválidas criadas anteriormente pela 1.0.14 podiam permanecer no
+arquivo ao lado das opções corretas. A 1.0.16 remove explicitamente:
+
+- `contrastopacity`;
+- `autocloseidledaemon`;
+- `disabledtrayicon`;
+- `showstartuplaunchmessage`.
+
+Em seguida grava somente as opções oficiais camelCase, incluindo
+`contrastOpacity=190` quando a opção correta ainda não existia.
+
+### GNOME Keyring / VS Code
+
+O daemon e o Secret Service podem estar ativos mesmo quando a coleção
+`login` ainda não existe. O diagnóstico do fix agora diferencia esse estado.
+Instalações limpas continuam usando o fluxo nativo SDDM/PAM do Arch; sistemas
+que passaram pelas versões de desenvolvimento anteriores podem precisar criar
+a coleção `login` uma única vez, usando a mesma senha da conta para que o PAM
+consiga desbloqueá-la nos logins seguintes.
+
+
+## 1.0.17 — Cinnamon X11-only e consolidação dos fixes
+
+### Cinnamon somente em X11
+
+O perfil Cinnamon do Wolf Linux deixa de apenas priorizar X11 e passa a
+oferecer **somente Cinnamon X11** no SDDM. O instalador remove as entradas
+`/usr/share/wayland-sessions/cinnamon*.desktop` e instala o hook
+`/etc/pacman.d/hooks/wolf-cinnamon-x11-only.hook`, que reaplica a remoção
+após instalações/atualizações do pacote `cinnamon`. A sessão
+`Cinnamon (Software Rendering)` continua disponível por ser uma sessão X11.
+
+### Flameshot
+
+A correção consolidada da 1.0.16 permanece diretamente no instalador:
+`ConfigParser` preserva maiúsculas/minúsculas e resíduos inválidos como
+`contrastopacity`, `autocloseidledaemon`, `disabledtrayicon` e
+`showstartuplaunchmessage` são removidos antes de gravar as chaves camelCase.
+
+### GNOME Keyring / Seahorse / VS Code
+
+O perfil Cinnamon passa a instalar também `seahorse`, além de `gnome-keyring`
+e `libsecret`. O instalador valida a integração PAM do SDDM, mantém o fluxo
+nativo SDDM/PAM para criação/desbloqueio do chaveiro `Login` e instala um
+fallback de autostart apenas se o pacote `gnome-keyring` deixar de listar
+Cinnamon. O VS Code continua recebendo `"password-store": "gnome-libsecret"`
+em `~/.vscode/argv.json` no setup da sessão.
+
+Em uma instalação limpa, o chaveiro `Login` deve ser criado/desbloqueado no
+primeiro login com senha. O Seahorse fica disponível como ferramenta de
+diagnóstico/reparo caso isso não ocorra.
+
+O ajuste do VS Code na 1.0.17 também passou a tratar `argv.json` como JSONC:
+a chave `password-store` é inserida/atualizada sem apagar comentários,
+`enable-crash-reporter`, `crash-reporter-id` ou outras opções já existentes.
+
+## 1.0.18 — Flutter Android/Web pronto nos três desktops
+
+A revisão 1.0.18 consolida a toolchain Flutter como configuração global do Wolf Linux, independente do ambiente gráfico escolhido.
+
+- adiciona `android-platform` ao conjunto Android, preenchendo `/opt/android-sdk/platforms` e evitando o erro `No valid Android SDK platforms found`;
+- mantém `android-sdk`, Build Tools, Command-line Tools e Platform Tools;
+- cria `/usr/local/bin/google-chrome -> /usr/bin/google-chrome-stable`, permitindo que o Flutter encontre o Google Chrome para desenvolvimento Web;
+- exporta `CHROME_EXECUTABLE=/usr/bin/google-chrome-stable`;
+- adiciona `wolf-android-licenses`, que abre o `sdkmanager --licenses` com permissão adequada para o SDK compartilhado em `/opt/android-sdk`;
+- amplia `wolf-flutter-doctor` para validar plataforma Android e Chrome antes de executar `flutter doctor -v`;
+- adiciona regressões correspondentes ao smoke test do projeto.
+
+A aceitação das licenças Android continua sendo uma ação explícita do usuário:
+
+```bash
+wolf-android-licenses
+```
+
+Depois:
+
+```bash
+flutter doctor
+```
+
+
+
+## 1.0.19 — Flutter 3.47 / Android SDK: ADB único e licenças compatíveis
+
+A revisão 1.0.19 fecha os dois avisos restantes observados no `flutter doctor`:
+
+- remove `android-tools` do manifesto para não instalar `/usr/bin/adb` em paralelo ao ADB oficial do SDK em `/opt/android-sdk/platform-tools/adb`;
+- mantém `android-sdk-platform-tools` como a única implementação de ADB/fastboot usada pelo ambiente Android;
+- deixa de instalar o AUR `android-sdk-cmdline-tools-latest`, pois a revisão 23+ mudou o fluxo de licenças e o Flutter 3.47.x ainda o interpreta incorretamente;
+- instala diretamente do Google o Android Command-line Tools **22.0** (`commandlinetools-linux-15859902_latest.zip`) e valida o SHA-256 oficial antes de extrair;
+- organiza a revisão em `/opt/android-sdk/cmdline-tools/22.0` e mantém `latest -> 22.0`;
+- preserva `wolf-android-licenses` para a aceitação interativa das licenças com permissões adequadas em `/opt/android-sdk`;
+- amplia `wolf-flutter-doctor` e o smoke test para detectar ADB duplicado e regressões na versão das Command-line Tools.
+
+O pin em 22.0 é temporário. Ele deve ser removido quando a versão Stable do Flutter reconhecer oficialmente o novo fluxo de licenças das Command-line Tools 23+.
+
+
+## 1.0.20 — Permissões corretas para Flutter e Android SDK
+
+A revisão 1.0.20 consolida o comportamento validado em máquina real para que
+`flutter doctor --android-licenses` funcione como usuário comum, sem `sudo`.
+
+- `/opt/flutter` permanece pertencendo ao usuário criado pelo instalador, permitindo que o Flutter mantenha seu próprio cache sem criar arquivos root-owned;
+- `/opt/android-sdk` permanece administrado pelo root/pacman, mas o instalador cria o grupo `android-sdk` e adiciona o usuário a ele;
+- o pacote oficial `acl` passa a ser instalado explicitamente;
+- ACLs de leitura/escrita são aplicadas recursivamente ao SDK Android e ACLs padrão são configuradas nos diretórios para novos arquivos/componentes;
+- um hook do pacman reaplica as ACLs após atualização de `android-sdk`, Build Tools, Platform Tools ou `android-platform`;
+- `wolf-android-licenses` deixa de elevar privilégios e passa a chamar `flutter doctor --android-licenses` como usuário normal;
+- `wolf-flutter-doctor` também verifica a associação ao grupo `android-sdk` e se `/opt/android-sdk` está gravável sem sudo;
+- os smoke tests passam a impedir regressões nessas permissões.
+
+Após o primeiro login da instalação, as licenças podem ser aceitas simplesmente com:
+
+```bash
+flutter doctor --android-licenses
+```
+
+ou pelo atalho:
+
+```bash
+wolf-android-licenses
+```
+
+Como a associação ao grupo é feita durante a instalação, ela já estará ativa no primeiro login normal do usuário.
+
+## 1.0.21 — Smoke test limpo e sincronização de instalações existentes
+
+- Corrige os avisos `SC2016` do ShellCheck no próprio `wolf-smoke-test.sh` sem
+  desativar regras do ShellCheck; os testes continuam comparando texto literal
+  do instalador, mas agora escapam explicitamente os `$` procurados.
+- Mantém `WOLF_VERSION=1.0.21` no instalador.
+- Adiciona `wolf-apply-current-system-hooks-1.0.21.sh`, que pode ser executado
+  numa instalação Wolf Linux já existente para instalar/reaplicar:
+  - hook `wolf-cinnamon-x11-only.hook`;
+  - hook `wolf-android-sdk-permissions.hook`;
+  - helper `wolf-fix-android-sdk-permissions`;
+  - grupo/ACL do Android SDK;
+  - propriedade de `/opt/flutter` para o usuário principal;
+  - helper `wolf-android-licenses` sem sudo.
+
+Isso permite atualizar a máquina de desenvolvimento atual sem reinstalação.

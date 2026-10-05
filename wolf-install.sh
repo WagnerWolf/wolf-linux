@@ -7,7 +7,7 @@ fi
 
 set -Eeuo pipefail
 
-WOLF_VERSION="1.0.6"
+WOLF_VERSION="1.0.21"
 DRY_RUN=0
 PLAN_ONLY=0
 RESET_STATE=0
@@ -2075,6 +2075,87 @@ install_flutter_sdk() {
     local flutter_dir="/mnt/opt/flutter"
     local target_flutter="/opt/flutter"
     local user_home="/home/$USERNAME_VALUE"
+    local android_cli_archive="commandlinetools-linux-15859902_latest.zip"
+    local android_cli_sha256="4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583"
+    local android_cli_url="https://dl.google.com/android/repository/${android_cli_archive}"
+
+    info "Instalando Android Command-line Tools 22.0 compatíveis com Flutter 3.47..."
+
+    # Flutter 3.47.x ainda consulta o fluxo legado sdkmanager --licenses.
+    # Command-line Tools 23+ substituiu esse fluxo pela nova Android CLI e
+    # faz o doctor reportar licenças como desconhecidas/não aceitas.
+    # Pinamos 22.0 temporariamente: é compatível com API 37 e com o checker
+    # atual do Flutter. O arquivo vem diretamente do Google e é validado
+    # pelo SHA-256 publicado oficialmente.
+    arch-chroot /mnt /bin/bash -s -- "$android_cli_url" "$android_cli_archive" "$android_cli_sha256" <<'ANDROIDCLI'
+set -Eeuo pipefail
+url="$1"
+archive="$2"
+sha="$3"
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+
+curl --fail --location "$url" --output "$tmpdir/$archive"
+printf '%s  %s\n' "$sha" "$tmpdir/$archive" | sha256sum --check -
+unzip -q "$tmpdir/$archive" -d "$tmpdir"
+
+rm -rf /opt/android-sdk/cmdline-tools/22.0 /opt/android-sdk/cmdline-tools/latest
+mkdir -p /opt/android-sdk/cmdline-tools
+mv "$tmpdir/cmdline-tools" /opt/android-sdk/cmdline-tools/22.0
+ln -s 22.0 /opt/android-sdk/cmdline-tools/latest
+
+grep -Eq '^Pkg.Revision[[:space:]]*=[[:space:]]*22\.0$' \
+    /opt/android-sdk/cmdline-tools/22.0/source.properties
+ANDROIDCLI
+
+    info "Configurando permissões compartilhadas do Android SDK..."
+
+    # /opt/android-sdk é mantido pelo root/pacman, mas ferramentas como
+    # `flutter doctor --android-licenses` precisam gravar em licenses/ e
+    # outros subdiretórios. Em vez de transferir o SDK inteiro ao usuário,
+    # o Wolf Linux usa um grupo dedicado + ACLs. Isso funciona para qualquer
+    # nome de usuário escolhido durante a instalação.
+    arch-chroot /mnt groupadd -f android-sdk
+    arch-chroot /mnt usermod -aG android-sdk "$USERNAME_VALUE"
+
+    cat > /mnt/usr/local/sbin/wolf-fix-android-sdk-permissions <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SDK_ROOT=/opt/android-sdk
+SDK_GROUP=android-sdk
+
+getent group "$SDK_GROUP" >/dev/null 2>&1 || groupadd -f "$SDK_GROUP"
+[[ -d "$SDK_ROOT" ]] || exit 0
+
+# Acesso aos arquivos/diretórios já existentes.
+setfacl -R -m "g:${SDK_GROUP}:rwX" "$SDK_ROOT"
+
+# ACL padrão em todos os diretórios existentes para que novos componentes,
+# plataformas, licenças e caches continuem graváveis pelo grupo.
+find "$SDK_ROOT" -type d -exec setfacl -m "d:g:${SDK_GROUP}:rwx" {} +
+EOF
+    chmod 755 /mnt/usr/local/sbin/wolf-fix-android-sdk-permissions
+
+    mkdir -p /mnt/etc/pacman.d/hooks
+    cat > /mnt/etc/pacman.d/hooks/wolf-android-sdk-permissions.hook <<'EOF'
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = android-sdk
+Target = android-sdk-build-tools
+Target = android-sdk-platform-tools
+Target = android-platform
+
+[Action]
+Description = Wolf Linux: reaplicando permissoes compartilhadas do Android SDK...
+When = PostTransaction
+Exec = /usr/local/sbin/wolf-fix-android-sdk-permissions
+EOF
+
+    arch-chroot /mnt /usr/local/sbin/wolf-fix-android-sdk-permissions
+    ok "Android SDK configurado para o grupo android-sdk com ACL persistente."
 
     info "Instalando Flutter SDK stable em /opt/flutter..."
 
@@ -2096,9 +2177,30 @@ install_flutter_sdk() {
 # Wolf Linux - Android / Flutter
 export ANDROID_HOME=/opt/android-sdk
 export ANDROID_SDK_ROOT=/opt/android-sdk
+export CHROME_EXECUTABLE=/usr/bin/google-chrome-stable
 export PATH="/opt/flutter/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/cmdline-tools/latest/bin:$PATH"
 EOF
     chmod 644 /mnt/etc/profile.d/wolf-development.sh
+
+    # Flutter no Linux procura por `google-chrome`. O pacote google-chrome
+    # do Arch/AUR fornece `google-chrome-stable`, então expomos um alias
+    # global sem tocar em arquivos pertencentes ao pacote.
+    mkdir -p /mnt/usr/local/bin
+    if [[ -x /mnt/usr/bin/google-chrome-stable ]]; then
+        ln -sfn /usr/bin/google-chrome-stable /mnt/usr/local/bin/google-chrome
+        ok "Compatibilidade Flutter Web: google-chrome -> google-chrome-stable."
+    else
+        warn "google-chrome-stable não encontrado; Flutter Web poderá reclamar do Chrome."
+    fi
+
+    # O metapacote android-sdk não instala uma SDK Platform. Sem ao menos
+    # uma plataforma, Flutter encontra /opt/android-sdk mas considera o SDK
+    # inválido. `android-platform` deve ter criado platforms/android-XX.
+    if compgen -G '/mnt/opt/android-sdk/platforms/android-*' >/dev/null; then
+        ok "Android SDK Platform encontrada em /opt/android-sdk/platforms."
+    else
+        die "Nenhuma Android SDK Platform encontrada. Verifique o pacote android-platform."
+    fi
 
     # Primeira execução baixa o Dart SDK/cache necessário. Fazemos isso já
     # como o usuário que será dono do SDK para evitar arquivos root-owned.
@@ -2122,6 +2224,7 @@ set -u
 
 export ANDROID_HOME=/opt/android-sdk
 export ANDROID_SDK_ROOT=/opt/android-sdk
+export CHROME_EXECUTABLE=/usr/bin/google-chrome-stable
 export PATH="/opt/flutter/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/cmdline-tools/latest/bin:$PATH"
 
 echo "============================================================"
@@ -2136,13 +2239,95 @@ else
     echo "[AVISO] /dev/kvm não está disponível."
 fi
 echo
+echo "Android SDK Platforms:"
+if compgen -G '/opt/android-sdk/platforms/android-*' >/dev/null; then
+    find /opt/android-sdk/platforms -mindepth 1 -maxdepth 1 -type d -printf '  %f\n' | sort
+else
+    echo "  [ERRO] nenhuma plataforma Android instalada."
+fi
+echo
+echo "Android Command-line Tools:"
+if [[ -f /opt/android-sdk/cmdline-tools/latest/source.properties ]]; then
+    grep '^Pkg.Revision' /opt/android-sdk/cmdline-tools/latest/source.properties || true
+else
+    echo "  [ERRO] cmdline-tools/latest ausente."
+fi
+echo
+echo "ADB:"
+mapfile -t adb_bins < <(type -aP adb 2>/dev/null | awk '!seen[$0]++')
+if (( ${#adb_bins[@]} == 1 )); then
+    echo "  [OK] ${adb_bins[0]}"
+elif (( ${#adb_bins[@]} == 0 )); then
+    echo "  [ERRO] adb não encontrado."
+else
+    printf '  [AVISO] múltiplos adb no PATH:\n'
+    printf '    %s\n' "${adb_bins[@]}"
+fi
+echo
+echo "Chrome para Flutter Web:"
+if command -v google-chrome >/dev/null 2>&1; then
+    echo "  $(command -v google-chrome)"
+else
+    echo "  [ERRO] google-chrome não encontrado."
+fi
+echo
+echo "Permissões do Android SDK:"
+if id -nG "$USER" | tr ' ' '\n' | grep -Fxq android-sdk; then
+    echo "  [OK] usuário pertence ao grupo android-sdk."
+else
+    echo "  [AVISO] sessão ainda não possui o grupo android-sdk; faça logout/login."
+fi
+if [[ -w /opt/android-sdk ]]; then
+    echo "  [OK] /opt/android-sdk gravável sem sudo."
+else
+    echo "  [ERRO] /opt/android-sdk não está gravável nesta sessão."
+fi
+echo
 echo "Flutter:"
 flutter doctor -v
 echo
 echo "Para revisar/aceitar as licenças Android:"
-echo "  flutter doctor --android-licenses"
+echo "  wolf-android-licenses"
 EOF
     chmod 755 /mnt/usr/local/bin/wolf-flutter-doctor
+
+    cat > /mnt/usr/local/bin/wolf-android-licenses <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+export ANDROID_HOME=/opt/android-sdk
+export ANDROID_SDK_ROOT=/opt/android-sdk
+export PATH="/opt/flutter/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/cmdline-tools/latest/bin:$PATH"
+
+if (( EUID == 0 )); then
+    echo "[ERRO] Não execute as licenças Android com sudo/root." >&2
+    echo "       O Wolf Linux configura /opt/android-sdk para o grupo android-sdk." >&2
+    exit 1
+fi
+
+if ! id -nG "$USER" | tr ' ' '\n' | grep -Fxq android-sdk; then
+    echo "[ERRO] Sua sessão ainda não possui o grupo android-sdk." >&2
+    echo "       Faça logout/login e tente novamente." >&2
+    exit 1
+fi
+
+if [[ ! -w /opt/android-sdk ]]; then
+    echo "[ERRO] /opt/android-sdk não está gravável nesta sessão." >&2
+    echo "       Rode: sudo /usr/local/sbin/wolf-fix-android-sdk-permissions" >&2
+    exit 1
+fi
+
+echo "============================================================"
+echo "          WOLF LINUX - LICENÇAS ANDROID SDK"
+echo "============================================================"
+echo
+echo "As licenças serão apresentadas pelo próprio Flutter."
+echo "O SDK Android permanece root-owned, com escrita concedida ao grupo android-sdk."
+echo
+
+exec /opt/flutter/bin/flutter doctor --android-licenses
+EOF
+    chmod 755 /mnt/usr/local/bin/wolf-android-licenses
 
     ok "Flutter stable instalado em /opt/flutter."
 }
@@ -2290,6 +2475,7 @@ if [[ -z "\${DISPLAY:-}" &&
 
     export ANDROID_HOME=/opt/android-sdk
     export ANDROID_SDK_ROOT=/opt/android-sdk
+    export CHROME_EXECUTABLE=/usr/bin/google-chrome-stable
     export PATH="/opt/flutter/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/cmdline-tools/latest/bin:\$PATH"
 
     if [[ -t 1 && "\${WOLF_FASTFETCH:-1}" != "0" ]] &&
@@ -2357,6 +2543,7 @@ source "$p10k_theme"
 # Flutter / Android
 export ANDROID_HOME=/opt/android-sdk
 export ANDROID_SDK_ROOT=/opt/android-sdk
+export CHROME_EXECUTABLE=/usr/bin/google-chrome-stable
 export PATH="/opt/flutter/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/cmdline-tools/latest/bin:\$PATH"
 
 [[ -f ~/.p10k.zsh ]] && source ~/.p10k.zsh
@@ -3210,7 +3397,7 @@ install_desktop_productivity_extras() {
 #!/usr/bin/env bash
 set -u
 
-MARKER="$HOME/.config/wolf-linux/default-apps-v4.done"
+MARKER="$HOME/.config/wolf-linux/default-apps-v5.done"
 mkdir -p "$(dirname "$MARKER")"
 
 [[ -f "$MARKER" ]] && exit 0
@@ -3294,6 +3481,18 @@ case "$DESKTOP" in
             )
         fi
 
+        # Xarchiver como gerenciador de arquivos compactados.
+        if [[ -r /usr/share/applications/xarchiver.desktop ]]; then
+            while IFS= read -r mime; do
+                [[ -n "$mime" ]] || continue
+                set_default xarchiver.desktop "$mime"
+            done < <(
+                sed -n 's/^MimeType=//p' /usr/share/applications/xarchiver.desktop \
+                    | tr ';' '\n' \
+                    | sed '/^$/d'
+            )
+        fi
+
         # Cinnamon possui uma preferência própria para a calculadora
         # (usada inclusive pela tecla Calculator de alguns teclados).
         if gsettings list-schemas 2>/dev/null \
@@ -3314,8 +3513,8 @@ case "$DESKTOP" in
         ;;
 esac
 
-# SMPlayer para vídeo.
-set_default smplayer.desktop \
+# VLC para vídeo.
+set_default vlc.desktop \
     video/mp4 \
     video/x-matroska \
     video/webm \
@@ -3346,12 +3545,15 @@ set_default audacious.desktop \
 
 # Também aproveita todos os MIME types de áudio/vídeo anunciados
 # pelos próprios .desktop, para acompanhar atualizações futuras.
-if [[ -r /usr/share/applications/smplayer.desktop ]]; then
+if [[ -r /usr/share/applications/vlc.desktop ]]; then
     while IFS= read -r mime; do
-        [[ "$mime" == video/* ]] || continue
-        xdg-mime default smplayer.desktop "$mime" >/dev/null 2>&1 || true
+        case "$mime" in
+            video/*|application/x-matroska)
+                set_default vlc.desktop "$mime"
+                ;;
+        esac
     done < <(
-        sed -n 's/^MimeType=//p' /usr/share/applications/smplayer.desktop \
+        sed -n 's/^MimeType=//p' /usr/share/applications/vlc.desktop \
             | tr ';' '\n' \
             | sed '/^$/d'
     )
@@ -3467,7 +3669,7 @@ EOF
 [Desktop Entry]
 Type=Application
 Name=Wolf Linux - Aplicativos padrão
-Comment=Configura SMPlayer, Audacious e preferências de miniaturas
+Comment=Configura VLC, Audacious e preferências de miniaturas
 Exec=/usr/local/bin/wolf-apply-default-apps.sh
 Hidden=false
 NoDisplay=true
@@ -3478,6 +3680,438 @@ EOF
     # Integrações específicas do Cinnamon / Nemo.
     # --------------------------------------------------------
     if [[ "$DESKTOP" == "cinnamon" ]]; then
+        # ----------------------------------------------------
+        # Wolf Linux usa Cinnamon somente em X11.
+        #
+        # A sessão Wayland é removida do SDDM para evitar seleção acidental
+        # e para manter o perfil validado do Wolf Linux consistente:
+        # - perfil flat real via libinput/xinput;
+        # - Flameshot previsível;
+        # - drag-and-drop do Xarchiver;
+        # - comportamento mais estável no conjunto Cinnamon/NVIDIA atual.
+        #
+        # Um hook do pacman reaplica a política após upgrades do Cinnamon,
+        # pois o pacote pode recriar os arquivos .desktop de Wayland.
+        # ----------------------------------------------------
+        install -d /mnt/usr/local/sbin /mnt/etc/pacman.d/hooks
+
+        cat > /mnt/usr/local/sbin/wolf-disable-cinnamon-wayland <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+shopt -s nullglob
+
+for entry in /usr/share/wayland-sessions/cinnamon*.desktop; do
+    rm -f -- "$entry"
+done
+EOF
+        chmod 755 /mnt/usr/local/sbin/wolf-disable-cinnamon-wayland
+
+        cat > /mnt/etc/pacman.d/hooks/wolf-cinnamon-x11-only.hook <<'EOF'
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = cinnamon
+
+[Action]
+Description = Wolf Linux: mantendo Cinnamon somente em X11...
+When = PostTransaction
+Exec = /usr/local/sbin/wolf-disable-cinnamon-wayland
+EOF
+
+        arch-chroot /mnt /usr/local/sbin/wolf-disable-cinnamon-wayland
+
+        arch-chroot /mnt install -d -o sddm -g sddm /var/lib/sddm
+
+        cat > /mnt/var/lib/sddm/state.conf <<EOF
+[Last]
+Session=cinnamon.desktop
+User=$USERNAME_VALUE
+EOF
+
+        arch-chroot /mnt chown sddm:sddm /var/lib/sddm/state.conf
+
+        # Portal do Cinnamon: XApp primeiro, GTK como fallback e
+        # GNOME Keyring explicitamente como Secret provider.
+        mkdir -p /mnt/etc/xdg/xdg-desktop-portal
+
+        cat > /mnt/etc/xdg/xdg-desktop-portal/x-cinnamon-portals.conf <<'EOF'
+[preferred]
+default=xapp;gtk;
+org.freedesktop.impl.portal.Settings=xapp;gtk;
+org.freedesktop.impl.portal.Secret=gnome-keyring;
+EOF
+
+        # Integração PAM do GNOME Keyring. O SDDM do Arch já fornece estas
+        # linhas atualmente; aceitamos tanto a forma nativa com prefixo '-'
+        # quanto a forma sem prefixo. Só adicionamos fallback se realmente
+        # estiverem ausentes, evitando as duplicatas da versão 1.0.14.
+        if [[ -f /mnt/etc/pam.d/sddm ]]; then
+            if ! grep -Eq '^-?auth[[:space:]]+optional[[:space:]]+pam_gnome_keyring\.so([[:space:]]|$)' /mnt/etc/pam.d/sddm; then
+                printf '\n-auth optional pam_gnome_keyring.so\n' \
+                    >> /mnt/etc/pam.d/sddm
+            fi
+
+            if ! grep -Eq '^-?session[[:space:]]+optional[[:space:]]+pam_gnome_keyring\.so[[:space:]]+auto_start([[:space:]]|$)' /mnt/etc/pam.d/sddm; then
+                printf '%s\n' '-session optional pam_gnome_keyring.so auto_start' \
+                    >> /mnt/etc/pam.d/sddm
+            fi
+        fi
+
+        if [[ -f /mnt/etc/pam.d/passwd ]] \
+           && ! grep -Eq '^-?password[[:space:]]+optional[[:space:]]+pam_gnome_keyring\.so([[:space:]]|$)' /mnt/etc/pam.d/passwd; then
+            printf '\npassword optional pam_gnome_keyring.so\n' \
+                >> /mnt/etc/pam.d/passwd
+        fi
+
+        # O pacote Arch do gnome-keyring normalmente inclui Cinnamon em seu
+        # autostart nativo. Se isso mudar em uma versão futura, instalamos um
+        # fallback global sem OnlyShowIn, evitando que Secret Service deixe de
+        # iniciar no Cinnamon. Não iniciamos socket/daemon manualmente.
+        rm -f /mnt/etc/xdg/autostart/wolf-gnome-keyring-secrets.desktop
+        KEYRING_AUTOSTART=/mnt/etc/xdg/autostart/gnome-keyring-secrets.desktop
+        if [[ -r "$KEYRING_AUTOSTART" ]] \
+           && ! grep -Eq '^OnlyShowIn=.*Cinnamon' "$KEYRING_AUTOSTART"; then
+            cp -f "$KEYRING_AUTOSTART" \
+                /mnt/etc/xdg/autostart/wolf-gnome-keyring-secrets.desktop
+            sed -i '/^OnlyShowIn=/d' \
+                /mnt/etc/xdg/autostart/wolf-gnome-keyring-secrets.desktop
+            warn "GNOME Keyring sem Cinnamon no OnlyShowIn; fallback Wolf instalado."
+        fi
+
+        # Xorg/libinput: mouse sem aceleração para a sessão X11.
+        mkdir -p /mnt/etc/X11/xorg.conf.d
+
+        cat > /mnt/etc/X11/xorg.conf.d/50-wolf-mouse-no-accel.conf <<'EOF'
+Section "InputClass"
+    Identifier "Wolf Linux - Mouse sem aceleracao"
+    MatchIsPointer "on"
+    MatchIsTouchpad "off"
+    MatchDriver "libinput"
+
+    Option "AccelProfile" "flat"
+    Option "AccelSpeed" "0"
+EndSection
+EOF
+
+        cat > /mnt/usr/local/bin/wolf-cinnamon-session-setup.sh <<'EOF'
+#!/usr/bin/env bash
+set -u
+
+DESKTOP="${XDG_CURRENT_DESKTOP:-${XDG_SESSION_DESKTOP:-}}"
+
+case "$DESKTOP" in
+    *X-Cinnamon*|*Cinnamon*) ;;
+    *) exit 0 ;;
+esac
+
+# ----------------------------------------------------------
+# Mouse
+# ----------------------------------------------------------
+gsettings set org.cinnamon.desktop.peripherals.mouse accel-profile 'flat' \
+    2>/dev/null || true
+gsettings set org.cinnamon.desktop.peripherals.mouse speed 0.0 \
+    2>/dev/null || true
+gsettings set org.nemo.preferences click-policy 'double' \
+    2>/dev/null || true
+
+if [[ "${XDG_SESSION_TYPE:-}" == "x11" ]] \
+   && command -v xinput >/dev/null 2>&1; then
+
+    while IFS= read -r id; do
+        [[ "$id" =~ ^[0-9]+$ ]] || continue
+
+        props="$(xinput list-props "$id" 2>/dev/null || true)"
+
+        # Não altera touchpads.
+        if grep -q 'libinput Tapping Enabled' <<<"$props"; then
+            continue
+        fi
+
+        profile_line="$(
+            grep -m1 'libinput Accel Profile Enabled (' <<<"$props" \
+                || true
+        )"
+
+        if [[ -n "$profile_line" ]]; then
+            values="${profile_line##*:}"
+            values="$(tr -d '[:space:]' <<<"$values")"
+
+            case "$values" in
+                *,*,*)
+                    xinput set-prop \
+                        "$id" \
+                        'libinput Accel Profile Enabled' \
+                        0 1 0 \
+                        >/dev/null 2>&1 || true
+                    ;;
+                *,*)
+                    xinput set-prop \
+                        "$id" \
+                        'libinput Accel Profile Enabled' \
+                        0 1 \
+                        >/dev/null 2>&1 || true
+                    ;;
+            esac
+        fi
+
+        if grep -q 'libinput Accel Speed (' <<<"$props"; then
+            xinput set-prop "$id" 'libinput Accel Speed' 0 \
+                >/dev/null 2>&1 || true
+        fi
+    done < <(xinput list --id-only 2>/dev/null || true)
+fi
+
+# ----------------------------------------------------------
+# Dark mode / portal
+# ----------------------------------------------------------
+if gsettings list-schemas 2>/dev/null | grep -Fxq 'org.x.apps.portal'; then
+    gsettings set org.x.apps.portal color-scheme 'prefer-dark' \
+        2>/dev/null || true
+fi
+
+if gsettings list-schemas 2>/dev/null \
+    | grep -Fxq 'org.gnome.desktop.interface'; then
+
+    gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark' \
+        2>/dev/null || true
+    gsettings set org.gnome.desktop.interface gtk-theme 'Adwaita-dark' \
+        2>/dev/null || true
+fi
+
+if gsettings list-schemas 2>/dev/null \
+    | grep -Fxq 'org.cinnamon.desktop.interface'; then
+
+    gsettings set org.cinnamon.desktop.interface gtk-theme 'Adwaita-dark' \
+        2>/dev/null || true
+fi
+
+# ----------------------------------------------------------
+# D-Bus / GNOME Keyring
+# ----------------------------------------------------------
+if command -v dbus-update-activation-environment >/dev/null 2>&1; then
+    dbus-update-activation-environment --systemd \
+        DISPLAY \
+        XAUTHORITY \
+        WAYLAND_DISPLAY \
+        XDG_CURRENT_DESKTOP \
+        XDG_SESSION_TYPE \
+        >/dev/null 2>&1 || true
+fi
+
+# GNOME Keyring é deixado para o fluxo nativo do Arch/Cinnamon:
+# SDDM/PAM prepara/desbloqueia o keyring e o autostart do pacote inicia
+# o componente secrets. Evitamos uma segunda inicialização manual aqui.
+
+# VS Code: usa Secret Service/libsecret explicitamente.
+mkdir -p "$HOME/.vscode"
+
+python - "$HOME/.vscode/argv.json" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+value = '"password-store": "gnome-libsecret"'
+
+if not path.exists():
+    path.write_text(
+        "{\n  " + value + "\n}\n",
+        encoding="utf-8",
+    )
+    raise SystemExit(0)
+
+text = path.read_text(encoding="utf-8")
+
+# argv.json é JSONC (aceita comentários), então não usamos json.loads aqui.
+# Se a chave já existir, apenas trocamos seu valor e preservamos todo o resto.
+pattern = re.compile(r'"password-store"\s*:\s*"[^"]*"')
+if pattern.search(text):
+    text = pattern.sub(value, text, count=1)
+else:
+    opening = text.find("{")
+    closing = text.rfind("}")
+
+    if opening == -1 or closing <= opening:
+        text = "{\n  " + value + "\n}\n"
+    else:
+        body = text[opening + 1:closing]
+        has_other_property = bool(re.search(r'"[^"]+"\s*:', body))
+        suffix = "," if has_other_property else ""
+        insertion = "\n  " + value + suffix + "\n"
+        text = text[:opening + 1] + insertion + text[opening + 1:]
+
+path.write_text(text, encoding="utf-8")
+PY
+
+# ----------------------------------------------------------
+# Flameshot: sem tray; executado sob demanda pela tecla Print.
+# ----------------------------------------------------------
+mkdir -p "$HOME/.config/flameshot"
+
+python - "$HOME/.config/flameshot/flameshot.ini" <<'PY'
+from configparser import ConfigParser
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+
+def new_parser():
+    parser = ConfigParser(interpolation=None)
+    # Flameshot diferencia maiúsculas/minúsculas nos nomes das opções.
+    # O ConfigParser padrão faria contrastOpacity virar contrastopacity.
+    parser.optionxform = str
+    return parser
+
+cfg = new_parser()
+
+if path.exists():
+    try:
+        cfg.read(path, encoding="utf-8")
+    except Exception:
+        cfg = new_parser()
+
+if not cfg.has_section("General"):
+    cfg.add_section("General")
+
+# Limpa resíduos de versões antigas do Wolf Linux que gravaram as
+# opções do Flameshot em minúsculas.
+legacy_lowercase = {
+    "contrastopacity",
+    "autocloseidledaemon",
+    "disabledtrayicon",
+    "showstartuplaunchmessage",
+}
+for key in list(cfg["General"].keys()):
+    if key in legacy_lowercase:
+        cfg.remove_option("General", key)
+
+if not cfg.has_option("General", "contrastOpacity"):
+    cfg.set("General", "contrastOpacity", "190")
+cfg.set("General", "disabledTrayIcon", "true")
+cfg.set("General", "autoCloseIdleDaemon", "true")
+cfg.set("General", "showStartupLaunchMessage", "false")
+
+with path.open("w", encoding="utf-8") as f:
+    cfg.write(f, space_around_delimiters=False)
+PY
+
+# Remove daemon antigo/tray da sessão se existir.
+pkill -x flameshot >/dev/null 2>&1 || true
+
+# Limpa atalhos de screenshot do Cinnamon para liberar Print.
+if gsettings list-schemas 2>/dev/null \
+    | grep -Fxq 'org.cinnamon.desktop.keybindings.media-keys'; then
+
+    for key in \
+        screenshot \
+        screenshot-clip \
+        area-screenshot \
+        area-screenshot-clip \
+        window-screenshot \
+        window-screenshot-clip
+    do
+        if gsettings list-keys \
+            org.cinnamon.desktop.keybindings.media-keys \
+            2>/dev/null \
+            | grep -Fxq "$key"; then
+
+            gsettings set \
+                org.cinnamon.desktop.keybindings.media-keys \
+                "$key" \
+                "[]" \
+                2>/dev/null || true
+        fi
+    done
+fi
+
+CUSTOM_SCHEMA='org.cinnamon.desktop.keybindings.custom-keybinding:/org/cinnamon/desktop/keybindings/custom-keybindings/wolf-flameshot/'
+
+gsettings set "$CUSTOM_SCHEMA" name 'Flameshot' 2>/dev/null || true
+gsettings set "$CUSTOM_SCHEMA" command '/usr/bin/flameshot gui' \
+    2>/dev/null || true
+gsettings set "$CUSTOM_SCHEMA" binding "['Print']" \
+    2>/dev/null || true
+
+python - <<'PY'
+import ast
+import subprocess
+
+schema = "org.cinnamon.desktop.keybindings"
+raw = subprocess.run(
+    ["gsettings", "get", schema, "custom-list"],
+    capture_output=True,
+    text=True,
+).stdout.strip()
+
+if raw.startswith("@as "):
+    raw = raw[4:]
+
+try:
+    items = ast.literal_eval(raw)
+except Exception:
+    items = []
+
+if not isinstance(items, list):
+    items = []
+
+if "wolf-flameshot" not in items:
+    items.append("wolf-flameshot")
+
+value = "[" + ", ".join(repr(x) for x in items) + "]"
+subprocess.run(["gsettings", "set", schema, "custom-list", value])
+PY
+
+# ----------------------------------------------------------
+# Favoritos do Nemo
+# ----------------------------------------------------------
+xdg-user-dirs-update >/dev/null 2>&1 || true
+mkdir -p "$HOME/.config/gtk-3.0"
+
+BOOKMARKS="$HOME/.config/gtk-3.0/bookmarks"
+touch "$BOOKMARKS"
+
+add_bookmark() {
+    local path="$1"
+    local label="$2"
+    local line
+
+    [[ -n "$path" && -d "$path" ]] || return 0
+
+    line="file://$path $label"
+
+    grep -Fxq "$line" "$BOOKMARKS" 2>/dev/null \
+        || printf '%s\n' "$line" >> "$BOOKMARKS"
+}
+
+add_bookmark "$(xdg-user-dir DOCUMENTS 2>/dev/null || true)" "Documentos"
+add_bookmark "$(xdg-user-dir DOWNLOAD 2>/dev/null || true)" "Downloads"
+add_bookmark "$(xdg-user-dir MUSIC 2>/dev/null || true)" "Música"
+add_bookmark "$(xdg-user-dir PICTURES 2>/dev/null || true)" "Imagens"
+add_bookmark "$(xdg-user-dir VIDEOS 2>/dev/null || true)" "Vídeos"
+
+# Reinicia portais depois de publicar prefer-dark e Secret provider.
+systemctl --user restart \
+    xdg-desktop-portal-xapp.service \
+    xdg-desktop-portal-gtk.service \
+    xdg-desktop-portal.service \
+    >/dev/null 2>&1 || true
+EOF
+
+        chmod 755 /mnt/usr/local/bin/wolf-cinnamon-session-setup.sh
+
+        cat > /mnt/etc/xdg/autostart/wolf-cinnamon-session-setup.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Wolf Linux - Cinnamon Session Setup
+Comment=Cinnamon X11, mouse flat, dark mode, keyring, Flameshot e integrações do Wolf Linux
+Exec=/usr/local/bin/wolf-cinnamon-session-setup.sh
+OnlyShowIn=X-Cinnamon;
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+
         mkdir -p /mnt/usr/share/nemo-python/extensions
 
         # ----------------------------------------------------
