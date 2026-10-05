@@ -974,3 +974,57 @@ XCursor e nos fallbacks `~/.icons/default` e
 - KDE Plasma: KWrite (pacote `kate`) definido como editor padrão e KCalc adicionado.
 - KDE Plasma: o launcher fixado do Discover é removido do painel no primeiro login.
 - O fundo preto do Syslinux em alguns boots Legacy é aceito; o menu continua funcional.
+
+
+## Notas da versão 1.0.9
+
+### Cinnamon
+
+- Corrigido o desktop ID do **Xed**: no Arch atual ele é
+  `org.x.editor.desktop`, não `xed.desktop`.
+- O Xed é aplicado aos MIME types de texto/código declarados pelo próprio
+  aplicativo, além da lista básica do Wolf Linux.
+- Adicionado **Xviewer** como visualizador de imagens padrão.
+- `org.cinnamon.desktop.default-applications.calculator exec` passa a ser
+  `galculator`.
+- `gnome-keyring` e `libsecret` passam a fazer parte explicitamente do perfil
+  Cinnamon.
+
+### Pacotes pessoais
+
+- `anydesk-bin` foi removido da instalação padrão do Wolf Linux.
+
+
+## Notas da versão 1.0.10
+
+### Integração Nemo / Cinnamon
+
+O perfil Cinnamon passa a instalar `nemo-python`, `udiskie` e
+`gnome-disk-utility`.
+
+O Nemo recebe duas integrações próprias do Wolf Linux:
+
+- **Abrir pasta no VS Code**
+- **Formatar mídia removível…**
+
+A ação de formatação só aparece na raiz de um filesystem em dispositivo
+USB/MMC/removível e abre o diálogo seguro do GNOME Disks.
+
+O `udiskie` também é iniciado no Cinnamon em modo `--smart-tray`,
+sem competir com o automount do Nemo/GVfs.
+
+
+## Notas da versão 1.0.11
+
+### Cinnamon e mídias removíveis
+
+O `udiskie` foi removido do perfil Cinnamon. O Cinnamon já possui seu próprio
+applet para desmontagem/ejeção de mídias removíveis, então manter um segundo
+ícone na bandeja seria redundante.
+
+As integrações do Nemo permanecem:
+
+- **Abrir pasta no VS Code**
+- **Formatar mídia removível…** via GNOME Disks
+
+O MATE continua usando `udiskie`, pois nele essa integração continua sendo útil.

@@ -3210,7 +3210,7 @@ install_desktop_productivity_extras() {
 #!/usr/bin/env bash
 set -u
 
-MARKER="$HOME/.config/wolf-linux/default-apps-v3.done"
+MARKER="$HOME/.config/wolf-linux/default-apps-v4.done"
 mkdir -p "$(dirname "$MARKER")"
 
 [[ -f "$MARKER" ]] && exit 0
@@ -3222,6 +3222,11 @@ set_default() {
 
     for mime in "$@"; do
         xdg-mime default "$desktop" "$mime" >/dev/null 2>&1 || true
+
+        # Cinnamon/GIO consulta GAppInfo diretamente em alguns pontos.
+        if command -v gio >/dev/null 2>&1; then
+            gio mime "$mime" "$desktop" >/dev/null 2>&1 || true
+        fi
     done
 }
 
@@ -3234,7 +3239,7 @@ case "$DESKTOP" in
         TEXT_EDITOR_DESKTOP="pluma.desktop"
         ;;
     *X-Cinnamon*|*Cinnamon*)
-        TEXT_EDITOR_DESKTOP="xed.desktop"
+        TEXT_EDITOR_DESKTOP="org.x.editor.desktop"
         ;;
     *KDE*|*Plasma*)
         TEXT_EDITOR_DESKTOP="org.kde.kwrite.desktop"
@@ -3258,6 +3263,56 @@ if [[ -n "$TEXT_EDITOR_DESKTOP" ]] \
         text/x-java \
         text/x-cmake
 fi
+
+# Aproveita também todos os MIME types anunciados pelo próprio editor.
+# Isso cobre extensões de código-fonte adicionais sem depender de uma lista fixa.
+if [[ -n "$TEXT_EDITOR_DESKTOP" ]] \
+   && [[ -r "/usr/share/applications/$TEXT_EDITOR_DESKTOP" ]]; then
+
+    while IFS= read -r mime; do
+        [[ -n "$mime" ]] || continue
+        set_default "$TEXT_EDITOR_DESKTOP" "$mime"
+    done < <(
+        sed -n 's/^MimeType=//p' "/usr/share/applications/$TEXT_EDITOR_DESKTOP" \
+            | tr ';' '\n' \
+            | sed '/^$/d'
+    )
+fi
+
+# Integrações próprias do Cinnamon.
+case "$DESKTOP" in
+    *X-Cinnamon*|*Cinnamon*)
+        # Xviewer é o visualizador X-Apps equivalente ao Eye of MATE.
+        if [[ -r /usr/share/applications/xviewer.desktop ]]; then
+            while IFS= read -r mime; do
+                [[ "$mime" == image/* ]] || continue
+                set_default xviewer.desktop "$mime"
+            done < <(
+                sed -n 's/^MimeType=//p' /usr/share/applications/xviewer.desktop \
+                    | tr ';' '\n' \
+                    | sed '/^$/d'
+            )
+        fi
+
+        # Cinnamon possui uma preferência própria para a calculadora
+        # (usada inclusive pela tecla Calculator de alguns teclados).
+        if gsettings list-schemas 2>/dev/null \
+            | grep -Fxq 'org.cinnamon.desktop.default-applications.calculator'; then
+
+            if gsettings list-keys \
+                org.cinnamon.desktop.default-applications.calculator \
+                2>/dev/null \
+                | grep -Fxq 'exec'; then
+
+                gsettings set \
+                    org.cinnamon.desktop.default-applications.calculator \
+                    exec \
+                    'galculator' \
+                    2>/dev/null || true
+            fi
+        fi
+        ;;
+esac
 
 # SMPlayer para vídeo.
 set_default smplayer.desktop \
@@ -3418,6 +3473,317 @@ Hidden=false
 NoDisplay=true
 X-GNOME-Autostart-enabled=true
 EOF
+
+    # --------------------------------------------------------
+    # Integrações específicas do Cinnamon / Nemo.
+    # --------------------------------------------------------
+    if [[ "$DESKTOP" == "cinnamon" ]]; then
+        mkdir -p /mnt/usr/share/nemo-python/extensions
+
+        # ----------------------------------------------------
+        # Nemo: Abrir pasta no VS Code.
+        # nemo-python carrega extensões de:
+        # /usr/share/nemo-python/extensions
+        # ----------------------------------------------------
+        cat > /mnt/usr/share/nemo-python/extensions/wolf_vscode.py <<'PY'
+import shutil
+import subprocess
+
+from gi.repository import Nemo, GObject
+
+
+class WolfVSCodeExtension(GObject.GObject, Nemo.MenuProvider):
+    def _code_available(self):
+        return shutil.which("code") is not None
+
+    def _open(self, file_info):
+        if not self._code_available():
+            return
+
+        location = file_info.get_location()
+        if location is None:
+            return
+
+        path = location.get_path()
+        if not path:
+            return
+
+        subprocess.Popen(
+            ["code", "--new-window", path],
+            cwd=path,
+            start_new_session=True,
+        )
+
+    def _selected_activate(self, _menu, file_info):
+        self._open(file_info)
+
+    def _background_activate(self, _menu, file_info):
+        self._open(file_info)
+
+    def get_file_items(self, window, files):
+        if not self._code_available() or len(files) != 1:
+            return
+
+        file_info = files[0]
+
+        if not file_info.is_directory():
+            return
+
+        if file_info.get_uri_scheme() != "file":
+            return
+
+        item = Nemo.MenuItem(
+            name="WolfLinux::VSCodeFolder",
+            label="Abrir pasta no VS Code",
+            tip="Abrir esta pasta em uma nova janela do Visual Studio Code",
+        )
+        item.connect("activate", self._selected_activate, file_info)
+        return [item]
+
+    def get_background_items(self, window, current_folder):
+        if not self._code_available():
+            return
+
+        if current_folder.get_uri_scheme() != "file":
+            return
+
+        item = Nemo.MenuItem(
+            name="WolfLinux::VSCodeCurrentFolder",
+            label="Abrir esta pasta no VS Code",
+            tip="Abrir a pasta atual em uma nova janela do Visual Studio Code",
+        )
+        item.connect("activate", self._background_activate, current_folder)
+        return [item]
+PY
+
+        # ----------------------------------------------------
+        # Helper seguro de formatação de mídias removíveis.
+        # ----------------------------------------------------
+        cat > /mnt/usr/local/bin/wolf-format-removable <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+usage() {
+    echo "Uso:"
+    echo "  wolf-format-removable --check CAMINHO"
+    echo "  wolf-format-removable --format CAMINHO"
+}
+
+resolve_device() {
+    local input="$1"
+    local real_path
+    local source
+    local target
+    local real_target
+    local parent=""
+    local disk=""
+    local rm_flag=""
+    local transport=""
+
+    real_path="$(readlink -f -- "$input" 2>/dev/null || true)"
+    [[ -n "$real_path" && -d "$real_path" ]] || return 1
+
+    source="$(
+        findmnt \
+            --noheadings \
+            --output SOURCE \
+            --target "$real_path" \
+            2>/dev/null \
+            | head -n1 \
+            | xargs
+    )"
+
+    target="$(
+        findmnt \
+            --noheadings \
+            --output TARGET \
+            --target "$real_path" \
+            2>/dev/null \
+            | head -n1 \
+            | xargs
+    )"
+
+    [[ -n "$source" && -n "$target" ]] || return 1
+
+    source="${source%%\\[*}"
+    [[ "$source" == /dev/* ]] || return 1
+
+    real_target="$(readlink -f -- "$target" 2>/dev/null || true)"
+    [[ "$real_path" == "$real_target" ]] || return 1
+
+    parent="$(
+        lsblk \
+            --noheadings \
+            --output PKNAME \
+            "$source" \
+            2>/dev/null \
+            | head -n1 \
+            | xargs
+    )"
+
+    if [[ -n "$parent" ]]; then
+        disk="/dev/$parent"
+    else
+        disk="$source"
+    fi
+
+    rm_flag="$(
+        lsblk \
+            --nodeps \
+            --noheadings \
+            --output RM \
+            "$disk" \
+            2>/dev/null \
+            | head -n1 \
+            | xargs
+    )"
+
+    transport="$(
+        lsblk \
+            --nodeps \
+            --noheadings \
+            --output TRAN \
+            "$disk" \
+            2>/dev/null \
+            | head -n1 \
+            | xargs
+    )"
+
+    case "$transport" in
+        usb|mmc)
+            ;;
+        *)
+            [[ "$rm_flag" == "1" ]] || return 1
+            ;;
+    esac
+
+    printf '%s\n' "$source"
+}
+
+[[ $# -eq 2 ]] || {
+    usage
+    exit 2
+}
+
+mode="$1"
+path="$2"
+device="$(resolve_device "$path")" || exit 1
+
+case "$mode" in
+    --check)
+        printf '%s\n' "$device"
+        ;;
+
+    --format)
+        command -v gnome-disks >/dev/null 2>&1 || {
+            echo "[ERRO] gnome-disks não encontrado." >&2
+            exit 1
+        }
+
+        exec gnome-disks \
+            --block-device "$device" \
+            --format-device
+        ;;
+
+    *)
+        usage
+        exit 2
+        ;;
+esac
+EOF
+
+        chmod 755 /mnt/usr/local/bin/wolf-format-removable
+
+        # ----------------------------------------------------
+        # Nemo: Formatar mídia removível...
+        # O item só aparece na raiz de um filesystem USB/MMC/removível.
+        # ----------------------------------------------------
+        cat > /mnt/usr/share/nemo-python/extensions/wolf_removable_media.py <<'PY'
+import os
+import subprocess
+
+from gi.repository import Nemo, GObject
+
+
+HELPER = "/usr/local/bin/wolf-format-removable"
+
+
+class WolfRemovableMediaExtension(GObject.GObject, Nemo.MenuProvider):
+    def _path(self, file_info):
+        if file_info is None:
+            return None
+
+        if file_info.get_uri_scheme() != "file":
+            return None
+
+        location = file_info.get_location()
+        if location is None:
+            return None
+
+        path = location.get_path()
+
+        if not path or not os.path.isdir(path):
+            return None
+
+        return path
+
+    def _is_removable_root(self, path):
+        if not path or not os.path.exists(HELPER):
+            return False
+
+        try:
+            result = subprocess.run(
+                [HELPER, "--check", path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=1.5,
+                check=False,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def _format(self, _menu, path):
+        try:
+            subprocess.Popen(
+                [HELPER, "--format", path],
+                start_new_session=True,
+            )
+        except Exception:
+            pass
+
+    def _item(self, path):
+        item = Nemo.MenuItem(
+            name="WolfLinux::FormatRemovable",
+            label="Formatar mídia removível…",
+            tip="Abrir o diálogo seguro de formatação para esta mídia",
+        )
+        item.connect("activate", self._format, path)
+        return item
+
+    def get_file_items(self, window, files):
+        if len(files) != 1:
+            return
+
+        path = self._path(files[0])
+
+        if not self._is_removable_root(path):
+            return
+
+        return [self._item(path)]
+
+    def get_background_items(self, window, current_folder):
+        path = self._path(current_folder)
+
+        if not self._is_removable_root(path):
+            return
+
+        return [self._item(path)]
+PY
+
+        ok "Integrações Nemo configuradas: VS Code e formatação de mídias."
+        return 0
+    fi
 
     # --------------------------------------------------------
     # Integrações específicas do MATE.
