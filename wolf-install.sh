@@ -7,7 +7,7 @@ fi
 
 set -Eeuo pipefail
 
-WOLF_VERSION="1.0.21"
+WOLF_VERSION="1.0.22"
 DRY_RUN=0
 PLAN_ONLY=0
 RESET_STATE=0
@@ -3397,7 +3397,7 @@ install_desktop_productivity_extras() {
 #!/usr/bin/env bash
 set -u
 
-MARKER="$HOME/.config/wolf-linux/default-apps-v5.done"
+MARKER="$HOME/.config/wolf-linux/default-apps-v6.done"
 mkdir -p "$(dirname "$MARKER")"
 
 [[ -f "$MARKER" ]] && exit 0
@@ -3513,8 +3513,8 @@ case "$DESKTOP" in
         ;;
 esac
 
-# VLC para vídeo.
-set_default vlc.desktop \
+# MPC-QT para vídeo.
+set_default io.github.mpc_qt.mpc-qt.desktop \
     video/mp4 \
     video/x-matroska \
     video/webm \
@@ -3543,17 +3543,19 @@ set_default audacious.desktop \
     application/xspf+xml \
     application/vnd.apple.mpegurl
 
-# Também aproveita todos os MIME types de áudio/vídeo anunciados
-# pelos próprios .desktop, para acompanhar atualizações futuras.
-if [[ -r /usr/share/applications/vlc.desktop ]]; then
+# Também aproveita todos os MIME types de vídeo anunciados pelo MPC-QT,
+# mas deliberadamente ignora inode/directory. Alguns players anunciam
+# diretórios como entrada suportada e não devem substituir o gerenciador
+# de arquivos do desktop.
+if [[ -r /usr/share/applications/io.github.mpc_qt.mpc-qt.desktop ]]; then
     while IFS= read -r mime; do
         case "$mime" in
             video/*|application/x-matroska)
-                set_default vlc.desktop "$mime"
+                set_default io.github.mpc_qt.mpc-qt.desktop "$mime"
                 ;;
         esac
     done < <(
-        sed -n 's/^MimeType=//p' /usr/share/applications/vlc.desktop \
+        sed -n 's/^MimeType=//p' /usr/share/applications/io.github.mpc_qt.mpc-qt.desktop \
             | tr ';' '\n' \
             | sed '/^$/d'
     )
@@ -3588,6 +3590,55 @@ touch "$MARKER"
 EOF
 
     chmod 755 /mnt/usr/local/bin/wolf-apply-default-apps.sh
+
+    # --------------------------------------------------------
+    # Proteção do handler de diretórios.
+    #
+    # Alguns players (incluindo MPC-QT em determinados cenários) podem
+    # registrar inode/directory e acabar assumindo Pasta pessoal/Super+E.
+    # Esta política é reaplicada a cada login, sem marker, para manter o
+    # gerenciador de arquivos nativo de cada desktop como handler padrão.
+    # --------------------------------------------------------
+    cat > /mnt/usr/local/bin/wolf-protect-directory-handler <<'EOF'
+#!/usr/bin/env bash
+set -u
+
+DESKTOP="${XDG_CURRENT_DESKTOP:-${XDG_SESSION_DESKTOP:-}}"
+FILE_MANAGER_DESKTOP=""
+
+case "$DESKTOP" in
+    *X-Cinnamon*|*Cinnamon*)
+        FILE_MANAGER_DESKTOP="nemo.desktop"
+        ;;
+    *MATE*)
+        FILE_MANAGER_DESKTOP="caja.desktop"
+        ;;
+    *KDE*|*Plasma*)
+        FILE_MANAGER_DESKTOP="org.kde.dolphin.desktop"
+        ;;
+esac
+
+[[ -n "$FILE_MANAGER_DESKTOP" ]] || exit 0
+[[ -r "/usr/share/applications/$FILE_MANAGER_DESKTOP" ]] || exit 0
+
+xdg-mime default "$FILE_MANAGER_DESKTOP" inode/directory >/dev/null 2>&1 || true
+
+if command -v gio >/dev/null 2>&1; then
+    gio mime inode/directory "$FILE_MANAGER_DESKTOP" >/dev/null 2>&1 || true
+fi
+EOF
+    chmod 755 /mnt/usr/local/bin/wolf-protect-directory-handler
+
+    cat > /mnt/etc/xdg/autostart/wolf-protect-directory-handler.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Wolf Linux - Proteger gerenciador de arquivos
+Comment=Mantém pastas associadas ao gerenciador de arquivos nativo do desktop
+Exec=/usr/local/bin/wolf-protect-directory-handler
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
 
     cat > /mnt/usr/local/bin/wolf-plasma-panel-cleanup.sh <<'EOF'
 #!/usr/bin/env bash
@@ -3669,7 +3720,7 @@ EOF
 [Desktop Entry]
 Type=Application
 Name=Wolf Linux - Aplicativos padrão
-Comment=Configura VLC, Audacious e preferências de miniaturas
+Comment=Configura MPC-QT, Audacious e preferências de miniaturas
 Exec=/usr/local/bin/wolf-apply-default-apps.sh
 Hidden=false
 NoDisplay=true

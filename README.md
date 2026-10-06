@@ -1259,3 +1259,11 @@ Como a associação ao grupo é feita durante a instalação, ela já estará at
   - helper `wolf-android-licenses` sem sudo.
 
 Isso permite atualizar a máquina de desenvolvimento atual sem reinstalação.
+
+## 1.0.22 — MPC-QT e proteção permanente de diretórios
+
+- Retorna `mpc-qt` como player de vídeo padrão e remove `vlc`/`vlc-plugins-all` do perfil multimídia.
+- Usa `io.github.mpc_qt.mpc-qt.desktop` apenas para MIME types de vídeo; `inode/directory` é deliberadamente ignorado.
+- Adiciona `/usr/local/bin/wolf-protect-directory-handler`, executado a cada login via XDG Autostart.
+- Mantém `inode/directory` associado ao gerenciador de arquivos nativo: Nemo no Cinnamon, Caja no MATE e Dolphin no KDE Plasma.
+- Adiciona `wolf-fix-directory-handler-1.0.22.sh` para aplicar a mesma proteção a instalações existentes sem reinstalação.

@@ -164,6 +164,42 @@ if [[ -f "$INSTALLER" && -f "$PACKAGES" ]]; then
     fi
 fi
 
+# Player de vídeo e associação de diretórios devem permanecer protegidos.
+if [[ -f "$INSTALLER" && -f "$PACKAGES" ]]; then
+    echo
+    echo ">> Validando MPC-QT e proteção do gerenciador de arquivos..."
+    MIME_FAIL=0
+
+    MULTIMEDIA_BLOCK="$(
+        sed -n '/^MULTIMEDIA_PACKAGES=(/,/^)/p' "$PACKAGES" 2>/dev/null || true
+    )"
+
+    grep -Eq '^[[:space:]]*mpc-qt([[:space:]]|$)' <<<"$MULTIMEDIA_BLOCK" \
+        || MIME_FAIL=1
+
+    if grep -Eq '^[[:space:]]*vlc(-plugins-all)?([[:space:]]|$)' <<<"$MULTIMEDIA_BLOCK"; then
+        echo "[ERRO] VLC voltou ao perfil multimídia; o padrão validado é MPC-QT."
+        MIME_FAIL=1
+    fi
+
+    grep -Fq 'io.github.mpc_qt.mpc-qt.desktop' "$INSTALLER" \
+        || MIME_FAIL=1
+    grep -Fq 'wolf-protect-directory-handler' "$INSTALLER" \
+        || MIME_FAIL=1
+    grep -Fq 'inode/directory' "$INSTALLER" \
+        || MIME_FAIL=1
+    for desktop in nemo.desktop caja.desktop org.kde.dolphin.desktop; do
+        grep -Fq "$desktop" "$INSTALLER" || MIME_FAIL=1
+    done
+
+    if (( MIME_FAIL == 0 )); then
+        echo "[OK] MPC-QT + inode/directory protegido em Cinnamon/MATE/KDE"
+    else
+        echo "[ERRO] player padrão ou proteção de diretórios perdeu configuração."
+        FAIL=1
+    fi
+fi
+
 # Toolchain Flutter/Android/Web deve ser igual nos três desktops.
 if [[ -f "$INSTALLER" && -f "$PACKAGES" ]]; then
     echo
