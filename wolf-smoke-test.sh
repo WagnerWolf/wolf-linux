@@ -42,6 +42,16 @@ done < <(
         -type f -name '*.sh' -print0 2>/dev/null
 )
 
+MULTIMONITOR_HELPER="$PROJECT/tools/wolf-multimonitor-setup-0.3.sh"
+if [[ -f "$MULTIMONITOR_HELPER" ]]; then
+    check_shell "$MULTIMONITOR_HELPER"
+fi
+
+MULTIMONITOR_INSTALLER="$PROJECT/tools/wolf-install-multimonitor-auto-0.3.sh"
+if [[ -f "$MULTIMONITOR_INSTALLER" ]]; then
+    check_shell "$MULTIMONITOR_INSTALLER"
+fi
+
 if [[ -d "$PROJECT/iso-profile" ]]; then
     echo
     echo ">> Validando perfil da ISO Wolf Linux..."
@@ -145,6 +155,13 @@ if [[ -f "$INSTALLER" && -f "$PACKAGES" ]]; then
     grep -Fq '"password-store": "gnome-libsecret"' "$INSTALLER" \
         || CINNAMON_FAIL=1
 
+    grep -Fq 'CinnVIIStarkMenu@NikoKrause' "$INSTALLER" \
+        || CINNAMON_FAIL=1
+    grep -Fq 'cinnamon-spices.linuxmint.com/files/applets/CinnVIIStarkMenu%40NikoKrause.zip' "$INSTALLER" \
+        || CINNAMON_FAIL=1
+    grep -Fq 'cinnvii-default-v1.done' "$INSTALLER" \
+        || CINNAMON_FAIL=1
+
     grep -Fq 'parser.optionxform = str' "$INSTALLER" \
         || CINNAMON_FAIL=1
     for key in \
@@ -157,9 +174,48 @@ if [[ -f "$INSTALLER" && -f "$PACKAGES" ]]; then
     done
 
     if (( CINNAMON_FAIL == 0 )); then
-        echo "[OK] Cinnamon X11-only + Flameshot + Keyring/Seahorse + VS Code"
+        echo "[OK] Cinnamon X11-only + CinnVII + Flameshot + Keyring/Seahorse + VS Code"
     else
         echo "[ERRO] perfil Cinnamon perdeu um ou mais fixes consolidados."
+        FAIL=1
+    fi
+fi
+
+# Wolf MultiMonitor agora é integrado ao perfil Cinnamon. O helper também
+# acompanha o DevKit para diagnóstico/rollback e deve garantir hotplug sem
+# apagar painéis de telas temporariamente ausentes.
+if [[ -f "$MULTIMONITOR_HELPER" ]]; then
+    echo
+    echo ">> Validando Wolf MultiMonitor integrado..."
+    MULTI_FAIL=0
+
+    grep -Fq 'CinnVIIStarkMenu@NikoKrause' "$MULTIMONITOR_HELPER" \
+        || MULTI_FAIL=1
+    grep -Fq 'grouped-window-list@cinnamon.org' "$MULTIMONITOR_HELPER" \
+        || MULTI_FAIL=1
+    grep -Fq 'window-display-settings' "$MULTIMONITOR_HELPER" \
+        || MULTI_FAIL=1
+    grep -Fq 'alttab-switcher-show-current-monitor' "$MULTIMONITOR_HELPER" \
+        || MULTI_FAIL=1
+    grep -Fq 'restore_latest' "$MULTIMONITOR_HELPER" \
+        || MULTI_FAIL=1
+    grep -Fq 'topology_signature' "$MULTIMONITOR_HELPER" \
+        || MULTI_FAIL=1
+    grep -Fq 'watch_loop' "$MULTIMONITOR_HELPER" \
+        || MULTI_FAIL=1
+    grep -Fq 'multimonitor.disabled' "$MULTIMONITOR_HELPER" \
+        || MULTI_FAIL=1
+    grep -Fq 'A reconciliação é aditiva' "$MULTIMONITOR_HELPER" \
+        || MULTI_FAIL=1
+    grep -Fq 'wolf-cinnamon-multimonitor.desktop' "$INSTALLER" \
+        || MULTI_FAIL=1
+    grep -Fq 'Exec=/usr/local/bin/wolf-cinnamon-multimonitor watch' "$INSTALLER" \
+        || MULTI_FAIL=1
+
+    if (( MULTI_FAIL == 0 )); then
+        echo "[OK] MultiMonitor: CinnVII + lista/Alt+Tab por monitor + hotplug + rollback"
+    else
+        echo "[ERRO] helper Wolf MultiMonitor perdeu uma ou mais garantias."
         FAIL=1
     fi
 fi

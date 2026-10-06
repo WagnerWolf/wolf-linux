@@ -31,6 +31,7 @@ mkdir -p \
     "$PROJECT/assets/wallpapers" \
     "$PROJECT/assets/zsh" \
     "$PROJECT/tests" \
+    "$PROJECT/tools" \
     "$PROJECT/vm" \
     "$PROJECT/out" \
     "$PROJECT/work"
@@ -51,6 +52,18 @@ done
 
 cp -f "$SELF_DIR/wolf-install.sh" "$PROJECT/install/wolf-install.sh"
 chmod 755 "$PROJECT/install/wolf-install.sh"
+
+for tool in \
+    wolf-fix-directory-handler-1.0.22.sh \
+    wolf-apply-current-system-hooks-1.0.21.sh \
+    wolf-multimonitor-setup-0.3.sh \
+    wolf-install-multimonitor-auto-0.3.sh
+do
+    if [[ -f "$SELF_DIR/$tool" ]]; then
+        cp -f "$SELF_DIR/$tool" "$PROJECT/tools/$tool"
+        chmod 755 "$PROJECT/tools/$tool"
+    fi
+done
 
 if [[ -f "$SELF_DIR/wolf-linux-packages-v0.1.conf" ]]; then
     cp -f "$SELF_DIR/wolf-linux-packages-v0.1.conf" \

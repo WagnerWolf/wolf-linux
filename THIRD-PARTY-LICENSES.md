@@ -26,3 +26,15 @@ inside `/usr/share/themes/Wolf-Sunrise-Dark/`.
 
 Wolf Linux adds a grayscale/silver CSS override while retaining the upstream
 layout and theme structure.
+
+## CinnVIIStarkMenu
+
+Wolf Linux Cinnamon can install `CinnVIIStarkMenu@NikoKrause` from the official
+Linux Mint Cinnamon Spices collection:
+
+https://github.com/linuxmint/cinnamon-spices-applets/tree/master/CinnVIIStarkMenu%40NikoKrause
+
+CinnVIIStarkMenu is distributed under the GNU General Public License, version 2
+or later. The applet is downloaded from upstream during installation; Wolf Linux
+only configures it as the default Cinnamon menu.
+

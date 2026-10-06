@@ -54,6 +54,33 @@ O MATE é o ambiente mais personalizado do projeto e inclui:
 - barreiras inteligentes entre monitores;
 - mouse sem aceleração no X11/libinput.
 
+
+### Wolf MultiMonitor (Cinnamon)
+
+O perfil Cinnamon inclui o **Wolf MultiMonitor**, validado em hardware real com duas telas.
+
+Na sessão X11 ele mantém uma experiência independente por monitor:
+
+- painel inferior em cada monitor ativo;
+- CinnVIIStarkMenu em cada painel;
+- Grouped Window List mostrando somente as janelas da própria tela;
+- relógio nos painéis criados automaticamente;
+- Alt+Tab limitado ao monitor ativo;
+- detecção de novos monitores durante a sessão por XRandR.
+
+O watcher é aditivo e conservador: ao desconectar uma tela, o Wolf Linux **não apaga** o painel associado, preservando personalizações para quando ela voltar. Ao conectar uma tela nova, o painel que estiver faltando é criado automaticamente.
+
+Comandos disponíveis no sistema instalado:
+
+```bash
+wolf-cinnamon-multimonitor status
+wolf-cinnamon-multimonitor enable
+wolf-cinnamon-multimonitor disable
+wolf-cinnamon-multimonitor restore
+```
+
+`restore` restaura o último backup e desativa o gerenciamento automático para que a configuração restaurada não seja reaplicada imediatamente.
+
 ### Áudio e Bluetooth
 
 - PipeWire.
@@ -1267,3 +1294,43 @@ Isso permite atualizar a máquina de desenvolvimento atual sem reinstalação.
 - Adiciona `/usr/local/bin/wolf-protect-directory-handler`, executado a cada login via XDG Autostart.
 - Mantém `inode/directory` associado ao gerenciador de arquivos nativo: Nemo no Cinnamon, Caja no MATE e Dolphin no KDE Plasma.
 - Adiciona `wolf-fix-directory-handler-1.0.22.sh` para aplicar a mesma proteção a instalações existentes sem reinstalação.
+
+## 1.0.23 — CinnVII como menu padrão e Wolf MultiMonitor v0.2
+
+### Cinnamon: CinnVIIStarkMenu por padrão
+
+O perfil Cinnamon passa a baixar o `CinnVIIStarkMenu@NikoKrause` diretamente do
+Cinnamon Spices oficial durante a instalação. No primeiro login, o Wolf Linux
+substitui `menu@cinnamon.org` pelo CinnVII preservando painel, posição e ID da
+instância. A troca é aplicada uma única vez; depois disso o usuário pode alterar
+ou remover o applet sem o sistema forçar sua volta. Se o download do Spice
+falhar, o instalador mantém o menu nativo do Cinnamon como fallback.
+
+### Wolf MultiMonitor v0.2 (experimental)
+
+O DevKit inclui `wolf-multimonitor-setup-0.2.sh`, ainda sem aplicação automática
+na ISO. O helper mantém o protótipo validado de painel e Alt+Tab independentes
+por monitor e troca o menu nativo por uma instância do CinnVII em cada painel.
+Ele faz backup antes de alterar a configuração e oferece `restore`. Novas
+instâncias do CinnVII tentam clonar a configuração visual da instância já usada
+pelo usuário.
+
+O objetivo do v0.2 é validar se o popup do menu e os aplicativos iniciados pelo
+painel secundário permanecem no monitor correspondente. A integração
+multi-monitor só será ativada automaticamente no instalador após esse teste em
+hardware.
+
+## 1.0.24 — Wolf MultiMonitor integrado ao Cinnamon
+
+A revisão 1.0.24 integra o Wolf MultiMonitor ao perfil Cinnamon após validação do protótipo v0.2 em hardware real.
+
+- o watcher inicia automaticamente apenas na sessão Cinnamon X11;
+- detecta a topologia no login e mudanças de hotplug durante a sessão;
+- cria painel inferior apenas nos monitores ativos que ainda não possuem painel;
+- garante CinnVIIStarkMenu e Grouped Window List em cada tela ativa;
+- mantém a lista de janelas e o Alt+Tab limitados ao monitor correspondente;
+- não remove automaticamente painéis de telas desconectadas, preservando personalizações;
+- cria um backup-base antes da primeira alteração automática multi-monitor;
+- oferece `status`, `enable`, `disable`, `reconcile` e `restore`;
+- `restore` desativa o watcher para impedir que o estado restaurado seja imediatamente reaplicado.
+
