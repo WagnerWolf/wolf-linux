@@ -7,7 +7,7 @@ fi
 
 set -Eeuo pipefail
 
-WOLF_VERSION="1.0.24"
+WOLF_VERSION="1.0.49"
 DRY_RUN=0
 PLAN_ONLY=0
 RESET_STATE=0
@@ -86,15 +86,15 @@ Opções:
   --dry-run       Detecta hardware, executa menus e mostra o plano.
                   Nunca formata, monta ou instala.
   --plan-only     Gera o plano e encerra.
-  --vm-install    Instalação real somente quando QEMU/KVM for detectado.
+  --vm-install    Instalação real somente quando QEMU/KVM ou VirtualBox for detectado.
   --install       Instalação real em hardware físico.
                   Exige confirmação explícita antes das alterações.
   --reset-state   Limpa checkpoints temporários.
   -h, --help      Mostra esta ajuda.
 
 SEGURANÇA:
-  --vm-install é recusado fora de QEMU/KVM.
-  --install é recusado quando QEMU/KVM é detectado.
+  --vm-install é recusado fora de QEMU/KVM/VirtualBox.
+  --install é recusado quando uma VM QEMU/KVM/VirtualBox é detectada.
   Em ambos os casos o plano é exibido antes da confirmação destrutiva.
 EOF
 }
@@ -275,11 +275,25 @@ detect_virtualization() {
         local product=""
         product="$(cat /sys/class/dmi/id/product_name 2>/dev/null || true)"
         case "$product" in
-            *QEMU*|*KVM*|*Virtual*)
+            *VirtualBox*)
+                VM_TYPE="oracle"
+                ;;
+            *QEMU*|*KVM*)
                 VM_TYPE="qemu"
                 ;;
         esac
     fi
+}
+
+is_supported_test_vm() {
+    case "$VM_TYPE" in
+        qemu|kvm|oracle|virtualbox|vbox)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
 }
 
 check_runtime() {
@@ -296,25 +310,19 @@ check_runtime() {
         (( EUID == 0 )) || die "A instalação real precisa ser executada como root."
 
         if (( VM_INSTALL == 1 )); then
-            case "$VM_TYPE" in
-                qemu|kvm)
-                    ok "QEMU/KVM confirmado. Operações destrutivas liberadas para a VM."
-                    ;;
-                *)
-                    die "--vm-install recusado: QEMU/KVM não foi detectado."
-                    ;;
-            esac
+            if is_supported_test_vm; then
+                ok "VM suportada confirmada ($VM_TYPE). Operações destrutivas liberadas para a VM."
+            else
+                die "--vm-install recusado: QEMU/KVM ou VirtualBox não foi detectado."
+            fi
 
         elif (( REAL_INSTALL == 1 )); then
-            case "$VM_TYPE" in
-                qemu|kvm)
-                    die "--install recusado dentro de QEMU/KVM. Use --vm-install."
-                    ;;
-                *)
-                    warn "MODO HARDWARE REAL ATIVADO."
-                    warn "O instalador poderá formatar os dispositivos mostrados no plano."
-                    ;;
-            esac
+            if is_supported_test_vm; then
+                die "--install recusado dentro de uma VM ($VM_TYPE). Use --vm-install."
+            else
+                warn "MODO HARDWARE REAL ATIVADO."
+                warn "O instalador poderá formatar os dispositivos mostrados no plano."
+            fi
 
         else
             die "Escolha o modo real: --install no hardware ou --vm-install na VM."
@@ -408,7 +416,10 @@ detect_gpu() {
         <<< "$controller_lines" && GPU_HAS_NVIDIA=1
 
     # VM: usa a GPU virtual, nunca a GPU física do host.
-    if [[ "$VM_TYPE" == "qemu" || "$VM_TYPE" == "kvm" ]] \
+    if [[ "$VM_TYPE" == "oracle" || "$VM_TYPE" == "virtualbox" || "$VM_TYPE" == "vbox" ]]; then
+        GPU_PROFILE="virtualbox"
+
+    elif [[ "$VM_TYPE" == "qemu" || "$VM_TYPE" == "kvm" ]] \
        && grep -qiE 'Virtio|Red Hat|QXL' <<< "$controller_lines"; then
         GPU_PROFILE="virtio"
 
@@ -508,13 +519,14 @@ choose_desktop() {
     echo
     echo "Escolha o ambiente gráfico:"
     echo
-    echo "  1) MATE"
+    echo "  1) MATE (LEGADO - marcado para remoção)"
     echo "  2) Cinnamon"
     echo "  3) KDE Plasma"
+    echo "  4) XFCE"
     echo
 
     while true; do
-        read -r -p "Opção [1-3]: " choice
+        read -r -p "Opção [1-4]: " choice
         case "$choice" in
             1)
                 DESKTOP="mate"
@@ -526,6 +538,10 @@ choose_desktop() {
                 ;;
             3)
                 DESKTOP="plasma"
+                break
+                ;;
+            4)
+                DESKTOP="xfce"
                 break
                 ;;
             *)
@@ -1242,6 +1258,9 @@ packages_for_desktop() {
         plasma)
             printf '%s\n' "${PLASMA_PACKAGES[@]}" "${PLASMA_PORTAL_PACKAGES[@]}"
             ;;
+        xfce)
+            printf '%s\n' "${XFCE_PACKAGES[@]}" "${XFCE_PORTAL_PACKAGES[@]}"
+            ;;
     esac
 }
 
@@ -1295,9 +1314,17 @@ collect_base_packages() {
             ;;
     esac
 
+    local -a vm_packages=()
+    case "$VM_TYPE" in
+        oracle|virtualbox|vbox)
+            vm_packages=("${VIRTUALBOX_GUEST_PACKAGES[@]}")
+            ;;
+    esac
+
     packages=(
         "${BASE_PACKAGES[@]}"
         "${cpu_packages[@]}"
+        "${vm_packages[@]}"
         "${DISPLAY_MANAGER_PACKAGES[@]}"
         "${AUDIO_PACKAGES[@]}"
         "${BLUETOOTH_PACKAGES[@]}"
@@ -1435,6 +1462,8 @@ configure_wolf_identity() {
     cat > /mnt/etc/os-release <<'EOF'
 NAME="Wolf Linux"
 PRETTY_NAME="Wolf Linux"
+LOGO="wolf-linux"
+VENDOR_NAME="Wolf Linux"
 ID=arch
 ID_LIKE=arch
 VARIANT="Wolf Linux"
@@ -1470,6 +1499,16 @@ EOF
             /mnt/etc/default/grub
     else
         printf 'GRUB_DISABLE_OS_PROBER=false\n' >> /mnt/etc/default/grub
+    fi
+
+    # GRUB 2.16 adiciona o gerador 31_efi_bootnext, que pode transformar
+    # entradas UEFI/NVRAM (inclusive pendrives) em itens persistentes do menu.
+    # O Wolf Linux mantém Windows via os-prober, mas oculta o ruído BootNext.
+    if grep -q '^GRUB_DISABLE_BOOTNEXT=' /mnt/etc/default/grub; then
+        sed -i 's/^GRUB_DISABLE_BOOTNEXT=.*/GRUB_DISABLE_BOOTNEXT=true/' \
+            /mnt/etc/default/grub
+    else
+        printf 'GRUB_DISABLE_BOOTNEXT=true\n' >> /mnt/etc/default/grub
     fi
 
     grep -q '^PRETTY_NAME="Wolf Linux"$' /mnt/etc/os-release ||
@@ -1581,6 +1620,9 @@ enable_one_service() {
             sshd.service)
                 arch-chroot /mnt pacman -Q openssh 2>/dev/null || true
                 ;;
+            vboxservice.service)
+                arch-chroot /mnt pacman -Q virtualbox-guest-utils 2>/dev/null || true
+                ;;
         esac
         die "Unit systemd não encontrada: $unit"
     fi
@@ -1612,10 +1654,17 @@ configure_services() {
         sddm.service
     )
 
-    if [[ "$VM_TYPE" == "qemu" || "$VM_TYPE" == "kvm" ]]; then
+    if is_supported_test_vm; then
         services+=(sshd.service)
-        info "VM detectada: sshd será habilitado somente para facilitar os testes."
+        info "VM detectada ($VM_TYPE): sshd será habilitado somente para facilitar os testes."
     fi
+
+    case "$VM_TYPE" in
+        oracle|virtualbox|vbox)
+            services+=(vboxservice.service)
+            info "VirtualBox detectado: vboxservice será habilitado para Guest Additions e multi-monitor."
+            ;;
+    esac
 
     local unit
 
@@ -1936,13 +1985,19 @@ ensure_yay() {
 collect_third_party_packages() {
     printf '%s\n' \
         "${ZSH_THIRD_PARTY_PACKAGES[@]}" \
+        "${MULTIMEDIA_THIRD_PARTY_PACKAGES[@]}" \
         "${INTERNET_THIRD_PARTY_PACKAGES[@]}" \
         "${DEV_THIRD_PARTY_PACKAGES[@]}" \
         "${PERSONAL_THIRD_PARTY_PACKAGES[@]}" \
-        "${SYSTEM_GUI_THIRD_PARTY_PACKAGES[@]}"
+        "${SYSTEM_GUI_THIRD_PARTY_PACKAGES[@]}" \
+        "${GAMING_THIRD_PARTY_PACKAGES[@]}"
 
     if [[ "$DESKTOP" == "mate" ]]; then
         printf '%s\n' "${MATE_THIRD_PARTY_PACKAGES[@]}"
+    fi
+
+    if [[ "$DESKTOP" == "xfce" ]]; then
+        printf '%s\n' "${XFCE_THIRD_PARTY_PACKAGES[@]}"
     fi
 }
 
@@ -2589,7 +2644,7 @@ install_terminal_defaults() {
 #!/usr/bin/env bash
 set -u
 
-MARKER="$HOME/.config/wolf-linux/terminal-v2.done"
+MARKER="$HOME/.config/wolf-linux/terminal-v3.done"
 
 [[ -f "$MARKER" ]] && exit 0
 mkdir -p "$(dirname "$MARKER")"
@@ -2706,6 +2761,35 @@ case "$DESKTOP" in
     *KDE*|*Plasma*)
         configure_konsole
         ;;
+    *XFCE*|*Xfce*)
+        mkdir -p "$HOME/.config/xfce4/terminal"
+        cat > "$HOME/.config/xfce4/terminal/terminalrc" <<'EOF'
+[Configuration]
+FontName=MesloLGS Nerd Font 11
+ColorForeground=#FFFFFF
+ColorBackground=#000000
+ColorUseTheme=FALSE
+MiscAlwaysShowTabs=FALSE
+MiscBell=FALSE
+MiscBordersDefault=TRUE
+MiscCursorBlinks=FALSE
+MiscCursorShape=TERMINAL_CURSOR_SHAPE_BLOCK
+MiscDefaultGeometry=120x30
+MiscInheritGeometry=FALSE
+MiscMenubarDefault=FALSE
+MiscMouseAutohide=FALSE
+MiscMouseWheelZoom=TRUE
+MiscToolbarDefault=FALSE
+MiscConfirmClose=TRUE
+MiscCycleTabs=TRUE
+MiscTabCloseButtons=TRUE
+MiscTabCloseMiddleClick=TRUE
+MiscTabPosition=GTK_POS_TOP
+MiscHighlightUrls=TRUE
+ScrollingBar=TERMINAL_SCROLLBAR_NONE
+ScrollingLines=10000
+EOF
+        ;;
 esac
 
 touch "$MARKER"
@@ -2777,6 +2861,2067 @@ set_mkinitcpio_modules() {
     fi
 
     info "mkinitcpio: $(grep '^MODULES=' "$conf")"
+}
+
+install_wolf_desktop_keybindings() {
+    info "Preparando atalhos Wolf Linux para MATE/XFCE..."
+
+    cat > /mnt/usr/local/bin/wolf-apply-desktop-keybindings <<'WOLF_KEYS'
+#!/usr/bin/env bash
+set -u
+DESKTOP="${XDG_CURRENT_DESKTOP:-${XDG_SESSION_DESKTOP:-}}"
+mkdir -p "$HOME/.config/wolf-linux"
+
+case "$DESKTOP" in
+    *MATE*)
+        # Brisk usa uma configuração global por processo. Com duas instâncias,
+        # Super_L faz ambas abrirem. Desabilitamos o hotkey interno e deixamos
+        # os menus clicáveis em cada painel até termos roteamento por instância.
+        if gsettings list-schemas | grep -Fxq com.solus-project.brisk-menu; then
+            gsettings set com.solus-project.brisk-menu hot-key '' 2>/dev/null || true
+        fi
+
+        if gsettings list-schemas | grep -Fxq org.mate.Marco.global-keybindings \
+           && gsettings list-schemas | grep -Fxq org.mate.Marco.keybinding-commands; then
+            gsettings set org.mate.Marco.global-keybindings run-command-1 '<Primary><Alt>t' || true
+            gsettings set org.mate.Marco.keybinding-commands command-1 'mate-terminal' || true
+            gsettings set org.mate.Marco.global-keybindings run-command-2 '<Super>e' || true
+            gsettings set org.mate.Marco.keybinding-commands command-2 'caja --no-desktop' || true
+
+            # Marco não possui filtro de Alt+Tab por monitor. Usamos um ciclo
+            # simples das janelas cujo centro está no monitor do ponteiro.
+            if gsettings list-keys org.mate.Marco.global-keybindings | grep -Fxq switch-windows; then
+                gsettings set org.mate.Marco.global-keybindings switch-windows 'disabled' || true
+            fi
+            if gsettings list-keys org.mate.Marco.global-keybindings | grep -Fxq switch-windows-backward; then
+                gsettings set org.mate.Marco.global-keybindings switch-windows-backward 'disabled' || true
+            fi
+            gsettings set org.mate.Marco.global-keybindings run-command-3 '<Alt>Tab' || true
+            gsettings set org.mate.Marco.keybinding-commands command-3 '/usr/local/bin/wolf-mate-cycle-window forward' || true
+            gsettings set org.mate.Marco.global-keybindings run-command-4 '<Shift><Alt>Tab' || true
+            gsettings set org.mate.Marco.keybinding-commands command-4 '/usr/local/bin/wolf-mate-cycle-window backward' || true
+        fi
+        ;;
+
+    *XFCE*|*Xfce*)
+        command -v xfconf-query >/dev/null 2>&1 || exit 0
+
+        setcmd() {
+            local key="$1" cmd="$2"
+            xfconf-query -c xfce4-keyboard-shortcuts \
+                -p "/commands/custom/$key" -n -t string -s "$cmd" 2>/dev/null \
+                || xfconf-query -c xfce4-keyboard-shortcuts \
+                    -p "/commands/custom/$key" -s "$cmd" 2>/dev/null || true
+        }
+
+        setcmd '<Primary><Alt>t' '/usr/local/bin/wolf-xfce-launch-here terminal'
+        setcmd '<Super>e' '/usr/local/bin/wolf-xfce-launch-here home'
+
+        # Limpe atalhos legados que chamem o popup do Whisker diretamente em
+        # Super; eles competiriam com o xcape e poderiam abrir no ponteiro.
+        while IFS= read -r prop; do
+            [[ "$prop" == /commands/custom/* ]] || continue
+            [[ "$prop" == *Super* ]] || continue
+            value="$(xfconf-query -c xfce4-keyboard-shortcuts -p "$prop" 2>/dev/null || true)"
+            if [[ "$value" == *xfce4-popup-whiskermenu* ]]; then
+                xfconf-query -c xfce4-keyboard-shortcuts -p "$prop" -r >/dev/null 2>&1 || true
+            fi
+        done < <(xfconf-query -c xfce4-keyboard-shortcuts -l 2>/dev/null || true)
+
+        # Não associe Super_L diretamente ao Whisker: o Xfce pode disparar a
+        # ligação também no início de Super+E. Em vez disso, xcape transforma
+        # apenas um toque isolado em Super numa combinação privada.
+        setcmd '<Primary><Alt><Shift>F12' '/usr/local/bin/wolf-xfce-whisker-current'
+        pkill -x xcape >/dev/null 2>&1 || true
+        if command -v xcape >/dev/null 2>&1; then
+            xcape -e 'Super_L=Control_L|Alt_L|Shift_L|F12' >/dev/null 2>&1 &
+        fi
+        ;;
+esac
+WOLF_KEYS
+    chmod 755 /mnt/usr/local/bin/wolf-apply-desktop-keybindings
+
+    cat > /mnt/usr/local/bin/wolf-mate-cycle-window <<'WOLF_MATE_CYCLE'
+#!/usr/bin/env python3
+import sys
+import gi
+gi.require_version("Gdk", "3.0")
+gi.require_version("Wnck", "3.0")
+from gi.repository import Gdk, Wnck
+
+direction = -1 if len(sys.argv) > 1 and sys.argv[1] == "backward" else 1
+screen = Wnck.Screen.get_default(); screen.force_update()
+display = Gdk.Display.get_default()
+seat = display.get_default_seat(); pointer = seat.get_pointer()
+_, x, y = pointer.get_position()
+monitor = display.get_monitor_at_point(x, y)
+geom = monitor.get_geometry() if monitor else None
+ws = screen.get_active_workspace()
+windows=[]
+for w in screen.get_windows_stacked():
+    try:
+        if w.is_skip_tasklist(): continue
+        if ws and not (w.is_pinned() or w.is_on_workspace(ws)): continue
+        wx,wy,ww,wh=w.get_geometry(); cx=wx+max(1,ww)//2; cy=wy+max(1,wh)//2
+        if geom and not (geom.x <= cx < geom.x+geom.width and geom.y <= cy < geom.y+geom.height): continue
+        windows.append(w)
+    except Exception: pass
+if not windows: raise SystemExit(0)
+active=screen.get_active_window()
+try: idx=windows.index(active)
+except ValueError: idx=-1 if direction>0 else 0
+target=windows[(idx+direction)%len(windows)]
+try:
+    target.unminimize(Gdk.CURRENT_TIME)
+    target.activate(Gdk.CURRENT_TIME)
+except Exception: pass
+WOLF_MATE_CYCLE
+    chmod 755 /mnt/usr/local/bin/wolf-mate-cycle-window
+
+    cat > /mnt/etc/xdg/autostart/wolf-desktop-keybindings.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Wolf Linux - Atalhos do desktop
+Exec=/usr/local/bin/wolf-apply-desktop-keybindings
+NotShowIn=XFCE;
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+}
+
+install_xfce_defaults() {
+    [[ "$DESKTOP" == "xfce" ]] || return 0
+    info "Preparando XFCE X11-only, painel Wolf, Whisker e MultiMonitor..."
+
+    install -d /mnt/usr/local/bin /mnt/usr/local/sbin /mnt/etc/pacman.d/hooks
+    install -d /mnt/etc/xdg/autostart /mnt/etc/xdg/xfce4/panel /mnt/usr/share/applications
+
+    if [[ -f "$PROJECT_DIR/tools/wolf-xfce-compositor-0.1.sh" ]]; then
+        install -Dm0755 "$PROJECT_DIR/tools/wolf-xfce-compositor-0.1.sh" \
+            /mnt/usr/local/bin/wolf-xfce-compositor
+    fi
+
+    cat > /mnt/etc/xdg/autostart/wolf-xfce-compositor-default.desktop <<'XFCE_PICOM_AUTOSTART'
+[Desktop Entry]
+Type=Application
+Name=Wolf Linux - Compositor XFCE
+Comment=Aplica Picom/XRender uma única vez como padrão inicial do XFCE
+Exec=/usr/local/bin/wolf-xfce-compositor ensure-default
+OnlyShowIn=XFCE;
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+XFCE_PICOM_AUTOSTART
+
+    # --------------------------------------------------------
+    # XFCE somente em X11.
+    # O Arch fornece xfce-wayland.desktop mesmo sendo experimental.
+    # Removemos a entrada e reaplicamos após upgrades do xfce4-session.
+    # --------------------------------------------------------
+    cat > /mnt/usr/local/sbin/wolf-disable-xfce-wayland <<'XFCE_X11'
+#!/usr/bin/env bash
+set -euo pipefail
+rm -f /usr/share/wayland-sessions/xfce-wayland.desktop
+XFCE_X11
+    chmod 755 /mnt/usr/local/sbin/wolf-disable-xfce-wayland
+
+    cat > /mnt/etc/pacman.d/hooks/wolf-xfce-x11-only.hook <<'XFCE_HOOK'
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = xfce4-session
+
+[Action]
+Description = Wolf Linux: mantendo XFCE somente em X11...
+When = PostTransaction
+Exec = /usr/local/sbin/wolf-disable-xfce-wayland
+XFCE_HOOK
+
+    arch-chroot /mnt /usr/local/sbin/wolf-disable-xfce-wayland
+
+    arch-chroot /mnt install -d -o sddm -g sddm /var/lib/sddm
+    cat > /mnt/var/lib/sddm/state.conf <<EOF
+[Last]
+Session=xfce.desktop
+User=$USERNAME_VALUE
+EOF
+    arch-chroot /mnt chown sddm:sddm /var/lib/sddm/state.conf
+
+    # --------------------------------------------------------
+    # Launchers Wolf usados no painel principal e secundários.
+    # O xfce4-panel copia estes arquivos para launcher-<id>/ no
+    # perfil do usuário; isso evita ícones genéricos sem aplicativo.
+    # --------------------------------------------------------
+    cat > /mnt/usr/share/applications/wolf-xfce-browser.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Google Chrome
+Exec=/usr/local/bin/wolf-xfce-launch-here browser %U
+Icon=google-chrome
+Terminal=false
+StartupNotify=true
+NoDisplay=true
+Categories=Network;WebBrowser;
+EOF
+
+    cat > /mnt/usr/share/applications/wolf-xfce-home.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Pasta pessoal
+Exec=/usr/local/bin/wolf-xfce-launch-here home
+Icon=user-home
+Terminal=false
+StartupNotify=true
+NoDisplay=true
+Categories=System;FileTools;FileManager;
+EOF
+
+    cat > /mnt/usr/share/applications/wolf-xfce-terminal.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Terminal
+Exec=/usr/local/bin/wolf-xfce-launch-here terminal
+Icon=utilities-terminal
+Terminal=false
+StartupNotify=true
+NoDisplay=true
+Categories=System;TerminalEmulator;
+EOF
+
+    # --------------------------------------------------------
+    # Default do painel: UMA barra inferior, sem pager, sem Action Buttons
+    # e sem o segundo painel/dock padrão do XFCE.
+    # O MultiMonitor replica uma versão reduzida nas telas secundárias.
+    # --------------------------------------------------------
+    cat > /mnt/etc/xdg/xfce4/panel/default.xml <<'XFCE_PANEL'
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfce4-panel" version="1.0">
+  <property name="configver" type="int" value="2"/>
+  <property name="panels" type="array">
+    <value type="int" value="1"/>
+    <property name="dark-mode" type="bool" value="true"/>
+    <property name="panel-1" type="empty">
+      <property name="position" type="string" value="p=8;x=0;y=0"/>
+      <property name="length" type="uint" value="100"/>
+      <property name="position-locked" type="bool" value="true"/>
+      <property name="size" type="uint" value="36"/>
+      <property name="nrows" type="uint" value="1"/>
+      <property name="span-monitors" type="bool" value="false"/>
+      <property name="autohide-behavior" type="uint" value="0"/>
+      <property name="plugin-ids" type="array">
+        <value type="int" value="1"/><value type="int" value="5"/>
+        <value type="int" value="6"/><value type="int" value="7"/>
+        <value type="int" value="8"/><value type="int" value="9"/>
+      </property>
+    </property>
+  </property>
+  <property name="plugins" type="empty">
+    <property name="plugin-1" type="string" value="whiskermenu"/>
+    <!-- Os três launchers fixos são materializados no primeiro login. -->
+    <property name="plugin-5" type="string" value="tasklist">
+      <property name="include-all-monitors" type="bool" value="false"/>
+      <property name="include-all-workspaces" type="bool" value="false"/>
+      <property name="grouping" type="uint" value="1"/>
+      <property name="show-labels" type="bool" value="true"/>
+    </property>
+    <property name="plugin-6" type="string" value="separator"><property name="expand" type="bool" value="true"/><property name="style" type="uint" value="0"/></property>
+    <property name="plugin-7" type="string" value="systray"><property name="square-icons" type="bool" value="true"/></property>
+    <property name="plugin-8" type="string" value="clock"/>
+    <property name="plugin-9" type="string" value="showdesktop"/>
+  </property>
+</channel>
+XFCE_PANEL
+
+    cat > /mnt/usr/local/bin/wolf-xfce-desktop-setup <<'XFCE_SETUP'
+#!/usr/bin/env bash
+if [[ -z "${BASH_VERSION:-}" ]]; then
+    exec /usr/bin/env bash "$0" "$@"
+fi
+set -Eeuo pipefail
+
+VERSION="0.7"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/wolf-linux/xfce"
+LAYOUT_MARKER="${XDG_CONFIG_HOME:-$HOME/.config}/wolf-linux/xfce-layout-v7.done"
+APPEARANCE_MARKER="${XDG_CONFIG_HOME:-$HOME/.config}/wolf-linux/xfce-appearance-v1.done"
+WALLPAPER="/usr/share/backgrounds/wolf-linux/wallpaper.png"
+WHISKER_ICON="$HOME/.local/share/icons/wolf-whisker.png"
+FORCE=0
+PANEL_RESTART_PENDING=0
+
+log(){ printf '[Wolf XFCE Setup] %s\n' "$*"; }
+
+ensure_panel_on_exit() {
+    if (( PANEL_RESTART_PENDING )) && command -v xfce4-panel >/dev/null 2>&1; then
+        log "Reconstrução interrompida; reiniciando xfce4-panel como proteção."
+        nohup xfce4-panel >/dev/null 2>&1 &
+    fi
+}
+trap ensure_panel_on_exit EXIT
+
+report_setup_error() {
+    local rc="$?"
+    local line="${BASH_LINENO[0]:-${LINENO}}"
+    printf '[Wolf XFCE Setup] ERRO: linha %s: %s (status %s)\n' \
+        "$line" "$BASH_COMMAND" "$rc" >&2
+    return "$rc"
+}
+trap report_setup_error ERR
+
+if [[ "${1:-apply}" == "--force" || "${2:-}" == "--force" ]]; then
+    FORCE=1
+fi
+
+wait_for_xfce() {
+    local i
+    for ((i=0; i<30; i++)); do
+        if xfconf-query -c xsettings -p /Net/ThemeName >/dev/null 2>&1 \
+            && xrandr --listmonitors >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+    done
+    log "xfconf/XRandR ainda não ficaram prontos; tentando mesmo assim."
+}
+
+set_prop() {
+    local channel="$1" prop="$2" type="$3" value="$4"
+    if xfconf-query -c "$channel" -p "$prop" >/dev/null 2>&1; then
+        xfconf-query -c "$channel" -p "$prop" -s "$value" >/dev/null 2>&1 || true
+    else
+        xfconf-query -c "$channel" -p "$prop" -n -t "$type" -s "$value" >/dev/null 2>&1 || true
+    fi
+}
+
+set_int_array() {
+    local channel="$1" prop="$2"; shift 2
+    local args=(xfconf-query -c "$channel" -p "$prop") v
+    xfconf-query -c "$channel" -p "$prop" -r >/dev/null 2>&1 || true
+    args+=( -n -a )
+    for v in "$@"; do args+=( -t int -s "$v" ); done
+    "${args[@]}" >/dev/null 2>&1 || true
+}
+
+set_string_array() {
+    local channel="$1" prop="$2"; shift 2
+    local args=(xfconf-query -c "$channel" -p "$prop") v
+    xfconf-query -c "$channel" -p "$prop" -r >/dev/null 2>&1 || true
+    args+=( -n -a )
+    for v in "$@"; do args+=( -t string -s "$v" ); done
+    "${args[@]}" >/dev/null 2>&1 || true
+}
+
+connected_outputs() {
+    xrandr --query 2>/dev/null | awk '$2 == "connected" {print $1}'
+}
+
+primary_output() {
+    local out
+    out="$(xrandr --listmonitors 2>/dev/null | awk 'NR>1 && /\*/ {print $NF; exit}')"
+    [[ -n "$out" ]] || out="$(connected_outputs | head -n1)"
+    printf '%s\n' "$out"
+}
+
+launcher_source() {
+    case "$1" in
+        browser)  printf '%s\n' /usr/share/applications/wolf-xfce-browser.desktop ;;
+        home)     printf '%s\n' /usr/share/applications/wolf-xfce-home.desktop ;;
+        terminal) printf '%s\n' /usr/share/applications/wolf-xfce-terminal.desktop ;;
+        *) return 1 ;;
+    esac
+}
+
+create_launcher() {
+    local id="$1" kind="$2" source base dir
+    source="$(launcher_source "$kind")"
+    [[ -f "$source" ]] || { log "Launcher ausente: $source"; return 1; }
+    base="$(basename "$source")"
+    dir="$HOME/.config/xfce4/panel/launcher-$id"
+    mkdir -p "$dir"
+    cp -f "$source" "$dir/$base"
+    chmod 644 "$dir/$base"
+    set_prop xfce4-panel "/plugins/plugin-$id" string launcher
+    set_string_array xfce4-panel "/plugins/plugin-$id/items" "$base"
+}
+
+create_whisker_icon() {
+    local src=""
+    for candidate in \
+        /usr/share/plymouth/themes/wolf-linux/logo.png \
+        /usr/share/icons/hicolor/256x256/apps/wolf-linux.png \
+        /usr/share/pixmaps/wolf-linux.png; do
+        if [[ -r "$candidate" ]]; then src="$candidate"; break; fi
+    done
+    [[ -n "$src" ]] || return 0
+    mkdir -p "$(dirname "$WHISKER_ICON")"
+    python3 - "$src" "$WHISKER_ICON" <<'PYICON'
+from PIL import Image, ImageDraw
+import sys
+src, dst = sys.argv[1:3]
+im = Image.open(src).convert('RGBA')
+alpha = im.getchannel('A')
+bbox = alpha.getbbox()
+if bbox:
+    im = im.crop(bbox)
+size = 128
+canvas = Image.new('RGBA', (size, size), (0,0,0,0))
+d = ImageDraw.Draw(canvas)
+d.ellipse((3,3,size-4,size-4), fill=(24,24,27,245), outline=(220,220,224,255), width=4)
+im.thumbnail((92,92), Image.Resampling.LANCZOS)
+x=(size-im.width)//2; y=(size-im.height)//2
+canvas.alpha_composite(im, (x,y))
+canvas.save(dst)
+PYICON
+}
+
+set_rc_value() {
+    local file="$1" key="$2" value="$3"
+    mkdir -p "$(dirname "$file")"
+    touch "$file"
+    if grep -q "^${key}=" "$file" 2>/dev/null; then
+        sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+    else
+        printf '%s=%s\n' "$key" "$value" >> "$file"
+    fi
+}
+
+configure_whisker() {
+    local id="$1"
+    local rc="$HOME/.config/xfce4/panel/whiskermenu-${id}.rc"
+    set_prop xfce4-panel "/plugins/plugin-$id" string whiskermenu
+    create_whisker_icon
+    [[ -f "$WHISKER_ICON" ]] && set_rc_value "$rc" button-icon "$WHISKER_ICON"
+    set_rc_value "$rc" show-button-title false
+    set_rc_value "$rc" show-button-icon true
+}
+
+configure_all_whiskers() {
+    local prop id type
+    while IFS= read -r prop; do
+        [[ "$prop" =~ ^/plugins/plugin-([0-9]+)$ ]] || continue
+        id="${BASH_REMATCH[1]}"
+        type="$(xfconf-query -c xfce4-panel -p "$prop" 2>/dev/null || true)"
+        if [[ "$type" == whiskermenu ]]; then
+            configure_whisker "$id"
+        fi
+    done < <(xfconf-query -c xfce4-panel -l 2>/dev/null | grep -E '^/plugins/plugin-[0-9]+$' || true)
+
+    # Com `set -e`, o status da última condição dentro de um while pode
+    # vazar como status da função. Esta função é de varredura/best-effort:
+    # não encontrar Whisker no último plugin nunca deve abortar o layout.
+    return 0
+}
+
+configure_tasklist() {
+    local id="$1"
+    set_prop xfce4-panel "/plugins/plugin-$id" string tasklist
+    set_prop xfce4-panel "/plugins/plugin-$id/include-all-monitors" bool false
+    set_prop xfce4-panel "/plugins/plugin-$id/include-all-workspaces" bool false
+    set_prop xfce4-panel "/plugins/plugin-$id/grouping" uint 1
+    set_prop xfce4-panel "/plugins/plugin-$id/show-labels" bool true
+}
+
+create_main_panel() {
+    local out="$1"
+    local ids=(1 2 3 4 5 6 7 8 9 10)
+
+    set_prop xfce4-panel /configver int 2
+    set_int_array xfce4-panel /panels 1
+    set_prop xfce4-panel /panels/dark-mode bool true
+    set_prop xfce4-panel /panels/panel-1/output-name string "$out"
+    set_prop xfce4-panel /panels/panel-1/position string 'p=8;x=0;y=0'
+    set_prop xfce4-panel /panels/panel-1/position-locked bool true
+    set_prop xfce4-panel /panels/panel-1/length uint 100
+    set_prop xfce4-panel /panels/panel-1/size uint 36
+    set_prop xfce4-panel /panels/panel-1/nrows uint 1
+    set_prop xfce4-panel /panels/panel-1/span-monitors bool false
+    set_prop xfce4-panel /panels/panel-1/autohide-behavior uint 0
+    set_int_array xfce4-panel /panels/panel-1/plugin-ids "${ids[@]}"
+
+    configure_whisker 1
+    create_launcher 2 browser
+    create_launcher 3 home
+    create_launcher 4 terminal
+    configure_tasklist 5
+
+    set_prop xfce4-panel /plugins/plugin-6 string separator
+    set_prop xfce4-panel /plugins/plugin-6/expand bool true
+    set_prop xfce4-panel /plugins/plugin-6/style uint 0
+
+    set_prop xfce4-panel /plugins/plugin-7 string systray
+    set_prop xfce4-panel /plugins/plugin-7/square-icons bool true
+
+    # Controle de volume nativo do painel. Ele usa libpulse, portanto funciona
+    # normalmente sobre pipewire-pulse; não significa voltar a PulseAudio.
+    set_prop xfce4-panel /plugins/plugin-8 string pulseaudio
+
+    set_prop xfce4-panel /plugins/plugin-9 string clock
+    set_prop xfce4-panel /plugins/plugin-10 string showdesktop
+}
+
+ensure_panel_css() {
+    # O xfce4-pulseaudio-plugin tende a usar um ícone maior que systray/clock
+    # em painéis de 36 px. Ajuste só a imagem do botão, sem afetar o popup.
+    local css="$HOME/.config/gtk-3.0/gtk.css"
+    mkdir -p "$(dirname "$css")"
+    python3 - "$css" <<'PYCSS'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+start = "/* WOLF-XFCE-PULSEAUDIO-BEGIN */"
+end = "/* WOLF-XFCE-PULSEAUDIO-END */"
+block = """/* WOLF-XFCE-PULSEAUDIO-BEGIN */
+#pulseaudio-button > box > image {
+  -gtk-icon-transform: scale(0.62);
+}
+#pulseaudio-button {
+  padding: 3px;
+}
+/* WOLF-XFCE-PULSEAUDIO-END */
+"""
+text = p.read_text(encoding="utf-8") if p.exists() else ""
+if start in text and end in text:
+    before = text.split(start, 1)[0].rstrip()
+    after = text.split(end, 1)[1].lstrip("\n")
+    text = (before + "\n\n" if before else "") + block + ("\n" + after if after else "")
+else:
+    text = text.rstrip()
+    text = (text + "\n\n" if text else "") + block
+p.write_text(text, encoding="utf-8")
+PYCSS
+}
+
+apply_style() {
+    set_prop xsettings /Net/ThemeName string Materia-dark
+    set_prop xsettings /Net/IconThemeName string Papirus-Dark
+    set_prop xsettings /Gtk/CursorThemeName string breeze_cursors
+    set_prop xsettings /Gtk/CursorThemeSize int 24
+    set_prop xsettings /Gtk/MonospaceFontName string 'MesloLGS Nerd Font 11'
+    set_prop xsettings /Xfce/SyncThemes bool true
+    set_prop xfwm4 /general/theme string Materia-dark
+    set_prop xfwm4 /general/workspace_count int 1
+    # Novas janelas seguem o monitor do ponteiro. Isso faz lançamentos pelo
+    # Whisker de cada tela tenderem naturalmente a nascer naquela mesma tela.
+    set_prop xfwm4 /general/placement_mode string mouse
+    set_prop xfwm4 /general/placement_ratio int 100
+    set_prop xfwm4 /general/focus_new bool true
+    # NVIDIA/X11: o compositor do xfwm4 causa stutter perceptível ao mover
+    # janelas/abas em alguns sistemas. O perfil Wolf prioriza baixa latência.
+    set_prop xfwm4 /general/use_compositing bool false
+    set_prop xfce4-panel /panels/dark-mode bool true
+
+    mkdir -p "$HOME/.config/gtk-3.0" "$HOME/.config/gtk-4.0" "$HOME/.local/share/icons/default"
+    cat > "$HOME/.config/gtk-3.0/settings.ini" <<'GTK'
+[Settings]
+gtk-application-prefer-dark-theme=true
+gtk-theme-name=Materia-dark
+gtk-icon-theme-name=Papirus-Dark
+gtk-cursor-theme-name=breeze_cursors
+gtk-cursor-theme-size=24
+GTK
+    cp -f "$HOME/.config/gtk-3.0/settings.ini" "$HOME/.config/gtk-4.0/settings.ini"
+    cat > "$HOME/.local/share/icons/default/index.theme" <<'CURSOR'
+[Icon Theme]
+Inherits=breeze_cursors
+CURSOR
+
+    if command -v gsettings >/dev/null 2>&1; then
+        gsettings set org.gnome.desktop.interface gtk-theme 'Materia-dark' 2>/dev/null || true
+        gsettings set org.gnome.desktop.interface icon-theme 'Papirus-Dark' 2>/dev/null || true
+        gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark' 2>/dev/null || true
+    fi
+}
+
+apply_terminal_style() {
+    mkdir -p "$HOME/.config/xfce4/terminal"
+    cat > "$HOME/.config/xfce4/terminal/terminalrc" <<'EOF_TERMINAL'
+[Configuration]
+FontName=MesloLGS Nerd Font 11
+ColorForeground=#FFFFFF
+ColorBackground=#000000
+ColorUseTheme=FALSE
+MiscAlwaysShowTabs=FALSE
+MiscBell=FALSE
+MiscBordersDefault=TRUE
+MiscCursorBlinks=FALSE
+MiscCursorShape=TERMINAL_CURSOR_SHAPE_BLOCK
+MiscDefaultGeometry=120x30
+MiscInheritGeometry=FALSE
+MiscMenubarDefault=FALSE
+MiscMouseAutohide=FALSE
+MiscMouseWheelZoom=TRUE
+MiscToolbarDefault=FALSE
+MiscConfirmClose=TRUE
+MiscCycleTabs=TRUE
+MiscTabCloseButtons=TRUE
+MiscTabCloseMiddleClick=TRUE
+MiscTabPosition=GTK_POS_TOP
+MiscHighlightUrls=TRUE
+ScrollingBar=TERMINAL_SCROLLBAR_NONE
+ScrollingLines=10000
+EOF_TERMINAL
+}
+
+path_to_uri() {
+    python3 - "$1" <<'PY'
+from pathlib import Path
+import sys
+print(Path(sys.argv[1]).expanduser().resolve().as_uri())
+PY
+}
+
+apply_user_dirs() {
+    if command -v xdg-user-dirs-update >/dev/null 2>&1; then
+        xdg-user-dirs-update >/dev/null 2>&1 || true
+    fi
+    mkdir -p "$HOME/.config/gtk-3.0"
+    local bookmarks="$HOME/.config/gtk-3.0/bookmarks" tmp kind path uri label
+    tmp="$(mktemp)"
+    [[ -f "$bookmarks" ]] && cat "$bookmarks" > "$tmp"
+
+    for kind in DOCUMENTS DOWNLOAD MUSIC PICTURES VIDEOS TEMPLATES PUBLICSHARE; do
+        path="$(xdg-user-dir "$kind" 2>/dev/null || true)"
+        [[ -n "$path" && "$path" != "$HOME" && -d "$path" ]] || continue
+        uri="$(path_to_uri "$path")"
+        label="$(basename "$path")"
+        grep -Fq "$uri" "$tmp" 2>/dev/null || printf '%s %s\n' "$uri" "$label" >> "$tmp"
+    done
+    mv -f "$tmp" "$bookmarks"
+}
+
+apply_xfce_helpers() {
+    mkdir -p "$HOME/.config/xfce4" "$HOME/.local/share/xfce4/helpers"
+    cat > "$HOME/.config/xfce4/helpers.rc" <<'HELPERS'
+WebBrowser=custom-WebBrowser
+FileManager=Thunar
+TerminalEmulator=xfce4-terminal
+HELPERS
+    cat > "$HOME/.local/share/xfce4/helpers/custom-WebBrowser.desktop" <<'BROWSER'
+[Desktop Entry]
+NoDisplay=true
+Version=1.0
+Encoding=UTF-8
+Type=X-XFCE-Helper
+X-XFCE-Category=WebBrowser
+X-XFCE-CommandsWithParameter=/usr/bin/google-chrome-stable "%s"
+Icon=google-chrome
+Name=Google Chrome
+X-XFCE-Commands=/usr/bin/google-chrome-stable
+BROWSER
+}
+
+apply_thunar_vscode_action() {
+    command -v code >/dev/null 2>&1 || return 0
+    mkdir -p "$HOME/.config/Thunar"
+    python3 - "$HOME/.config/Thunar/uca.xml" <<'PYUCA'
+from pathlib import Path
+import sys, xml.etree.ElementTree as ET
+p=Path(sys.argv[1])
+try:
+    tree=ET.parse(p); root=tree.getroot()
+except Exception:
+    root=ET.Element('actions'); tree=ET.ElementTree(root)
+name='Abrir esta pasta no VS Code'
+for action in list(root.findall('action')):
+    n=action.find('name')
+    uid=action.find('unique-id')
+    if (n is not None and n.text == name) or (uid is not None and uid.text == 'wolf-open-vscode'):
+        root.remove(action)
+a=ET.SubElement(root,'action')
+for tag,text in [
+    ('icon','visual-studio-code'),
+    ('name',name),
+    ('submenu',''),
+    ('unique-id','wolf-open-vscode'),
+    ('command','code --new-window "%f"'),
+    ('description','Abrir a pasta atual no Visual Studio Code'),
+    ('range','*'),
+    ('patterns','*'),
+]:
+    e=ET.SubElement(a,tag); e.text=text
+ET.SubElement(a,'directories')
+ET.indent(tree, space='  ')
+p.parent.mkdir(parents=True,exist_ok=True)
+tree.write(p,encoding='UTF-8',xml_declaration=True)
+PYUCA
+}
+
+apply_mouse_flat() {
+    if [[ "${XDG_SESSION_TYPE:-x11}" == x11 ]] && [[ -x /usr/local/bin/wolf-disable-mouse-accel.sh ]]; then
+        /usr/local/bin/wolf-disable-mouse-accel.sh >/dev/null 2>&1 || true
+    fi
+}
+
+apply_wallpaper() {
+    [[ -f "$WALLPAPER" ]] || { log "Wallpaper Wolf não encontrado: $WALLPAPER"; return 0; }
+
+    set_prop xfce4-desktop /backdrop/single-workspace-mode bool true
+    set_prop xfce4-desktop /backdrop/single-workspace-number int 0
+
+    local out base prop
+    while IFS= read -r out; do
+        [[ -n "$out" ]] || continue
+        base="/backdrop/screen0/monitor${out}/workspace0"
+        set_prop xfce4-desktop "$base/last-image" string "$WALLPAPER"
+        set_prop xfce4-desktop "$base/image-style" int 5
+        set_prop xfce4-desktop "$base/color-style" int 0
+    done < <(connected_outputs)
+
+    while IFS= read -r prop; do
+        [[ -n "$prop" ]] || continue
+        case "$prop" in
+            */last-image|*/last-single-image|*/image-path)
+                xfconf-query -c xfce4-desktop -p "$prop" -s "$WALLPAPER" >/dev/null 2>&1 || true
+                ;;
+        esac
+    done < <(xfconf-query -c xfce4-desktop -l 2>/dev/null || true)
+
+    if command -v xfdesktop >/dev/null 2>&1; then
+        xfdesktop --reload >/dev/null 2>&1 || true
+    fi
+}
+
+apply_first_login_appearance() {
+    if [[ -f "$APPEARANCE_MARKER" ]]; then
+        log "Aparência inicial já aplicada; preservando tema, wallpaper e preferências do usuário."
+        return 0
+    fi
+
+    apply_style
+    apply_terminal_style
+    apply_wallpaper
+
+    mkdir -p "$(dirname "$APPEARANCE_MARKER")"
+    touch "$APPEARANCE_MARKER"
+    log "Aparência inicial aplicada uma única vez."
+}
+
+backup_current() {
+    local stamp dest
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    dest="$STATE_DIR/$stamp"
+    mkdir -p "$dest"
+    if [[ -d "$HOME/.config/xfce4" ]]; then
+        cp -a "$HOME/.config/xfce4" "$dest/xfce4-config" 2>/dev/null || true
+    fi
+    xfconf-query -c xfce4-panel -lv > "$dest/xfce4-panel.txt" 2>/dev/null || true
+    printf '%s\n' "$dest" > "$STATE_DIR/latest"
+    log "Backup: $dest"
+}
+
+apply_layout() {
+    command -v xfconf-query >/dev/null 2>&1 || return 0
+    command -v xrandr >/dev/null 2>&1 || return 0
+    wait_for_xfce
+
+    local out
+    out="$(primary_output)"
+    [[ -n "$out" ]] || { log "Nenhum monitor ativo detectado."; return 1; }
+
+    # Tudo que pode falhar sem tocar no painel é preparado antes da etapa destrutiva.
+    create_whisker_icon
+    backup_current
+    PANEL_RESTART_PENDING=1
+    xfce4-panel -q >/dev/null 2>&1 || true
+    sleep 1
+    xfconf-query -c xfce4-panel -p /panels -r -R >/dev/null 2>&1 || true
+    xfconf-query -c xfce4-panel -p /plugins -r -R >/dev/null 2>&1 || true
+    xfconf-query -c xfce4-panel -p /configver -r >/dev/null 2>&1 || true
+    rm -rf "$HOME/.config/xfce4/panel/launcher-"* 2>/dev/null || true
+
+    create_main_panel "$out"
+    ensure_panel_css
+    apply_first_login_appearance
+    apply_user_dirs
+    apply_xfce_helpers
+    apply_thunar_vscode_action
+    configure_all_whiskers
+    apply_mouse_flat
+
+    nohup xfce4-panel >/dev/null 2>&1 &
+    sleep 2
+    PANEL_RESTART_PENDING=0
+
+    mkdir -p "$(dirname "$LAYOUT_MARKER")"
+    touch "$LAYOUT_MARKER"
+    log "Painel principal Wolf Linux aplicado em $out."
+}
+
+status() {
+    printf 'Wolf XFCE Desktop Setup v%s\n' "$VERSION"
+    local marker_state="pendente" appearance_state="pendente"
+    [[ -f "$LAYOUT_MARKER" ]] && marker_state="aplicado"
+    [[ -f "$APPEARANCE_MARKER" ]] && appearance_state="aplicada/preservada"
+    printf 'Layout inicial: %s\n' "$marker_state"
+    printf 'Aparência inicial: %s\n' "$appearance_state"
+    printf 'Tema: %s\n' "$(xfconf-query -c xsettings -p /Net/ThemeName 2>/dev/null || true)"
+    printf 'Tema XFWM: %s\n' "$(xfconf-query -c xfwm4 -p /general/theme 2>/dev/null || true)"
+    printf 'Workspaces: %s\n' "$(xfconf-query -c xfwm4 -p /general/workspace_count 2>/dev/null || true)"
+    printf 'Painéis: '
+    xfconf-query -c xfce4-panel -p /panels 2>/dev/null || true
+    printf 'Placement: %s\n' "$(xfconf-query -c xfwm4 -p /general/placement_mode 2>/dev/null || true)"
+    printf 'Ícone Whisker: %s\n' "$WHISKER_ICON"
+    printf 'Fonte terminal: '
+    grep '^FontName=' "$HOME/.config/xfce4/terminal/terminalrc" 2>/dev/null || true
+}
+
+case "${1:-apply}" in
+    apply)
+        wait_for_xfce
+        if (( FORCE == 0 )); then
+            if [[ -f "$LAYOUT_MARKER" ]] || compgen -G "${XDG_CONFIG_HOME:-$HOME/.config}/wolf-linux/xfce-layout-v*.done" >/dev/null; then
+                # Layout e aparência são política de PRIMEIRO LOGIN. Revisões
+                # futuras não reconstroem o painel de um usuário já configurado.
+                exit 0
+            fi
+        fi
+        apply_layout
+        ;;
+    force|--force)
+        FORCE=1
+        apply_layout
+        ;;
+    css|ensure-css)
+        ensure_panel_css
+        ;;
+    status) status ;;
+    *) echo "Uso: $0 [apply|force|status]" >&2; exit 2 ;;
+esac
+XFCE_SETUP
+    chmod 755 /mnt/usr/local/bin/wolf-xfce-desktop-setup
+
+    cat > /mnt/usr/local/bin/wolf-xfce-multimonitor <<'XFCE_MM'
+#!/usr/bin/env bash
+if [[ -z "${BASH_VERSION:-}" ]]; then
+    exec /usr/bin/env bash "$0" "$@"
+fi
+set -Eeuo pipefail
+
+VERSION="0.5"
+DISABLED_MARKER="${XDG_CONFIG_HOME:-$HOME/.config}/wolf-linux/xfce-multimonitor.disabled"
+
+log(){ printf '[Wolf XFCE MultiMonitor] %s\n' "$*"; }
+
+set_prop() {
+    local channel="$1" prop="$2" type="$3" value="$4"
+    if xfconf-query -c "$channel" -p "$prop" >/dev/null 2>&1; then
+        xfconf-query -c "$channel" -p "$prop" -s "$value" >/dev/null 2>&1 || true
+    else
+        xfconf-query -c "$channel" -p "$prop" -n -t "$type" -s "$value" >/dev/null 2>&1 || true
+    fi
+}
+
+set_int_array() {
+    local channel="$1" prop="$2"; shift 2
+    local args=(xfconf-query -c "$channel" -p "$prop") v
+    xfconf-query -c "$channel" -p "$prop" -r >/dev/null 2>&1 || true
+    args+=( -n -a )
+    for v in "$@"; do args+=( -t int -s "$v" ); done
+    "${args[@]}" >/dev/null 2>&1 || true
+}
+
+set_string_array() {
+    local channel="$1" prop="$2"; shift 2
+    local args=(xfconf-query -c "$channel" -p "$prop") v
+    xfconf-query -c "$channel" -p "$prop" -r >/dev/null 2>&1 || true
+    args+=( -n -a )
+    for v in "$@"; do args+=( -t string -s "$v" ); done
+    "${args[@]}" >/dev/null 2>&1 || true
+}
+
+monitor_outputs() { xrandr --listmonitors 2>/dev/null | awk 'NR>1 {print $NF}'; }
+primary_output() {
+    local out
+    out="$(xrandr --listmonitors 2>/dev/null | awk 'NR>1 && /\*/ {print $NF; exit}')"
+    [[ -n "$out" ]] || out="$(monitor_outputs | head -n1)"
+    printf '%s\n' "$out"
+}
+
+next_plugin_id() {
+    local max=0 prop id
+    while IFS= read -r prop; do
+        [[ "$prop" =~ ^/plugins/plugin-([0-9]+)$ ]] || continue
+        id="${BASH_REMATCH[1]}"
+        (( id > max )) && max="$id"
+    done < <(xfconf-query -c xfce4-panel -l 2>/dev/null | grep -E '^/plugins/plugin-[0-9]+$' || true)
+    echo $((max + 1))
+}
+
+panel_ids() { xfconf-query -c xfce4-panel -p /panels 2>/dev/null | grep -E '^[0-9]+$' || true; }
+
+launcher_source() {
+    case "$1" in
+        browser)  printf '%s\n' /usr/share/applications/wolf-xfce-browser.desktop ;;
+        home)     printf '%s\n' /usr/share/applications/wolf-xfce-home.desktop ;;
+        terminal) printf '%s\n' /usr/share/applications/wolf-xfce-terminal.desktop ;;
+        *) return 1 ;;
+    esac
+}
+
+create_launcher() {
+    local id="$1" kind="$2" source base dir
+    source="$(launcher_source "$kind")"
+    [[ -f "$source" ]] || return 1
+    base="$(basename "$source")"
+    dir="$HOME/.config/xfce4/panel/launcher-$id"
+    mkdir -p "$dir"
+    cp -f "$source" "$dir/$base"
+    chmod 644 "$dir/$base"
+    set_prop xfce4-panel "/plugins/plugin-$id" string launcher
+    set_string_array xfce4-panel "/plugins/plugin-$id/items" "$base"
+}
+
+configure_whisker() {
+    local id="$1"
+    set_prop xfce4-panel "/plugins/plugin-$id" string whiskermenu
+    local icon="$HOME/.local/share/icons/wolf-whisker.png"
+    local rc="$HOME/.config/xfce4/panel/whiskermenu-${id}.rc"
+    mkdir -p "$(dirname "$rc")"
+    touch "$rc"
+    if [[ -f "$icon" ]]; then
+        if grep -q '^button-icon=' "$rc"; then
+            sed -i "s|^button-icon=.*|button-icon=$icon|" "$rc"
+        else
+            printf 'button-icon=%s\n' "$icon" >> "$rc"
+        fi
+    fi
+    for kv in 'show-button-title=false' 'show-button-icon=true'; do
+        local key="${kv%%=*}" value="${kv#*=}"
+        if grep -q "^${key}=" "$rc"; then sed -i "s|^${key}=.*|${key}=${value}|" "$rc"; else printf '%s\n' "$kv" >> "$rc"; fi
+    done
+}
+
+configure_tasklist() {
+    local id="$1"
+    set_prop xfce4-panel "/plugins/plugin-$id" string tasklist
+    set_prop xfce4-panel "/plugins/plugin-$id/include-all-monitors" bool false
+    set_prop xfce4-panel "/plugins/plugin-$id/include-all-workspaces" bool false
+    set_prop xfce4-panel "/plugins/plugin-$id/grouping" uint 1
+    set_prop xfce4-panel "/plugins/plugin-$id/show-labels" bool true
+}
+
+create_secondary_layout() {
+    local pid="$1" out="$2" next id
+    local ids=()
+    next="$(next_plugin_id)"
+
+    set_prop xfce4-panel "/panels/panel-$pid/output-name" string "$out"
+    set_prop xfce4-panel "/panels/panel-$pid/position" string 'p=8;x=0;y=0'
+    set_prop xfce4-panel "/panels/panel-$pid/position-locked" bool true
+    set_prop xfce4-panel "/panels/panel-$pid/length" uint 100
+    set_prop xfce4-panel "/panels/panel-$pid/size" uint 36
+    set_prop xfce4-panel "/panels/panel-$pid/nrows" uint 1
+    set_prop xfce4-panel "/panels/panel-$pid/span-monitors" bool false
+    set_prop xfce4-panel "/panels/panel-$pid/autohide-behavior" uint 0
+    set_prop xfce4-panel "/panels/panel-$pid/wolf-managed" bool true
+    set_prop xfce4-panel "/panels/panel-$pid/wolf-layout-version" int 5
+
+    id="$next"; next=$((next+1)); ids+=("$id"); configure_whisker "$id"
+    id="$next"; next=$((next+1)); ids+=("$id"); create_launcher "$id" browser
+    id="$next"; next=$((next+1)); ids+=("$id"); create_launcher "$id" home
+    id="$next"; next=$((next+1)); ids+=("$id"); create_launcher "$id" terminal
+    id="$next"; next=$((next+1)); ids+=("$id"); configure_tasklist "$id"
+    id="$next"; next=$((next+1)); ids+=("$id"); set_prop xfce4-panel "/plugins/plugin-$id" string separator; set_prop xfce4-panel "/plugins/plugin-$id/expand" bool true; set_prop xfce4-panel "/plugins/plugin-$id/style" uint 0
+    id="$next"; ids+=("$id"); set_prop xfce4-panel "/plugins/plugin-$id" string clock
+
+    set_int_array xfce4-panel "/panels/panel-$pid/plugin-ids" "${ids[@]}"
+}
+
+ensure_tasklists_local() {
+    local prop type
+    while IFS= read -r prop; do
+        [[ "$prop" =~ ^/plugins/plugin-[0-9]+$ ]] || continue
+        type="$(xfconf-query -c xfce4-panel -p "$prop" 2>/dev/null || true)"
+        [[ "$type" == tasklist ]] || continue
+        set_prop xfce4-panel "$prop/include-all-monitors" bool false
+        set_prop xfce4-panel "$prop/include-all-workspaces" bool false
+    done < <(xfconf-query -c xfce4-panel -l 2>/dev/null | grep -E '^/plugins/plugin-[0-9]+$' || true)
+}
+
+apply_layout() {
+    [[ -e "$DISABLED_MARKER" ]] && return 0
+    command -v xfconf-query >/dev/null 2>&1 || return 0
+    command -v xrandr >/dev/null 2>&1 || return 0
+
+    local primary out pid max_panel=1 used current_output
+    local -a outputs=() panels=() managed=() secondary_outputs=() unused_managed=()
+    mapfile -t outputs < <(monitor_outputs)
+    ((${#outputs[@]})) || return 0
+    primary="$(primary_output)"
+
+    mapfile -t panels < <(panel_ids)
+    if ((${#panels[@]} == 0)); then
+        # Recuperação excepcional: só reconstrua o layout base se realmente
+        # não existir painel algum. Em condições normais, nunca reescrevemos
+        # preferências de plugins já existentes.
+        /usr/local/bin/wolf-xfce-desktop-setup force >/dev/null 2>&1 || true
+        mapfile -t panels < <(panel_ids)
+    fi
+
+    # A única preferência do painel principal gerenciada continuamente é o
+    # output físico. Não tocamos em tamanho, scroll, autohide, plugins etc.
+    current_output="$(xfconf-query -c xfce4-panel -p /panels/panel-1/output-name 2>/dev/null || true)"
+    if [[ -n "$primary" && "$current_output" != "$primary" ]]; then
+        set_prop xfce4-panel /panels/panel-1/output-name string "$primary"
+        log "painel principal associado a $primary"
+    fi
+
+    for out in "${outputs[@]}"; do
+        [[ "$out" == "$primary" ]] || secondary_outputs+=("$out")
+    done
+
+    for pid in "${panels[@]}"; do
+        (( pid > max_panel )) && max_panel="$pid"
+        [[ "$pid" == 1 ]] && continue
+        if [[ "$(xfconf-query -c xfce4-panel -p "/panels/panel-$pid/wolf-managed" 2>/dev/null || true)" == true ]]; then
+            managed+=("$pid")
+        fi
+    done
+
+    declare -A assigned=()
+    for out in "${secondary_outputs[@]}"; do
+        for pid in "${managed[@]}"; do
+            if [[ "$(xfconf-query -c xfce4-panel -p "/panels/panel-$pid/output-name" 2>/dev/null || true)" == "$out" ]]; then
+                assigned["$out"]="$pid"
+                break
+            fi
+        done
+    done
+
+    # Não fazemos mais "upgrade destrutivo" de painéis já existentes por
+    # versão. O usuário pode personalizar scroll, tamanho, plugins e comportamento
+    # à vontade; esses ajustes sobrevivem a reboot e hotplug.
+    for pid in "${managed[@]}"; do
+        used=0
+        for out in "${!assigned[@]}"; do
+            [[ "${assigned[$out]}" == "$pid" ]] && used=1
+        done
+        (( used == 0 )) && unused_managed+=("$pid")
+    done
+
+    for out in "${secondary_outputs[@]}"; do
+        [[ -n "${assigned[$out]:-}" ]] && continue
+        if ((${#unused_managed[@]})); then
+            pid="${unused_managed[0]}"
+            unused_managed=("${unused_managed[@]:1}")
+            set_prop xfce4-panel "/panels/panel-$pid/output-name" string "$out"
+            assigned["$out"]="$pid"
+            log "painel Wolf existente reassociado a $out (panel-$pid)"
+        else
+            max_panel=$((max_panel + 1)); pid="$max_panel"
+            panels+=("$pid")
+            set_int_array xfce4-panel /panels "${panels[@]}"
+            create_secondary_layout "$pid" "$out"
+            assigned["$out"]="$pid"
+            log "painel secundário criado em $out (panel-$pid)"
+        fi
+    done
+
+    # Esta é parte essencial da política multimonitor e não altera scroll nem
+    # demais preferências do tasklist.
+    ensure_tasklists_local
+
+    # NÃO execute xfce4-panel -r aqui. O painel observa xfconf em tempo real e
+    # um restart no login estava sobrescrevendo/perturbando ajustes do usuário.
+}
+
+status() {
+    printf 'Wolf XFCE MultiMonitor v%s\n' "$VERSION"
+    local auto_state='ativado'
+    [[ -e "$DISABLED_MARKER" ]] && auto_state='desativado'
+    printf 'Automático: %s\n' "$auto_state"
+    xrandr --listmonitors 2>/dev/null || true
+    echo 'Painéis:'
+    local pid
+    while IFS= read -r pid; do
+        local suffix=""
+        [[ "$(xfconf-query -c xfce4-panel -p "/panels/panel-$pid/wolf-managed" 2>/dev/null || true)" == true ]] && suffix=" [Wolf]"
+        printf '  panel-%s -> %s%s\n' "$pid" \
+            "$(xfconf-query -c xfce4-panel -p "/panels/panel-$pid/output-name" 2>/dev/null || echo Automatic)" \
+            "$suffix"
+    done < <(panel_ids)
+}
+
+watch_loop() {
+    command -v xev >/dev/null 2>&1 || {
+        log "xev não encontrado; aplicando layout uma vez e encerrando o watcher."
+        apply_layout
+        return 0
+    }
+
+    # Reconciliação leve no início da sessão. Como apply_layout é não destrutivo,
+    # isso não reinicia o painel nem restaura preferências padrão.
+    apply_layout
+
+    local line now last_apply=0
+    while true; do
+        while IFS= read -r line; do
+            [[ -e "$DISABLED_MARKER" ]] && continue
+            if [[ "$line" == *"RRScreenChangeNotify event"* || "$line" == *"RRNotify event"* ]]; then
+                now="$(date +%s%3N)"
+                # XRandR pode emitir vários eventos para uma única operação.
+                # Debounce sem polling: apenas ignore a rajada por 1500 ms.
+                if (( now - last_apply < 1500 )); then
+                    continue
+                fi
+                last_apply="$now"
+                sleep 1
+                apply_layout
+            fi
+        done < <(LC_ALL=C xev -root -event randr 2>/dev/null)
+
+        # Reinicie o listener somente se xev morrer inesperadamente.
+        sleep 2
+    done
+}
+
+case "${1:-apply}" in
+    apply) apply_layout ;;
+    watch) watch_loop ;;
+    status) status ;;
+    enable) rm -f "$DISABLED_MARKER"; apply_layout ;;
+    disable) mkdir -p "$(dirname "$DISABLED_MARKER")"; touch "$DISABLED_MARKER" ;;
+    *) echo "Uso: $0 [apply|watch|status|enable|disable]" >&2; exit 2 ;;
+esac
+XFCE_MM
+    chmod 755 /mnt/usr/local/bin/wolf-xfce-multimonitor
+
+    # Whisker: Super abre o menu do monitor do ponteiro, ancorado ao botão.
+    cat > /mnt/usr/local/bin/wolf-xfce-whisker-current <<'XFCE_WHISKER'
+#!/usr/bin/env bash
+if [[ -z "${BASH_VERSION:-}" ]]; then exec /usr/bin/env bash "$0" "$@"; fi
+set -Eeuo pipefail
+
+# Abre a instância do Whisker pertencente ao monitor onde está o ponteiro,
+# sempre ancorada ao BOTÃO do painel. O bool:false é importante: versões
+# recentes do Whisker aceitam o parâmetro "popup" com um booleano que define
+# se o menu deve nascer no ponteiro (true) ou junto ao applet (false).
+
+command -v xfconf-query >/dev/null 2>&1 || exit 1
+command -v xrandr >/dev/null 2>&1 || exit 1
+command -v xfce4-panel >/dev/null 2>&1 || exit 1
+
+mouse_x=0
+mouse_y=0
+if command -v xdotool >/dev/null 2>&1; then
+    while IFS='=' read -r key value; do
+        case "$key" in
+            X) mouse_x="$value" ;;
+            Y) mouse_y="$value" ;;
+        esac
+    done < <(xdotool getmouselocation --shell 2>/dev/null || true)
+fi
+
+# Uma única consulta ao RandR por acionamento da tecla.
+randr_query="$(xrandr --query 2>/dev/null || true)"
+randr_monitors="$(xrandr --listmonitors 2>/dev/null || true)"
+
+point_output=""
+while IFS= read -r line; do
+    [[ "$line" == *" connected "* ]] || continue
+    out="${line%% *}"
+    if [[ "$line" =~ ([0-9]+)x([0-9]+)\+(-?[0-9]+)\+(-?[0-9]+) ]]; then
+        w="${BASH_REMATCH[1]}"
+        h="${BASH_REMATCH[2]}"
+        x="${BASH_REMATCH[3]}"
+        y="${BASH_REMATCH[4]}"
+        if (( mouse_x >= x && mouse_x < x+w && mouse_y >= y && mouse_y < y+h )); then
+            point_output="$out"
+            break
+        fi
+    fi
+done <<< "$randr_query"
+
+primary_output="$(awk 'NR>1 && /\*/ {print $NF; exit}' <<< "$randr_monitors")"
+[[ -n "$primary_output" ]] || primary_output="$(awk '$2=="connected" {print $1; exit}' <<< "$randr_query")"
+[[ -n "$point_output" ]] || point_output="$primary_output"
+
+panel_id=""
+first_panel=""
+while IFS= read -r p; do
+    [[ "$p" =~ ^[0-9]+$ ]] || continue
+    [[ -n "$first_panel" ]] || first_panel="$p"
+    out="$(xfconf-query -c xfce4-panel -p "/panels/panel-$p/output-name" 2>/dev/null || true)"
+    if [[ "$out" == "$point_output" ]]; then
+        panel_id="$p"
+        break
+    fi
+    if [[ "$point_output" == "$primary_output" && "$out" == "Automatic" ]]; then
+        panel_id="$p"
+    fi
+done < <(xfconf-query -c xfce4-panel -p /panels 2>/dev/null || true)
+
+monitor_count="$(awk 'NR>1 {n++} END {print n+0}' <<< "$randr_monitors")"
+if [[ -z "$panel_id" && "$monitor_count" -le 1 ]]; then
+    panel_id="$first_panel"
+fi
+
+whisker_id=""
+if [[ -n "$panel_id" ]]; then
+    while IFS= read -r id; do
+        [[ "$id" =~ ^[0-9]+$ ]] || continue
+        type="$(xfconf-query -c xfce4-panel -p "/plugins/plugin-$id" 2>/dev/null || true)"
+        if [[ "$type" == "whiskermenu" ]]; then
+            whisker_id="$id"
+            break
+        fi
+    done < <(xfconf-query -c xfce4-panel -p "/panels/panel-$panel_id/plugin-ids" 2>/dev/null || true)
+fi
+
+if [[ -n "$whisker_id" ]]; then
+    # O booleano false força popup junto ao applet, e não sob o ponteiro.
+    if xfce4-panel --plugin-event="whiskermenu-${whisker_id}:popup:bool:false" >/dev/null 2>&1; then
+        exit 0
+    fi
+
+    # Fallback apenas para builds antigos. Nunca use --pointer.
+    if command -v xfce4-popup-whiskermenu >/dev/null 2>&1 \
+       && xfce4-popup-whiskermenu --instance="$whisker_id" >/dev/null 2>&1; then
+        exit 0
+    fi
+fi
+
+if (( monitor_count <= 1 )) && command -v xfce4-popup-whiskermenu >/dev/null 2>&1; then
+    exec xfce4-popup-whiskermenu
+fi
+
+printf '[Wolf XFCE Whisker] Não encontrei uma instância do Whisker no monitor %s.\n' \
+    "${point_output:-desconhecido}" >&2
+exit 1
+XFCE_WHISKER
+    chmod 755 /mnt/usr/local/bin/wolf-xfce-whisker-current
+
+    # Fallback de posicionamento: aplicações iniciadas pelo Whisker seguem o
+    # monitor em que a instância do menu foi aberta.
+    cat > /mnt/usr/local/bin/wolf-xfce-whisker-placement <<'XFCE_PLACEMENT'
+#!/usr/bin/env bash
+if [[ -z "${BASH_VERSION:-}" ]]; then exec /usr/bin/env bash "$0" "$@"; fi
+set -u
+
+VERSION="0.2"
+RUNTIME_BASE="${XDG_RUNTIME_DIR:-/tmp}/wolf-linux"
+PID_FILE="$RUNTIME_BASE/xfce-whisker-placement.pid"
+CONTEXT_FILE="$RUNTIME_BASE/xfce-launch-context.tsv"
+CONTEXT_TTL_MS=8000
+WHISKER_TTL_MS=6000
+
+log(){ printf '[Wolf XFCE Window Placement] %s\n' "$*"; }
+now_ms(){ date +%s%3N; }
+
+monitor_for_point() {
+    local px="$1" py="$2" line out w h x y
+    while IFS= read -r line; do
+        [[ "$line" == *" connected "* ]] || continue
+        out="${line%% *}"
+        if [[ "$line" =~ ([0-9]+)x([0-9]+)\+(-?[0-9]+)\+(-?[0-9]+) ]]; then
+            w="${BASH_REMATCH[1]}"; h="${BASH_REMATCH[2]}"
+            x="${BASH_REMATCH[3]}"; y="${BASH_REMATCH[4]}"
+            if (( px >= x && px < x+w && py >= y && py < y+h )); then
+                printf '%s\t%s\t%s\t%s\t%s\n' "$out" "$x" "$y" "$w" "$h"
+                return 0
+            fi
+        fi
+    done < <(xrandr --query 2>/dev/null || true)
+    return 1
+}
+
+pointer_target() {
+    local loc mx=0 my=0 key value
+    loc="$(xdotool getmouselocation --shell 2>/dev/null || true)"
+    while IFS='=' read -r key value; do
+        case "$key" in
+            X) mx="$value" ;;
+            Y) my="$value" ;;
+        esac
+    done <<< "$loc"
+    [[ "$mx" =~ ^-?[0-9]+$ && "$my" =~ ^-?[0-9]+$ ]] || return 1
+    monitor_for_point "$mx" "$my"
+}
+
+monitor_for_window() {
+    local wid="$1" geometry cx cy key value
+    local wx=0 wy=0 ww=0 wh=0
+    geometry="$(xdotool getwindowgeometry --shell "$wid" 2>/dev/null || true)"
+    [[ -n "$geometry" ]] || return 1
+    while IFS='=' read -r key value; do
+        case "$key" in
+            X) wx="$value" ;;
+            Y) wy="$value" ;;
+            WIDTH) ww="$value" ;;
+            HEIGHT) wh="$value" ;;
+        esac
+    done <<< "$geometry"
+    [[ "$wx" =~ ^-?[0-9]+$ && "$wy" =~ ^-?[0-9]+$ && "$ww" =~ ^[0-9]+$ && "$wh" =~ ^[0-9]+$ ]] || return 1
+    cx=$((wx + ww / 2)); cy=$((wy + wh / 2))
+    monitor_for_point "$cx" "$cy"
+}
+
+window_class() {
+    local wid="$1" class
+    class="$(xprop -id "$wid" WM_CLASS 2>/dev/null || true)"
+    class="${class#*= }"
+    printf '%s\n' "$class"
+}
+
+is_whisker_window() {
+    local wid="$1" class pid cmd name
+    [[ "$wid" =~ ^0x[0-9a-fA-F]+$ ]] || return 1
+
+    class="$(window_class "$wid")"
+    if [[ "${class,,}" == *wrapper-2.0* ]]; then
+        name="$(xprop -id "$wid" _NET_WM_NAME WM_NAME 2>/dev/null || true)"
+        if [[ "${name,,}" == *whisker* || "${name,,}" == *'menu whisker'* ]]; then
+            return 0
+        fi
+    fi
+
+    pid="$(xdotool getwindowpid "$((wid))" 2>/dev/null || true)"
+    if [[ "$pid" =~ ^[0-9]+$ && -r "/proc/$pid/cmdline" ]]; then
+        cmd="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
+        [[ "$cmd" == *wrapper-2.0* && "$cmd" == *whiskermenu* ]] && return 0
+    fi
+    return 1
+}
+
+candidate_window() {
+    local wid="$1" class type
+    class="$(window_class "$wid")"
+    case "${class,,}" in
+        *xfce4-panel*|*wrapper-2.0*|*xfdesktop*|*xfce4-notifyd*|*alttab*) return 1 ;;
+    esac
+
+    type="$(xprop -id "$wid" _NET_WM_WINDOW_TYPE 2>/dev/null || true)"
+    case "$type" in
+        *_NET_WM_WINDOW_TYPE_DESKTOP*|*_NET_WM_WINDOW_TYPE_DOCK*|*_NET_WM_WINDOW_TYPE_NOTIFICATION*|*_NET_WM_WINDOW_TYPE_TOOLTIP*|*_NET_WM_WINDOW_TYPE_POPUP_MENU*) return 1 ;;
+    esac
+    return 0
+}
+
+window_matches_expected() {
+    local wid="$1" expected="$2" i class
+    [[ -z "$expected" ]] && return 0
+    for ((i=0; i<10; i++)); do
+        class="$(window_class "$wid")"
+        if [[ -n "$class" ]] && grep -Eiq "$expected" <<< "$class"; then
+            return 0
+        fi
+        sleep 0.05
+    done
+    return 1
+}
+
+window_is_on_target() {
+    local wid="$1" tx="$2" ty="$3" tw="$4" th="$5" geometry key value
+    local wx=0 wy=0 ww=0 wh=0 cx cy
+    geometry="$(xdotool getwindowgeometry --shell "$((wid))" 2>/dev/null || true)"
+    [[ -n "$geometry" ]] || return 1
+    while IFS='=' read -r key value; do
+        case "$key" in
+            X) wx="$value" ;;
+            Y) wy="$value" ;;
+            WIDTH) ww="$value" ;;
+            HEIGHT) wh="$value" ;;
+        esac
+    done <<< "$geometry"
+    cx=$((wx + ww / 2)); cy=$((wy + wh / 2))
+    (( cx >= tx && cx < tx+tw && cy >= ty && cy < ty+th ))
+}
+
+move_window_to_target() {
+    local wid="$1" target_x="$2" target_y="$3" target_w="$4" target_h="$5"
+    local geometry key value wx=0 wy=0 ww=0 wh=0 cx cy current
+    local src_x=0 src_y=0 local_x local_y max_x max_y new_x new_y state
+    local was_max_h=0 was_max_v=0 was_fullscreen=0
+
+    geometry="$(xdotool getwindowgeometry --shell "$((wid))" 2>/dev/null || true)"
+    [[ -n "$geometry" ]] || return 1
+    while IFS='=' read -r key value; do
+        case "$key" in
+            X) wx="$value" ;;
+            Y) wy="$value" ;;
+            WIDTH) ww="$value" ;;
+            HEIGHT) wh="$value" ;;
+        esac
+    done <<< "$geometry"
+    [[ "$wx" =~ ^-?[0-9]+$ && "$wy" =~ ^-?[0-9]+$ && "$ww" =~ ^[0-9]+$ && "$wh" =~ ^[0-9]+$ ]] || return 1
+
+    cx=$((wx + ww / 2)); cy=$((wy + wh / 2))
+    if (( cx >= target_x && cx < target_x+target_w && cy >= target_y && cy < target_y+target_h )); then
+        return 0
+    fi
+
+    current="$(monitor_for_point "$cx" "$cy" 2>/dev/null || true)"
+    if [[ -n "$current" ]]; then
+        IFS=$'\t' read -r _ src_x src_y _ _ <<< "$current"
+    fi
+
+    local_x=$((wx - src_x)); local_y=$((wy - src_y))
+    (( local_x < 0 )) && local_x=0
+    (( local_y < 0 )) && local_y=0
+    max_x=$((target_w - ww)); max_y=$((target_h - wh))
+    (( max_x < 0 )) && max_x=0
+    (( max_y < 0 )) && max_y=0
+    (( local_x > max_x )) && local_x="$max_x"
+    (( local_y > max_y )) && local_y="$max_y"
+    new_x=$((target_x + local_x)); new_y=$((target_y + local_y))
+
+    state="$(xprop -id "$wid" _NET_WM_STATE 2>/dev/null || true)"
+    [[ "$state" == *_NET_WM_STATE_MAXIMIZED_HORZ* ]] && was_max_h=1
+    [[ "$state" == *_NET_WM_STATE_MAXIMIZED_VERT* ]] && was_max_v=1
+    [[ "$state" == *_NET_WM_STATE_FULLSCREEN* ]] && was_fullscreen=1
+
+    if (( was_max_h || was_max_v || was_fullscreen )); then
+        wmctrl -ir "$wid" -b remove,fullscreen,maximized_vert,maximized_horz >/dev/null 2>&1 || true
+        sleep 0.04
+    fi
+
+    xdotool windowmove --sync "$((wid))" "$new_x" "$new_y" >/dev/null 2>&1 || return 1
+
+    if (( was_max_h )); then wmctrl -ir "$wid" -b add,maximized_horz >/dev/null 2>&1 || true; fi
+    if (( was_max_v )); then wmctrl -ir "$wid" -b add,maximized_vert >/dev/null 2>&1 || true; fi
+    if (( was_fullscreen )); then wmctrl -ir "$wid" -b add,fullscreen >/dev/null 2>&1 || true; fi
+    return 0
+}
+
+settle_and_move() {
+    local wid="$1" tx="$2" ty="$3" tw="$4" th="$5"
+    # O Chromium pode restaurar a geometria gravada alguns instantes depois de
+    # mapear a janela. Trabalhamos apenas quando uma janela realmente surge:
+    # não existe polling contínuo aqui.
+    sleep 0.18
+    move_window_to_target "$wid" "$tx" "$ty" "$tw" "$th" || true
+    sleep 0.65
+    if ! window_is_on_target "$wid" "$tx" "$ty" "$tw" "$th"; then
+        move_window_to_target "$wid" "$tx" "$ty" "$tw" "$th" || true
+    fi
+}
+
+arm_context() {
+    local expected="${1:-}" target out x y w h expiry tmp
+    command -v xdotool >/dev/null 2>&1 || return 1
+    command -v xrandr >/dev/null 2>&1 || return 1
+    target="$(pointer_target 2>/dev/null || true)"
+    [[ -n "$target" ]] || return 1
+    IFS=$'\t' read -r out x y w h <<< "$target"
+    expiry=$(( $(now_ms) + CONTEXT_TTL_MS ))
+    mkdir -p "$RUNTIME_BASE"
+    tmp="$CONTEXT_FILE.$$"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$expiry" "$out" "$x" "$y" "$w" "$h" "$expected" > "$tmp"
+    mv -f "$tmp" "$CONTEXT_FILE"
+}
+
+read_context() {
+    CTX_EXPIRY=0; CTX_X=0; CTX_Y=0; CTX_W=0; CTX_H=0; CTX_EXPECTED=""
+    [[ -r "$CONTEXT_FILE" ]] || return 1
+    IFS=$'\t' read -r CTX_EXPIRY _ CTX_X CTX_Y CTX_W CTX_H CTX_EXPECTED < "$CONTEXT_FILE" || return 1
+    if [[ ! "$CTX_EXPIRY" =~ ^[0-9]+$ ]] || (( $(now_ms) >= CTX_EXPIRY )); then
+        rm -f "$CONTEXT_FILE"
+        return 1
+    fi
+    return 0
+}
+
+consume_context() { rm -f "$CONTEXT_FILE"; }
+
+parse_client_ids() {
+    local line="$1" payload token
+    local -a tokens=()
+    payload="${line#*#}"
+    payload="${payload//,/ }"
+    read -r -a tokens <<< "$payload"
+    for token in "${tokens[@]}"; do
+        if [[ "$token" =~ ^0x[0-9a-fA-F]+$ ]]; then
+            printf '%s\n' "${token,,}"
+        fi
+    done
+}
+
+initial_clients() {
+    local line
+    line="$(xprop -root _NET_CLIENT_LIST 2>/dev/null || true)"
+    parse_client_ids "$line"
+}
+
+handle_explicit_active() {
+    local wid="$1"
+    read_context || return 1
+    candidate_window "$wid" || return 1
+    window_matches_expected "$wid" "$CTX_EXPECTED" || return 1
+    settle_and_move "$wid" "$CTX_X" "$CTX_Y" "$CTX_W" "$CTX_H"
+    consume_context
+    return 0
+}
+
+daemon_loop() {
+    command -v xdotool >/dev/null 2>&1 || exit 0
+    command -v xrandr >/dev/null 2>&1 || exit 0
+    command -v wmctrl >/dev/null 2>&1 || exit 0
+    command -v xprop >/dev/null 2>&1 || exit 0
+
+    mkdir -p "$RUNTIME_BASE"
+    if [[ -r "$PID_FILE" ]]; then
+        local old_pid
+        old_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+        if [[ "$old_pid" =~ ^[0-9]+$ ]] && kill -0 "$old_pid" 2>/dev/null; then
+            exit 0
+        fi
+    fi
+    printf '%s\n' "$$" > "$PID_FILE"
+
+    trap 'pkill -P "$$" -x xprop >/dev/null 2>&1 || true; rm -f "$PID_FILE"' EXIT
+    trap 'exit 0' INT TERM
+
+    local whisker_until=0 target_out="" target_x=0 target_y=0 target_w=0 target_h=0
+    local line wid target now id active
+    declare -A seen=() current=()
+
+    while IFS= read -r id; do seen["${id,,}"]=1; done < <(initial_clients)
+
+    while true; do
+        while IFS= read -r line; do
+            if [[ "$line" == _NET_ACTIVE_WINDOW* ]]; then
+                active="$(grep -Eo '0x[0-9a-fA-F]+' <<< "$line" | tail -n1 || true)"
+                [[ "$active" =~ ^0x[0-9a-fA-F]+$ && "$active" != 0x0 ]] || continue
+                active="${active,,}"
+
+                if is_whisker_window "$active"; then
+                    target="$(monitor_for_window "$((active))" 2>/dev/null || true)"
+                    if [[ -n "$target" ]]; then
+                        IFS=$'\t' read -r target_out target_x target_y target_w target_h <<< "$target"
+                        whisker_until=$(( $(now_ms) + WHISKER_TTL_MS ))
+                    fi
+                else
+                    # Contextos explícitos vêm dos launchers Wolf (Chrome,
+                    # Terminal, Home). Isso também cobre um app já existente
+                    # que é apenas reativado e não cria um novo client X11.
+                    handle_explicit_active "$active" || true
+                fi
+                continue
+            fi
+
+            [[ "$line" == _NET_CLIENT_LIST* ]] || continue
+            current=()
+            while IFS= read -r id; do
+                [[ -n "$id" ]] && current["$id"]=1
+            done < <(parse_client_ids "$line")
+
+            for id in "${!current[@]}"; do
+                [[ -n "${seen[$id]:-}" ]] && continue
+
+                if is_whisker_window "$id"; then
+                    target="$(monitor_for_window "$((id))" 2>/dev/null || true)"
+                    if [[ -n "$target" ]]; then
+                        IFS=$'\t' read -r target_out target_x target_y target_w target_h <<< "$target"
+                        whisker_until=$(( $(now_ms) + WHISKER_TTL_MS ))
+                    fi
+                    continue
+                fi
+
+                candidate_window "$id" || continue
+
+                if read_context && window_matches_expected "$id" "$CTX_EXPECTED"; then
+                    settle_and_move "$id" "$CTX_X" "$CTX_Y" "$CTX_W" "$CTX_H"
+                    consume_context
+                    continue
+                fi
+
+                now="$(now_ms)"
+                if (( whisker_until > now )) && [[ -n "$target_out" ]]; then
+                    settle_and_move "$id" "$target_x" "$target_y" "$target_w" "$target_h"
+                    # O contexto do Whisker vale somente para a primeira nova
+                    # janela. Evite capturar abas destacadas/diálogos depois.
+                    whisker_until=0
+                    target_out=""
+                fi
+            done
+
+            seen=()
+            for id in "${!current[@]}"; do seen["$id"]=1; done
+        done < <(LC_ALL=C xprop -root -spy _NET_CLIENT_LIST _NET_ACTIVE_WINDOW 2>/dev/null)
+
+        # xprop só deve sair se a sessão X estiver encerrando ou por erro.
+        # Em erro transitório, reinicie o listener sem criar um loop agressivo.
+        sleep 2
+    done
+}
+
+start_daemon() {
+    mkdir -p "$RUNTIME_BASE"
+    if [[ -r "$PID_FILE" ]]; then
+        local pid
+        pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+        if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then return 0; fi
+    fi
+    nohup "$0" daemon >/dev/null 2>&1 &
+}
+
+stop_daemon() {
+    local pid=""
+    [[ -r "$PID_FILE" ]] && pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+    if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null || true
+    fi
+    rm -f "$PID_FILE" "$CONTEXT_FILE"
+}
+
+status_daemon() {
+    printf 'Wolf XFCE Window Placement v%s\n' "$VERSION"
+    printf 'Modo: orientado a eventos (_NET_CLIENT_LIST/_NET_ACTIVE_WINDOW); sem polling do mouse\n'
+    printf 'Whisker: novas janelas seguem o monitor onde o menu foi aberto\n'
+    printf 'Launchers Wolf: seguem o monitor do ponteiro no momento do clique\n'
+    if [[ -r "$PID_FILE" ]]; then
+        local pid
+        pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+        if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+            printf 'Processo: ativo (PID %s)\n' "$pid"
+            return 0
+        fi
+    fi
+    printf 'Processo: parado\n'
+    return 1
+}
+
+case "${1:-start}" in
+    daemon) daemon_loop ;;
+    start) start_daemon ;;
+    stop) stop_daemon ;;
+    restart) stop_daemon; start_daemon ;;
+    status) status_daemon ;;
+    arm) shift; arm_context "${1:-}" ;;
+    *) echo "Uso: $0 {start|stop|restart|status|daemon|arm [regex-classe]}" >&2; exit 2 ;;
+esac
+XFCE_PLACEMENT
+    chmod 755 /mnt/usr/local/bin/wolf-xfce-whisker-placement
+
+    cat > /mnt/usr/local/bin/wolf-xfce-launch-here <<'XFCE_LAUNCH_HERE'
+#!/usr/bin/env bash
+if [[ -z "${BASH_VERSION:-}" ]]; then exec /usr/bin/env bash "$0" "$@"; fi
+set -Eeuo pipefail
+
+profile="${1:-}"
+[[ -n "$profile" ]] || { echo "Uso: $0 {browser|home|terminal|command} [args...]" >&2; exit 2; }
+shift || true
+
+arm() {
+    local expected="$1"
+    if [[ -x /usr/local/bin/wolf-xfce-whisker-placement ]]; then
+        /usr/local/bin/wolf-xfce-whisker-placement arm "$expected" >/dev/null 2>&1 || true
+    fi
+}
+
+case "$profile" in
+    browser)
+        arm 'google-chrome|Google-chrome|chrome'
+        exec /usr/bin/google-chrome-stable "$@"
+        ;;
+    home)
+        arm 'Thunar|thunar'
+        exec /usr/bin/thunar "$@"
+        ;;
+    terminal)
+        arm 'xfce4-terminal|Xfce4-terminal'
+        exec /usr/bin/xfce4-terminal "$@"
+        ;;
+    command)
+        expected="${1:-}"
+        [[ -n "$expected" ]] || { echo "Uso: $0 command <regex-classe> <comando> [args...]" >&2; exit 2; }
+        shift
+        (($# > 0)) || { echo "Comando ausente." >&2; exit 2; }
+        arm "$expected"
+        exec "$@"
+        ;;
+    *)
+        echo "Perfil desconhecido: $profile" >&2
+        exit 2
+        ;;
+esac
+XFCE_LAUNCH_HERE
+    chmod 755 /mnt/usr/local/bin/wolf-xfce-launch-here
+
+    # MIME/helpers específicos do XFCE.
+    cat > /mnt/usr/local/bin/wolf-xfce-default-apps <<'XFCE_DEFAULTS'
+#!/usr/bin/env bash
+if [[ -z "${BASH_VERSION:-}" ]]; then exec /usr/bin/env bash "$0" "$@"; fi
+set -Eeuo pipefail
+
+DESKTOP="${XDG_CURRENT_DESKTOP:-${XDG_SESSION_DESKTOP:-}}"
+case "$DESKTOP" in *XFCE*|*Xfce*) ;; *) exit 0 ;; esac
+
+set_default() {
+    local desktop="$1"; shift
+    [[ -r "/usr/share/applications/$desktop" ]] || return 0
+    local mime
+    for mime in "$@"; do
+        [[ -n "$mime" ]] || continue
+        xdg-mime default "$desktop" "$mime" >/dev/null 2>&1 || true
+        if command -v gio >/dev/null 2>&1; then
+            gio mime "$mime" "$desktop" >/dev/null 2>&1 || true
+        fi
+    done
+}
+
+set_from_desktop() {
+    local desktop="$1" filter="${2:-}" prefix=""
+    [[ -r "/usr/share/applications/$desktop" ]] || return 0
+
+    if [[ -n "$filter" && "${filter: -2}" == '/*' ]]; then
+        prefix="${filter::-1}"
+    fi
+
+    while IFS= read -r mime; do
+        [[ -n "$mime" ]] || continue
+        if [[ -n "$filter" ]]; then
+            if [[ -n "$prefix" ]]; then
+                [[ "$mime" == "$prefix"* ]] || continue
+            else
+                [[ "$mime" == "$filter" ]] || continue
+            fi
+        fi
+        set_default "$desktop" "$mime"
+    done < <(sed -n 's/^MimeType=//p' "/usr/share/applications/$desktop" | tr ';' '\n' | sed '/^$/d')
+}
+
+# Helpers nativos do XFCE.
+mkdir -p "$HOME/.config/xfce4"
+cat > "$HOME/.config/xfce4/helpers.rc" <<'HELPERS'
+WebBrowser=custom-WebBrowser
+FileManager=Thunar
+TerminalEmulator=xfce4-terminal
+HELPERS
+
+mkdir -p "$HOME/.local/share/xfce4/helpers"
+cat > "$HOME/.local/share/xfce4/helpers/custom-WebBrowser.desktop" <<'BROWSER'
+[Desktop Entry]
+NoDisplay=true
+Version=1.0
+Encoding=UTF-8
+Type=X-XFCE-Helper
+X-XFCE-Category=WebBrowser
+X-XFCE-CommandsWithParameter=/usr/bin/google-chrome-stable "%s"
+Icon=google-chrome
+Name=Google Chrome
+X-XFCE-Commands=/usr/bin/google-chrome-stable
+BROWSER
+
+# Pastas.
+set_default thunar.desktop inode/directory
+
+# Web.
+set_default google-chrome.desktop \
+    text/html application/xhtml+xml \
+    x-scheme-handler/http x-scheme-handler/https \
+    x-scheme-handler/about x-scheme-handler/unknown
+
+# Imagens: usa todos os MIME types anunciados pelo Ristretto.
+set_from_desktop org.xfce.ristretto.desktop 'image/*'
+set_default org.xfce.ristretto.desktop \
+    image/jpeg image/png image/gif image/webp image/bmp image/tiff image/svg+xml image/avif image/heif image/heic
+
+# PDFs/documentos de leitura.
+set_from_desktop xreader.desktop
+set_default xreader.desktop application/pdf application/postscript application/epub+zip application/x-cbr application/x-cbz
+
+# Texto/código simples.
+set_from_desktop org.xfce.mousepad.desktop 'text/*'
+set_default org.xfce.mousepad.desktop application/json application/xml application/x-shellscript
+
+# Vídeo e áudio.
+set_from_desktop io.github.mpc_qt.mpc-qt.desktop 'video/*'
+set_default io.github.mpc_qt.mpc-qt.desktop application/x-matroska
+set_from_desktop audacious.desktop 'audio/*'
+set_default audacious.desktop application/xspf+xml
+
+# Compactados.
+set_from_desktop xarchiver.desktop
+
+# Torrents/magnet.
+set_from_desktop transmission-qt.desktop
+set_default transmission-qt.desktop application/x-bittorrent x-scheme-handler/magnet
+
+# Escritório.
+set_from_desktop libreoffice-writer.desktop
+set_from_desktop libreoffice-calc.desktop
+set_from_desktop libreoffice-impress.desktop
+
+# LibreOffice anuncia text/plain entre os MIME types possíveis. Como o bloco
+# de escritório roda depois do Mousepad, reafirme explicitamente o editor de
+# texto simples por último para que .txt nunca caia no Writer.
+set_default org.xfce.mousepad.desktop text/plain
+
+# Reforça navegador padrão também pela API do xdg-settings.
+xdg-settings set default-web-browser google-chrome.desktop >/dev/null 2>&1 || true
+XFCE_DEFAULTS
+    chmod 755 /mnt/usr/local/bin/wolf-xfce-default-apps
+
+    # Alt+Tab por monitor sob o ponteiro (X11/XRandR).
+    cat > /mnt/usr/local/bin/wolf-xfce-alttab <<'XFCE_ALTTAB'
+#!/usr/bin/env bash
+if [[ -z "${BASH_VERSION:-}" ]]; then
+    exec /usr/bin/env bash "$0" "$@"
+fi
+set -Eeuo pipefail
+
+VERSION="0.1"
+ALTTAB_ARGS=(-w 1 -d 0 -sc 0 -vp pointer)
+
+log(){ printf '[Wolf XFCE AltTab] %s\n' "$*"; }
+
+set_xfconf() {
+    local channel="$1" prop="$2" type="$3" value="$4"
+    if xfconf-query -c "$channel" -p "$prop" >/dev/null 2>&1; then
+        xfconf-query -c "$channel" -p "$prop" -s "$value" >/dev/null
+    else
+        xfconf-query -c "$channel" -p "$prop" -n -t "$type" -s "$value" >/dev/null
+    fi
+}
+
+configure_shortcuts() {
+    command -v xfconf-query >/dev/null 2>&1 || {
+        log "xfconf-query não encontrado; atalhos não foram alterados."
+        return 1
+    }
+
+    # O xfwm4 pode restaurar o atalho padrão se a ação cycle_windows_key
+    # simplesmente desaparecer. Mantemos as ações em combinações privadas
+    # praticamente inalcançáveis e deixamos Alt+Tab/Alt+Shift+Tab vazios.
+    set_xfconf xfce4-keyboard-shortcuts '/xfwm4/custom/override' bool true
+    set_xfconf xfce4-keyboard-shortcuts '/xfwm4/custom/<Primary><Alt><Shift>F23' string cycle_windows_key
+    set_xfconf xfce4-keyboard-shortcuts '/xfwm4/custom/<Primary><Alt><Shift>F24' string cycle_reverse_windows_key
+    set_xfconf xfce4-keyboard-shortcuts '/xfwm4/custom/<Alt>Tab' string ''
+    set_xfconf xfce4-keyboard-shortcuts '/xfwm4/custom/<Alt><Shift>Tab' string ''
+}
+
+start_switcher() {
+    if ! command -v alttab >/dev/null 2>&1; then
+        log "alttab não está instalado; mantendo o Alt+Tab nativo intacto."
+        return 1
+    fi
+
+    configure_shortcuts
+
+    if pgrep -u "$UID" -x alttab >/dev/null 2>&1; then
+        return 0
+    fi
+
+    local state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/wolf-linux"
+    mkdir -p "$state_dir"
+    nohup alttab "${ALTTAB_ARGS[@]}" >"$state_dir/xfce-alttab.log" 2>&1 &
+}
+
+stop_switcher() {
+    pkill -u "$UID" -x alttab >/dev/null 2>&1 || true
+}
+
+restart_switcher() {
+    stop_switcher
+    start_switcher
+}
+
+status_switcher() {
+    printf 'Wolf XFCE AltTab v%s\n' "$VERSION"
+    printf 'Modo: workspace atual + monitor sob o ponteiro\n'
+    printf 'Argumentos: alttab %s\n' "${ALTTAB_ARGS[*]}"
+    if command -v alttab >/dev/null 2>&1; then
+        printf 'Binário: %s\n' "$(command -v alttab)"
+    else
+        printf 'Binário: ausente\n'
+    fi
+    if pgrep -u "$UID" -x alttab >/dev/null 2>&1; then
+        printf 'Processo: ativo\n'
+    else
+        printf 'Processo: parado\n'
+    fi
+}
+
+case "${1:-start}" in
+    configure) configure_shortcuts ;;
+    start) start_switcher ;;
+    restart) restart_switcher ;;
+    stop) stop_switcher ;;
+    status) status_switcher ;;
+    *)
+        echo "Uso: $0 {configure|start|restart|stop|status}" >&2
+        exit 2
+        ;;
+esac
+XFCE_ALTTAB
+    chmod 755 /mnt/usr/local/bin/wolf-xfce-alttab
+
+    # Mouse X11/libinput sem aceleração também no XFCE.
+    mkdir -p /mnt/etc/X11/xorg.conf.d
+    cat > /mnt/etc/X11/xorg.conf.d/50-wolf-mouse-no-accel.conf <<'XFCE_MOUSE_XORG'
+Section "InputClass"
+    Identifier "Wolf Linux - Mouse sem aceleracao"
+    MatchIsPointer "on"
+    MatchIsTouchpad "off"
+    MatchDriver "libinput"
+    Option "AccelProfile" "flat"
+    Option "AccelSpeed" "0"
+EndSection
+XFCE_MOUSE_XORG
+
+    cat > /mnt/usr/local/bin/wolf-disable-mouse-accel.sh <<'XFCE_MOUSE'
+#!/usr/bin/env bash
+set -u
+sleep 2
+command -v xinput >/dev/null 2>&1 || exit 0
+while IFS= read -r id; do
+    [[ "$id" =~ ^[0-9]+$ ]] || continue
+    props="$(xinput list-props "$id" 2>/dev/null || true)"
+    grep -q 'libinput Tapping Enabled' <<<"$props" && continue
+    line="$(grep -m1 'libinput Accel Profile Enabled (' <<<"$props" || true)"
+    values="${line##*:}"; values="$(tr -d '[:space:]' <<<"$values")"
+    case "$values" in
+        *,*,*) xinput set-prop "$id" 'libinput Accel Profile Enabled' 0 1 0 >/dev/null 2>&1 || true ;;
+        *,*)   xinput set-prop "$id" 'libinput Accel Profile Enabled' 0 1 >/dev/null 2>&1 || true ;;
+    esac
+    if grep -q 'libinput Accel Speed' <<<"$props"; then
+        xinput set-prop "$id" 'libinput Accel Speed' 0 >/dev/null 2>&1 || true
+    fi
+done < <(xinput list --id-only 2>/dev/null || true)
+XFCE_MOUSE
+    chmod 755 /mnt/usr/local/bin/wolf-disable-mouse-accel.sh
+
+    cat > /mnt/etc/xdg/autostart/wolf-xfce-mouse-flat.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Wolf Linux - Mouse sem aceleração
+Exec=/usr/local/bin/wolf-disable-mouse-accel.sh
+OnlyShowIn=XFCE;
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+
+    cat > /mnt/etc/xdg/autostart/wolf-xfce-default-apps.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Wolf Linux - Aplicativos padrão XFCE
+Exec=sh -c 'sleep 7; /usr/local/bin/wolf-xfce-default-apps'
+OnlyShowIn=XFCE;
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+
+    cat > /mnt/etc/xdg/autostart/wolf-xfce-desktop-setup.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Wolf Linux - XFCE Desktop Setup
+Exec=sh -c 'sleep 5; /usr/local/bin/wolf-xfce-desktop-setup apply'
+OnlyShowIn=XFCE;
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+
+    cat > /mnt/etc/xdg/autostart/wolf-xfce-multimonitor.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Wolf Linux - XFCE MultiMonitor
+Exec=sh -c 'sleep 8; /usr/local/bin/wolf-xfce-multimonitor watch'
+OnlyShowIn=XFCE;
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+
+    cat > /mnt/etc/xdg/autostart/wolf-xfce-alttab.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Wolf Linux - Alt+Tab por monitor
+Exec=sh -c 'sleep 6; /usr/local/bin/wolf-xfce-alttab start'
+OnlyShowIn=XFCE;
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+
+    cat > /mnt/etc/xdg/autostart/wolf-xfce-whisker-placement.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Wolf Linux - Posicionamento de janelas por contexto
+Exec=sh -c 'sleep 6; /usr/local/bin/wolf-xfce-whisker-placement start'
+OnlyShowIn=XFCE;
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+
+    cat > /mnt/usr/local/bin/wolf-xfce-super-setup <<'XFCE_SUPER_SETUP'
+#!/usr/bin/env bash
+if [[ -z "${BASH_VERSION:-}" ]]; then exec /usr/bin/env bash "$0" "$@"; fi
+set -Eeuo pipefail
+
+DESKTOP="${XDG_CURRENT_DESKTOP:-${XDG_SESSION_DESKTOP:-}}"
+case "$DESKTOP" in *XFCE*|*Xfce*) ;; *) exit 0 ;; esac
+
+command -v xfconf-query >/dev/null 2>&1 || exit 0
+command -v xcape >/dev/null 2>&1 || exit 0
+
+# Sem atraso fixo de vários segundos: espere somente o xfconf ficar pronto.
+for _ in {1..20}; do
+    if xfconf-query -c xfce4-keyboard-shortcuts -l >/dev/null 2>&1; then
+        break
+    fi
+    sleep 0.1
+done
+
+setcmd() {
+    local key="$1" cmd="$2"
+    xfconf-query -c xfce4-keyboard-shortcuts \
+        -p "/commands/custom/$key" -n -t string -s "$cmd" 2>/dev/null \
+        || xfconf-query -c xfce4-keyboard-shortcuts \
+            -p "/commands/custom/$key" -s "$cmd" 2>/dev/null || true
+}
+
+while IFS= read -r prop; do
+    [[ "$prop" == /commands/custom/* ]] || continue
+    value="$(xfconf-query -c xfce4-keyboard-shortcuts -p "$prop" 2>/dev/null || true)"
+    if [[ "$prop" == '/commands/custom/<Primary><Alt><Shift>F12' ]]; then
+        xfconf-query -c xfce4-keyboard-shortcuts -p "$prop" -r >/dev/null 2>&1 || true
+        continue
+    fi
+    if [[ "$prop" == *Super* && "$value" == *xfce4-popup-whiskermenu* ]]; then
+        xfconf-query -c xfce4-keyboard-shortcuts -p "$prop" -r >/dev/null 2>&1 || true
+    fi
+done < <(xfconf-query -c xfce4-keyboard-shortcuts -l 2>/dev/null || true)
+
+# Autoridade única dos atalhos Wolf no XFCE.
+setcmd '<Primary><Alt>t' '/usr/local/bin/wolf-xfce-launch-here terminal'
+setcmd '<Super>e' '/usr/local/bin/wolf-xfce-launch-here home'
+setcmd '<Primary><Alt><Shift>F12' '/usr/local/bin/wolf-xfce-whisker-current'
+
+pkill -x xcape >/dev/null 2>&1 || true
+exec xcape -e 'Super_L=Control_L|Alt_L|Shift_L|F12'
+
+XFCE_SUPER_SETUP
+    chmod 755 /mnt/usr/local/bin/wolf-xfce-super-setup
+
+    cat > /mnt/etc/xdg/autostart/wolf-xfce-super-key.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Wolf Linux - Super abre Whisker por monitor
+Exec=/usr/local/bin/wolf-xfce-super-setup
+OnlyShowIn=XFCE;
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+
+    # O XFCE tem um setup próprio para estilo/wallpaper, com retry até o
+    # xfconfd/xfdesktop estarem prontos. Evita a corrida dos helpers genéricos.
+    for desktop_file in         /mnt/etc/xdg/autostart/wolf-first-login-style.desktop         /mnt/etc/xdg/autostart/wolf-first-login-wallpaper.desktop; do
+        [[ -f "$desktop_file" ]] || continue
+        if grep -q '^NotShowIn=' "$desktop_file"; then
+            sed -i '/^NotShowIn=/ s/;*$/;XFCE;/' "$desktop_file"
+        else
+            printf 'NotShowIn=XFCE;\n' >> "$desktop_file"
+        fi
+    done
+
+    ok "Perfil XFCE X11-only + Whisker/Alt+Tab/aplicações por monitor + painel Wolf + defaults + MultiMonitor preparado."
 }
 
 install_mate_windows_layout() {
@@ -3044,6 +5189,17 @@ EOF
     fetch_wolf_asset \
         "plymouth/logo.png" \
         /mnt/usr/share/plymouth/themes/wolf-linux/logo.png
+
+    # Ícone de distribuição para telas "Sobre o sistema". O campo LOGO do
+    # os-release aponta para wolf-linux; distributor-logo cobre aplicativos
+    # mais antigos que ainda usam o nome convencional.
+    mkdir -p /mnt/usr/share/icons/hicolor/256x256/apps /mnt/usr/share/pixmaps
+    cp -f /mnt/usr/share/plymouth/themes/wolf-linux/logo.png \
+        /mnt/usr/share/icons/hicolor/256x256/apps/wolf-linux.png
+    cp -f /mnt/usr/share/plymouth/themes/wolf-linux/logo.png \
+        /mnt/usr/share/pixmaps/wolf-linux.png
+    cp -f /mnt/usr/share/plymouth/themes/wolf-linux/logo.png \
+        /mnt/usr/share/pixmaps/distributor-logo.png
 
     cat > /mnt/usr/share/plymouth/themes/wolf-linux/wolf-linux.plymouth <<'EOF'
 [Plymouth Theme]
@@ -3356,6 +5512,13 @@ case "$DESKTOP" in
             plasma-apply-wallpaperimage "$WALLPAPER" >/dev/null 2>&1 || true
         fi
         ;;
+    *XFCE*|*Xfce*)
+        if command -v xfconf-query >/dev/null 2>&1; then
+            while IFS= read -r prop; do
+                xfconf-query -c xfce4-desktop -p "$prop" -s "$WALLPAPER" 2>/dev/null || true
+            done < <(xfconf-query -c xfce4-desktop -l 2>/dev/null | grep '/last-image$' || true)
+        fi
+        ;;
 esac
 
 touch "$MARKER"
@@ -3430,6 +5593,9 @@ case "$DESKTOP" in
         ;;
     *KDE*|*Plasma*)
         TEXT_EDITOR_DESKTOP="org.kde.kwrite.desktop"
+        ;;
+    *XFCE*|*Xfce*)
+        TEXT_EDITOR_DESKTOP="org.xfce.mousepad.desktop"
         ;;
 esac
 
@@ -3615,6 +5781,9 @@ case "$DESKTOP" in
         ;;
     *KDE*|*Plasma*)
         FILE_MANAGER_DESKTOP="org.kde.dolphin.desktop"
+        ;;
+    *XFCE*|*Xfce*)
+        FILE_MANAGER_DESKTOP="thunar.desktop"
         ;;
 esac
 
@@ -3831,6 +6000,96 @@ EOF
         fi
 
         # ----------------------------------------------------
+        # CinnVIIStarkMenu — roteamento da tecla Super por monitor.
+        #
+        # O CinnVII ainda usa a API antiga addHotKey(), que não escolhe a
+        # instância conforme o monitor atual. O Cinnamon 6.6 já possui a API
+        # multi-instância addXletHotKey(), usada para encaminhar o atalho à
+        # instância do applet localizada no monitor do ponteiro. O helper
+        # abaixo aplica somente essa compatibilidade e mantém backup do JS.
+        # ----------------------------------------------------
+        mkdir -p /mnt/usr/local/bin
+        cat > /mnt/usr/local/bin/wolf-cinnvii-hotkey-fix <<'WOLF_CINNVII_HOTKEY_FIX'
+#!/usr/bin/env bash
+if [[ -z "${BASH_VERSION:-}" ]]; then
+    exec /usr/bin/env bash "$0" "$@"
+fi
+set -Eeuo pipefail
+
+UUID="CinnVIIStarkMenu@NikoKrause"
+APPLET_DIR="${1:-$HOME/.local/share/cinnamon/applets/$UUID}"
+
+command -v python3 >/dev/null 2>&1 || { echo "[ERRO] python3 não encontrado." >&2; exit 1; }
+[[ -d "$APPLET_DIR" ]] || { echo "[ERRO] CinnVII não encontrado em: $APPLET_DIR" >&2; exit 1; }
+
+python3 - "$APPLET_DIR" <<'PY'
+from pathlib import Path
+import re
+import shutil
+import sys
+
+root = Path(sys.argv[1])
+files = sorted(root.rglob("applet.js"))
+
+# CinnVII é multiversão: 3.2, 3.4 e 4.2 variam em whitespace e até no
+# ponto-e-vírgula do removeHotKey(). Use regex para suportar todas elas.
+old_add_re = re.compile(
+    r'Main\.keybindingManager\.addHotKey\(\s*'
+    r'"overlay-key-"\s*\+\s*this\.instance_id\s*,\s*'
+    r'this\.overlayKey\s*,\s*Lang\.bind\(this,\s*function\(\)\s*\{'
+)
+old_remove_re = re.compile(
+    r'Main\.keybindingManager\.removeHotKey\(\s*'
+    r'"overlay-key-"\s*\+\s*this\.instance_id\s*\)[ \t]*;?'
+)
+new_add_re = re.compile(
+    r'Main\.keybindingManager\.addXletHotKey\(\s*this\s*,\s*'
+    r'"overlay-key"\s*,\s*this\.overlayKey\s*,\s*'
+    r'Lang\.bind\(this,\s*function\(\)\s*\{'
+)
+new_remove_re = re.compile(
+    r'Main\.keybindingManager\.removeXletHotKey\(\s*this\s*,\s*'
+    r'"overlay-key"\s*\)[ \t]*;?'
+)
+new_add = 'Main.keybindingManager.addXletHotKey(this, "overlay-key", this.overlayKey, Lang.bind(this, function() {'
+new_remove = 'Main.keybindingManager.removeXletHotKey(this, "overlay-key");'
+
+supported = 0
+changed = 0
+for path in files:
+    text = path.read_text(encoding="utf-8")
+    has_old_add = bool(old_add_re.search(text))
+    has_old_remove = bool(old_remove_re.search(text))
+    has_new_add = bool(new_add_re.search(text))
+    has_new_remove = bool(new_remove_re.search(text))
+    if not any((has_old_add, has_old_remove, has_new_add, has_new_remove)):
+        continue
+    supported += 1
+    updated = text
+    if has_old_add:
+        updated = old_add_re.sub(new_add, updated)
+    if has_old_remove:
+        updated = old_remove_re.sub(new_remove, updated)
+    if not (new_add_re.search(updated) and new_remove_re.search(updated)):
+        print(f"[ERRO] patch incompleto em {path}", file=sys.stderr)
+        raise SystemExit(3)
+    if updated == text:
+        continue
+    backup = path.with_name(path.name + ".wolf-before-monitor-hotkey.bak")
+    if not backup.exists():
+        shutil.copy2(path, backup)
+    path.write_text(updated, encoding="utf-8")
+    changed += 1
+
+if supported == 0:
+    print("[ERRO] versão compatível do CinnVII não encontrada", file=sys.stderr)
+    raise SystemExit(4)
+print(f"CinnVII hotkey: supported={supported} changed={changed}")
+PY
+WOLF_CINNVII_HOTKEY_FIX
+        chmod 755 /mnt/usr/local/bin/wolf-cinnvii-hotkey-fix
+
+        # ----------------------------------------------------
         # CinnVIIStarkMenu — menu padrão do perfil Cinnamon.
         #
         # O applet é baixado do Cinnamon Spices oficial durante a instalação
@@ -3869,6 +6128,17 @@ EOF
             rm -rf "$CINNVII_TMP"
         fi
 
+        if [[ -d "$CINNVII_DEST" ]]; then
+            if /mnt/usr/local/bin/wolf-cinnvii-hotkey-fix "$CINNVII_DEST"; then
+                arch-chroot /mnt chown -R \
+                    "$USERNAME_VALUE:$USERNAME_VALUE" \
+                    "/home/$USERNAME_VALUE/.local/share/cinnamon/applets/$CINNVII_UUID"
+                log "CinnVII: tecla Super configurada para o menu do monitor do ponteiro."
+            else
+                warn "Não foi possível aplicar o roteamento multi-monitor da tecla Super no CinnVII."
+            fi
+        fi
+
         # ----------------------------------------------------
         # Wolf MultiMonitor — painéis independentes por monitor.
         #
@@ -3884,7 +6154,7 @@ EOF
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-VERSION="0.3"
+VERSION="0.5"
 BACKUP_ROOT="${XDG_STATE_HOME:-$HOME/.local/state}/wolf-linux/multimonitor"
 CONFIG_ROOT="${XDG_CONFIG_HOME:-$HOME/.config}/wolf-linux"
 DISABLED_MARKER="$CONFIG_ROOT/multimonitor.disabled"
@@ -4049,6 +6319,14 @@ ensure_cinnvii_installed() {
     ok "CinnVIIStarkMenu instalado."
 }
 
+ensure_cinnvii_hotkey_fix() {
+    if command -v wolf-cinnvii-hotkey-fix >/dev/null 2>&1; then
+        if ! wolf-cinnvii-hotkey-fix "$MENU_DIR" >/dev/null 2>&1; then
+            warn "Não foi possível verificar o roteamento da tecla Super do CinnVII."
+        fi
+    fi
+}
+
 copy_menu_settings_to_new_instances() {
     local ids_file="$1"
     local root="$CINNAMON_SPICES_CONFIG_DIR/$MENU_UUID"
@@ -4090,6 +6368,43 @@ for instance_id in new_ids:
 PY
 }
 
+apply_wolf_menu_branding() {
+    local logo="/usr/share/pixmaps/wolf-linux.png"
+    [[ -f "$logo" ]] || return 0
+
+    if gsettings list-keys org.cinnamon 2>/dev/null | grep -Fxq 'app-menu-icon-name'; then
+        gsettings set org.cinnamon app-menu-icon-name 'wolf-linux' 2>/dev/null || true
+    fi
+    if gsettings list-keys org.cinnamon 2>/dev/null | grep -Fxq 'app-menu-label'; then
+        gsettings set org.cinnamon app-menu-label '' 2>/dev/null || true
+    fi
+
+    python3 - "$logo" "$CINNAMON_SPICES_CONFIG_DIR/$MENU_UUID" <<'WOLFJSON'
+import json
+import pathlib
+import sys
+
+logo = sys.argv[1]
+root = pathlib.Path(sys.argv[2])
+if not root.is_dir():
+    raise SystemExit(0)
+
+for path in root.glob("*.json"):
+    try:
+        data = json.loads(path.read_text())
+    except Exception:
+        continue
+    for key, value in (("menu-custom", True), ("menu-icon", logo), ("menu-label", "")):
+        if key in data and isinstance(data[key], dict):
+            data[key]["value"] = value
+        elif key in data:
+            data[key] = value
+        else:
+            data[key] = {"value": value}
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=4) + "\n")
+WOLFJSON
+}
+
 reconcile_cinnamon() {
     check_environment
 
@@ -4100,6 +6415,7 @@ reconcile_cinnamon() {
 
     # Na ISO o CinnVII já vem instalado. No helper manual, tentamos obtê-lo se faltar.
     ensure_cinnvii_installed
+    ensure_cinnvii_hotkey_fix
 
     ids_file="$(mktemp)"
 
@@ -4250,6 +6566,7 @@ PY
     # Cinnamon cria o JSON da nova instância de forma assíncrona.
     sleep 1
     copy_menu_settings_to_new_instances "$ids_file"
+    apply_wolf_menu_branding
     rm -f "$ids_file"
 
     # Valor 1 = janelas de outros monitores somente se eles não tiverem lista própria.
@@ -6052,6 +8369,10 @@ install_gpu_profile() {
             early_modules=(virtio_gpu)
             ;;
 
+        virtualbox)
+            packages=("${VIRTUALBOX_GPU_PACKAGES[@]}")
+            ;;
+
         intel)
             packages=("${INTEL_GPU_PACKAGES[@]}")
             early_modules=(i915)
@@ -6158,6 +8479,12 @@ validate_graphics_stack() {
                 vulkan-virtio \
                 lib32-vulkan-virtio
             ;;
+        virtualbox)
+            arch-chroot /mnt pacman -Q \
+                virtualbox-guest-utils \
+                mesa \
+                lib32-mesa
+            ;;
         nvidia-kepler-nouveau|nvidia-legacy-or-unknown)
             arch-chroot /mnt pacman -Q \
                 vulkan-nouveau \
@@ -6196,7 +8523,504 @@ install_gaming_stack() {
     (( validation_failed == 0 )) ||
         die "A stack gaming não passou na validação."
 
-    ok "Stack gaming instalada."
+    # Xbox Bluetooth: BlueZ cria o HID via UHID e o xpadneo fornece o gamepad.
+    # Carregá-los cedo evita o estado Connected=yes sem /dev/input em firmwares
+    # que dependem do caminho userspace HID do BlueZ.
+    cat > /mnt/etc/modules-load.d/wolf-gamepad.conf <<'EOF'
+uhid
+hid_xpadneo
+EOF
+
+    cat > /mnt/usr/local/bin/wolf-gamepad-setup <<'WOLF_GAMEPAD'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+APP_NAME="Wolf Gamepad Setup"
+VERSION="0.3"
+XPADNEO_MODULE="hid_xpadneo"
+XPADNEO_CONF="/etc/modprobe.d/99-wolf-xpadneo-gamepads.conf"
+XPADNEO_LOAD_CONF="/etc/modules-load.d/xpadneo.conf"
+
+say()  { printf '%s\n' "$*"; }
+info() { printf '[INFO] %s\n' "$*"; }
+ok()   { printf '[OK] %s\n' "$*"; }
+warn() { printf '[AVISO] %s\n' "$*" >&2; }
+die()  { printf '[ERRO] %s\n' "$*" >&2; exit 1; }
+
+need_cmd() { command -v "$1" >/dev/null 2>&1 || die "Comando obrigatório não encontrado: $1"; }
+pause() { read -r -p $'\nPressione Enter para continuar...' _ || true; }
+normalize_mac() { tr '[:lower:]' '[:upper:]' <<<"$1"; }
+
+header() {
+    clear 2>/dev/null || true
+    say "======================================================"
+    say "           ${APP_NAME} v${VERSION}"
+    say "======================================================"
+    say "Perfis atuais:"
+    say "  - Xbox/XInput Bluetooth + xpadneo"
+    say "  - Layout Nintendo (+32) para controles Xbox-like"
+    say ""
+    say "O perfil PS3 poderá ser acrescentado depois."
+    say "======================================================"
+}
+
+xpadneo_installed() { modinfo "$XPADNEO_MODULE" >/dev/null 2>&1; }
+
+kernel_headers_package() {
+    local rel
+    rel="$(uname -r)"
+    case "$rel" in
+        *-zen*) echo "linux-zen-headers" ;;
+        *-lts*) echo "linux-lts-headers" ;;
+        *-hardened*) echo "linux-hardened-headers" ;;
+        *) echo "linux-headers" ;;
+    esac
+}
+
+install_support() {
+    need_cmd pacman
+    local headers
+    headers="$(kernel_headers_package)"
+
+    info "Instalando/verificando suporte geral a gamepads Xbox Bluetooth..."
+    sudo pacman -S --needed --noconfirm \
+        dkms "$headers" bluez bluez-utils steam-devices evtest joyutils
+
+    if pacman -Si xpadneo-dkms >/dev/null 2>&1; then
+        sudo pacman -S --needed --noconfirm xpadneo-dkms
+    elif command -v yay >/dev/null 2>&1; then
+        yay -S --needed --noconfirm xpadneo-dkms
+    elif ! xpadneo_installed; then
+        die "xpadneo-dkms não está nos repositórios configurados e yay não foi encontrado. Instale xpadneo-dkms pelo AUR e execute novamente."
+    fi
+
+    printf '%s\n' uhid | sudo tee /etc/modules-load.d/uhid.conf >/dev/null
+    printf '%s\n' "$XPADNEO_MODULE" | sudo tee "$XPADNEO_LOAD_CONF" >/dev/null
+    sudo systemctl enable --now bluetooth.service >/dev/null 2>&1 || true
+    sudo modprobe uhid
+    sudo modprobe "$XPADNEO_MODULE"
+
+    if [[ -e /dev/uhid ]]; then
+        ok "UHID disponível em /dev/uhid."
+    else
+        warn "/dev/uhid não apareceu; controles Bluetooth HID podem conectar sem criar input device."
+    fi
+    ok "Suporte instalado. uhid e xpadneo serão carregados cedo nos próximos boots."
+}
+
+all_bt_macs() { bluetoothctl devices 2>/dev/null | awk '/^Device / {print $2}'; }
+
+bt_info() { bluetoothctl info "$1" 2>/dev/null || true; }
+
+bt_field() {
+    local mac="$1" field="$2"
+    bt_info "$mac" | sed -n "s/^[[:space:]]*${field}: //p" | head -n1
+}
+
+is_xbox_bt_device() {
+    local mac="$1" info_out
+    info_out="$(bt_info "$mac")"
+    grep -qiE 'Name: Xbox Wireless Controller|Modalias: usb:v045Ep(02FD|0B05|0B13|0B20|0B22)' <<<"$info_out"
+}
+
+xbox_devices() {
+    local mac name connected paired bonded trusted services modalias
+    while read -r mac; do
+        [[ -n "$mac" ]] || continue
+        is_xbox_bt_device "$mac" || continue
+        name="$(bt_field "$mac" Name)"
+        connected="$(bt_field "$mac" Connected)"
+        paired="$(bt_field "$mac" Paired)"
+        bonded="$(bt_field "$mac" Bonded)"
+        trusted="$(bt_field "$mac" Trusted)"
+        services="$(bt_field "$mac" ServicesResolved)"
+        modalias="$(bt_field "$mac" Modalias)"
+        printf '%s|%s|%s|%s|%s|%s|%s|%s\n' \
+            "$(normalize_mac "$mac")" "${name:-?}" "${connected:-?}" "${paired:-?}" \
+            "${bonded:-?}" "${trusted:-?}" "${services:-?}" "${modalias:-?}"
+    done < <(all_bt_macs)
+}
+
+choose_xbox_device() {
+    local -a devs=()
+    mapfile -t devs < <(xbox_devices)
+    ((${#devs[@]} > 0)) || die "Nenhum controle Xbox Bluetooth conhecido foi encontrado. Coloque-o em modo de pareamento e conecte-o primeiro."
+
+    say "Controles Xbox Bluetooth encontrados:"
+    local i row mac name connected paired bonded trusted services modalias
+    for i in "${!devs[@]}"; do
+        row="${devs[$i]}"
+        IFS='|' read -r mac name connected paired bonded trusted services modalias <<<"$row"
+        printf '  %d) %s  %s\n' "$((i+1))" "$mac" "$name"
+        printf '     connected=%s paired=%s bonded=%s trusted=%s services=%s\n' \
+            "$connected" "$paired" "$bonded" "$trusted" "$services"
+        printf '     %s\n' "$modalias"
+    done
+
+    local choice
+    if ((${#devs[@]} == 1)); then
+        choice=1
+    else
+        read -r -p "Escolha o controle: " choice
+        [[ "$choice" =~ ^[0-9]+$ ]] || die "Seleção inválida."
+        ((choice >= 1 && choice <= ${#devs[@]})) || die "Seleção inválida."
+    fi
+
+    IFS='|' read -r SELECTED_MAC SELECTED_NAME _ _ _ _ _ SELECTED_MODALIAS <<<"${devs[$((choice-1))]}"
+    export SELECTED_MAC SELECTED_NAME SELECTED_MODALIAS
+}
+
+input_device_present() {
+    grep -qiE 'N: Name="(Xbox Wireless Controller|.*Xbox.*Controller.*)"' /proc/bus/input/devices 2>/dev/null
+}
+
+input_device_summary() {
+    awk '
+        BEGIN{RS=""; ORS="\n\n"}
+        tolower($0) ~ /xbox wireless controller|xbox.*controller/ {print}
+    ' /proc/bus/input/devices 2>/dev/null || true
+}
+
+input_event_nodes() {
+    awk '
+        BEGIN{RS=""}
+        tolower($0) ~ /xbox wireless controller|xbox.*controller/ {
+            if (match($0, /Handlers=[^\n]*/)) {
+                h=substr($0, RSTART, RLENGTH)
+                n=split(h, a, /[[:space:]]+/)
+                for (i=1; i<=n; i++) if (a[i] ~ /^event[0-9]+$/) print "/dev/input/" a[i]
+            }
+        }
+    ' /proc/bus/input/devices 2>/dev/null | sort -u
+}
+
+xpadneo_hid_devices() {
+    local f
+    for f in /sys/bus/hid/devices/*/uevent; do
+        [[ -r "$f" ]] || continue
+        if grep -qiE 'HID_NAME=.*Xbox Wireless Controller|HID_ID=0005:0000045E:' "$f"; then
+            local dir driver
+            dir="${f%/uevent}"
+            driver="$(basename "$(readlink -f "$dir/driver" 2>/dev/null || true)")"
+            printf '%s | driver=%s\n' "$(basename "$dir")" "${driver:-nenhum}"
+        fi
+    done
+}
+
+wait_for_input() {
+    local seconds="${1:-12}" i
+    for ((i=0; i<seconds; i++)); do
+        input_device_present && return 0
+        sleep 1
+    done
+    return 1
+}
+
+clean_repair_selected() {
+    local mac="$1"
+    warn "Vou remover o registro Bluetooth atual de $mac e criar um pareamento limpo."
+    say "Coloque o controle em modo de pareamento (logo piscando rapidamente)."
+    read -r -p "Pressione Enter para continuar, ou Ctrl+C para cancelar..." _ || true
+
+    bluetoothctl disconnect "$mac" >/dev/null 2>&1 || true
+    bluetoothctl remove "$mac" >/dev/null 2>&1 || true
+    sleep 1
+
+    # Faça uma descoberta curta para o BlueZ voltar a conhecer o endereço antes
+    # do comando pair. `timeout` só limita o scan; não altera o bluetoothd.
+    timeout 8 bluetoothctl scan on >/dev/null 2>&1 || true
+    if ! bluetoothctl pair "$mac"; then
+        warn "Pareamento limpo falhou. Confirme que o controle continua em modo Sync e tente novamente."
+        return 1
+    fi
+    bluetoothctl trust "$mac" >/dev/null 2>&1 || true
+    bluetoothctl connect "$mac" >/dev/null 2>&1 || true
+    sleep 2
+    return 0
+}
+
+repair_selected_gamepad() {
+    need_cmd bluetoothctl
+    sudo modprobe uhid || true
+    sudo modprobe "$XPADNEO_MODULE" || true
+
+    info "Estado atual de ${SELECTED_NAME} (${SELECTED_MAC}):"
+    bt_info "$SELECTED_MAC" | grep -E '^[[:space:]]*(Paired|Bonded|Trusted|Connected|ServicesResolved|Modalias):' || true
+
+    bluetoothctl trust "$SELECTED_MAC" >/dev/null 2>&1 || true
+
+    local paired bonded
+    paired="$(bt_field "$SELECTED_MAC" Paired)"
+    bonded="$(bt_field "$SELECTED_MAC" Bonded)"
+
+    if [[ "$paired" != yes || "$bonded" != yes ]]; then
+        warn "O controle não está completamente pareado/bonded. Connected=yes sozinho NÃO cria um gamepad para Steam."
+        say ""
+        say "Coloque o controle em modo de pareamento (segure o botão Sync até o logo piscar rapidamente)."
+        read -r -p "Pressione Enter quando ele estiver em modo de pareamento..." _ || true
+
+        bluetoothctl disconnect "$SELECTED_MAC" >/dev/null 2>&1 || true
+        info "Solicitando pareamento/bond ao BlueZ..."
+        if ! bluetoothctl pair "$SELECTED_MAC"; then
+            warn "O pareamento falhou. Remover e parear novamente pelo bluetoothctl/Blueman pode ser necessário."
+        fi
+        bluetoothctl trust "$SELECTED_MAC" >/dev/null 2>&1 || true
+    fi
+
+    bluetoothctl connect "$SELECTED_MAC" >/dev/null 2>&1 || true
+    sleep 2
+
+    if wait_for_input 12; then
+        ok "Input device criado. O controle agora pode ser enumerado por SDL/Steam."
+        input_device_summary
+        say "Eventos:"
+        input_event_nodes | sed 's/^/  - /'
+        return 0
+    fi
+
+    paired="$(bt_field "$SELECTED_MAC" Paired)"
+    bonded="$(bt_field "$SELECTED_MAC" Bonded)"
+    warn "Bluetooth está ativo, mas nenhum input device do controle apareceu."
+    say "Paired=${paired:-?} Bonded=${bonded:-?} Connected=$(bt_field "$SELECTED_MAC" Connected || true) ServicesResolved=$(bt_field "$SELECTED_MAC" ServicesResolved || true)"
+    say ""
+    if [[ "$bonded" != yes ]]; then
+        warn "O vínculo criptográfico ainda não foi criado (Bonded=no). Connected=yes sozinho não basta para expor um gamepad."
+        warn "Não vou relaxar ClassicBondedOnly automaticamente, pois isso reduz a política de segurança do BlueZ."
+        local answer=""
+        read -r -p "Remover o registro atual e tentar um pareamento limpo agora? [s/N] " answer || true
+        case "${answer,,}" in
+            s|sim|y|yes)
+                if clean_repair_selected "$SELECTED_MAC" && wait_for_input 12; then
+                    ok "Pareamento limpo concluído e input device criado."
+                    input_device_summary
+                    say "Eventos:"
+                    input_event_nodes | sed 's/^/  - /'
+                    return 0
+                fi
+                ;;
+        esac
+    else
+        warn "O pareamento está correto; verifique abaixo se o dispositivo HID chegou ao kernel/xpadneo."
+        xpadneo_hid_devices || true
+    fi
+
+    if [[ "${SELECTED_MODALIAS:-}" == *p02FDd0903* ]]; then
+        warn "Este PID/firmware 045E:02FD d0903 possui relato upstream com exatamente: conecta no Bluetooth, mas não cria /dev/input."
+        warn "Se Paired/Bonded estiverem corretos, atualize o firmware com Xbox Accessories e depois remova/pareie novamente no Linux."
+    fi
+    return 1
+}
+
+ensure_selected_operational() {
+    if input_device_present; then
+        return 0
+    fi
+    warn "O controle ainda não existe como input device. Vou tentar reparar o pareamento/ativação antes de aplicar o mapeamento."
+    repair_selected_gamepad
+}
+
+read_managed_quirks() {
+    [[ -f "$XPADNEO_CONF" ]] || return 0
+    sed -nE 's/^options[[:space:]]+hid_xpadneo[[:space:]]+quirks=([^[:space:]#]+).*/\1/p' "$XPADNEO_CONF" | tail -n1
+}
+
+write_managed_quirks() {
+    local quirks="$1" tmp
+    tmp="$(mktemp)"
+    {
+        say "# Gerado por ${APP_NAME} v${VERSION}"
+        say "# +32 = layout Nintendo no xpadneo"
+        if [[ -n "$quirks" ]]; then
+            say "options hid_xpadneo quirks=${quirks}"
+        fi
+    } >"$tmp"
+    sudo install -m 0644 "$tmp" "$XPADNEO_CONF"
+    rm -f "$tmp"
+}
+
+reload_selected_after_quirk() {
+    local mac="$1"
+    if [[ -e "/sys/module/${XPADNEO_MODULE}/parameters/quirks" ]]; then
+        local current
+        current="$(read_managed_quirks || true)"
+        printf '%s\n' "$current" | sudo tee "/sys/module/${XPADNEO_MODULE}/parameters/quirks" >/dev/null || true
+    fi
+    if [[ "$(bt_field "$mac" Connected)" == yes ]]; then
+        bluetoothctl disconnect "$mac" >/dev/null 2>&1 || true
+        sleep 2
+    fi
+    bluetoothctl connect "$mac" >/dev/null 2>&1 || true
+    sleep 3
+}
+
+add_nintendo_mapping() {
+    need_cmd bluetoothctl
+    xpadneo_installed || die "hid_xpadneo não está instalado. Use primeiro a opção de instalar suporte."
+    choose_xbox_device
+    ensure_selected_operational || die "O controle não está operacional como input device; não faz sentido aplicar o layout ainda."
+
+    local current new entry
+    current="$(read_managed_quirks || true)"
+    entry="${SELECTED_MAC}+32"
+
+    if [[ -z "$current" ]]; then
+        new="$entry"
+    elif tr ',' '\n' <<<"$current" | grep -Fxiq "$entry"; then
+        new="$current"
+    else
+        new="$(tr ',' '\n' <<<"$current" | awk -v mac="$SELECTED_MAC" 'BEGIN{IGNORECASE=1} index(toupper($0), toupper(mac)) != 1 && NF {print}' | paste -sd, -)"
+        [[ -n "$new" ]] && new+=","
+        new+="$entry"
+    fi
+
+    write_managed_quirks "$new"
+    reload_selected_after_quirk "$SELECTED_MAC"
+
+    ok "Layout Nintendo configurado para ${SELECTED_NAME} (${SELECTED_MAC})."
+    info "Quirks gerenciadas: $new"
+    [[ -r "/sys/module/${XPADNEO_MODULE}/parameters/quirks" ]] \
+        && info "Parâmetro ativo: $(cat "/sys/module/${XPADNEO_MODULE}/parameters/quirks")"
+
+    if input_device_present; then
+        ok "O input device continua presente após a reconexão."
+    else
+        warn "O controle desapareceu de /proc/bus/input/devices após reconectar; rode Diagnóstico/Reparar."
+    fi
+    info "Na Steam ele continuará Xbox-compatible; +32 apenas troca A/B/X/Y no nível do driver."
+}
+
+remove_nintendo_mapping() {
+    need_cmd bluetoothctl
+    choose_xbox_device
+
+    local current new
+    current="$(read_managed_quirks || true)"
+    [[ -n "$current" ]] || { warn "Não há quirks gerenciadas pelo Wolf para remover."; return 0; }
+
+    new="$(tr ',' '\n' <<<"$current" | awk -v mac="$SELECTED_MAC" 'BEGIN{IGNORECASE=1} index(toupper($0), toupper(mac)) != 1 && NF {print}' | paste -sd, -)"
+    if [[ -n "$new" ]]; then
+        write_managed_quirks "$new"
+    else
+        sudo rm -f "$XPADNEO_CONF"
+    fi
+    reload_selected_after_quirk "$SELECTED_MAC"
+    ok "Mapeamento Nintendo removido para ${SELECTED_MAC}."
+}
+
+diagnostics() {
+    need_cmd bluetoothctl
+    say "--- Kernel ---"
+    uname -a
+    say ""
+
+    say "--- Pacotes relevantes ---"
+    pacman -Q xpadneo-dkms steam-devices bluez bluez-utils dkms evtest joyutils 2>/dev/null || true
+    say "Steam: $(command -v steam 2>/dev/null || echo 'comando não encontrado')"
+    say ""
+
+    say "--- UHID / módulos ---"
+    if [[ -e /dev/uhid ]]; then
+        ls -l /dev/uhid
+    else
+        say "/dev/uhid AUSENTE"
+    fi
+    if [[ -r /proc/config.gz ]]; then
+        zgrep -E '^CONFIG_UHID=' /proc/config.gz 2>/dev/null || true
+    fi
+    lsmod | grep -Ei 'xpadneo|xpad|uhid|hid_nintendo' || true
+    say ""
+
+    say "--- Aliases xpadneo para Xbox ---"
+    modinfo "$XPADNEO_MODULE" 2>/dev/null | grep -Ei '^alias:.*045E.*(02FD|0B05|0B13|0B20|0B22)' || true
+    say ""
+
+    say "--- Quirks ativas ---"
+    if [[ -r "/sys/module/${XPADNEO_MODULE}/parameters/quirks" ]]; then
+        cat "/sys/module/${XPADNEO_MODULE}/parameters/quirks"
+    else
+        say "hid_xpadneo não está carregado."
+    fi
+    say ""
+
+    say "--- Configuração persistente Wolf ---"
+    if [[ -f "$XPADNEO_CONF" ]]; then
+        cat "$XPADNEO_CONF"
+    else
+        say "nenhuma"
+    fi
+    say ""
+
+    say "--- Controles Xbox Bluetooth conhecidos ---"
+    local rows
+    rows="$(xbox_devices || true)"
+    if [[ -n "$rows" ]]; then
+        say "${rows//|/ | }"
+    else
+        say "nenhum"
+    fi
+    say ""
+
+    say "--- Dispositivos HID Xbox no sysfs ---"
+    xpadneo_hid_devices || true
+    say ""
+
+    say "--- Dispositivos de entrada relacionados ---"
+    input_device_summary
+    if input_device_present; then
+        say "Event nodes:"
+        input_event_nodes | sed 's/^/  - /'
+    else
+        say "NENHUM input device Xbox encontrado. A Steam não conseguirá enumerar o controle neste estado."
+    fi
+    say ""
+
+    say "--- BlueZ input.conf ---"
+    if [[ -f /etc/bluetooth/input.conf ]]; then
+        grep -E '^[[:space:]]*(UserspaceHID|ClassicBondedOnly|LEAutoSecurity)[[:space:]]*=' /etc/bluetooth/input.conf || say "sem overrides relevantes"
+    else
+        say "arquivo ausente; defaults do BlueZ em uso (UserspaceHID=true, ClassicBondedOnly=true)."
+    fi
+    say ""
+
+    say "--- Logs recentes bluetoothd/xpadneo ---"
+    journalctl -b -u bluetooth --no-pager -n 120 2>/dev/null | grep -Ei 'xbox|hid|bond|uhid|input|reject|02fd|045e' | tail -n 60 || true
+    sudo dmesg 2>/dev/null | grep -Ei 'xpadneo|xbox|045e|02fd|uhid|hid-generic' | tail -n 60 || true
+}
+
+repair_gamepad() {
+    choose_xbox_device
+    repair_selected_gamepad
+}
+
+main_menu() {
+    while true; do
+        header
+        say "1) Instalar/verificar suporte Xbox Bluetooth (xpadneo + Steam)"
+        say "2) Configurar layout Nintendo (+32) em um controle Xbox Bluetooth"
+        say "3) Remover layout Nintendo de um controle"
+        say "4) Diagnóstico completo"
+        say "5) Reparar pareamento e validar input device"
+        say "0) Sair"
+        say ""
+        read -r -p "Opção: " opt
+        case "$opt" in
+            1) install_support; pause ;;
+            2) add_nintendo_mapping; pause ;;
+            3) remove_nintendo_mapping; pause ;;
+            4) diagnostics; pause ;;
+            5) repair_gamepad; pause ;;
+            0) exit 0 ;;
+            *) warn "Opção inválida."; sleep 1 ;;
+        esac
+    done
+}
+
+need_cmd bluetoothctl
+main_menu
+WOLF_GAMEPAD
+    chmod 755 /mnt/usr/local/bin/wolf-gamepad-setup
+
+    ok "Stack gaming instalada (Steam + ferramentas evdev + xpadneo)."
 }
 
 install_mate_wolf_theme() {
@@ -6762,6 +9586,17 @@ EOF
         fi
         ;;
 
+    *XFCE*|*Xfce*)
+        if command -v xfconf-query >/dev/null 2>&1; then
+            xfconf-query -c xsettings -p /Net/ThemeName -s 'Materia-dark' 2>/dev/null || true
+            xfconf-query -c xsettings -p /Net/IconThemeName -s 'Papirus-Dark' 2>/dev/null || true
+            xfconf-query -c xsettings -p /Gtk/CursorThemeName -s 'breeze_cursors' 2>/dev/null || true
+            xfconf-query -c xfwm4 -p /general/theme -s 'Materia-dark' 2>/dev/null || true
+            xfconf-query -c xfwm4 -p /general/use_compositing -n -t bool -s false 2>/dev/null \
+                || xfconf-query -c xfwm4 -p /general/use_compositing -s false 2>/dev/null || true
+        fi
+        ;;
+
     *KDE*|*Plasma*)
         if command -v plasma-apply-colorscheme >/dev/null 2>&1; then
             plasma-apply-colorscheme BreezeDark >/dev/null 2>&1 || true
@@ -6804,6 +9639,723 @@ EOF
     ok "Padrões visuais preparados para o primeiro login."
 }
 
+install_wolf_desktop_branding() {
+    info "Instalando identidade Wolf para menus Cinnamon/KDE..."
+
+    local src="$PROJECT_DIR/tools/wolf-desktop-branding-0.1.sh"
+    [[ -f "$src" ]] || die "Helper de branding ausente no projeto: $src"
+
+    install -Dm0755 "$src" /mnt/usr/local/bin/wolf-desktop-branding
+    mkdir -p /mnt/etc/xdg/autostart
+    cat > /mnt/etc/xdg/autostart/wolf-desktop-branding.desktop <<'WOLF_BRANDING_DESKTOP'
+[Desktop Entry]
+Type=Application
+Name=Wolf Linux - Identidade do desktop
+Comment=Aplica o símbolo Wolf Linux ao menu do Cinnamon e Plasma uma única vez
+Exec=/usr/local/bin/wolf-desktop-branding
+OnlyShowIn=X-Cinnamon;KDE;
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+WOLF_BRANDING_DESKTOP
+
+    ok "Branding de menu Cinnamon/KDE preparado para o primeiro login."
+}
+
+install_wolf_grub_manager() {
+    info "Instalando Wolf GRUB Manager..."
+
+    mkdir -p /mnt/usr/local/bin
+
+    cat > /mnt/usr/local/bin/wolf-grub-manager <<'WOLF_GRUB_MANAGER'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+APP_NAME="Wolf GRUB Manager"
+VERSION="0.3"
+
+GRUB_CFG="/boot/grub/grub.cfg"
+GRUB_DEFAULT="/etc/default/grub"
+GRUB_D="/etc/grub.d"
+WOLF_ENTRIES_DIR="/etc/grub.d/wolf-entries.d"
+WOLF_CUSTOM_SCRIPT="/etc/grub.d/42_wolf_custom"
+BACKUP_ROOT="/var/backups/wolf-grub"
+
+say()  { printf '%s\n' "$*"; }
+info() { printf '[INFO] %s\n' "$*"; }
+ok()   { printf '[OK] %s\n' "$*"; }
+warn() { printf '[AVISO] %s\n' "$*" >&2; }
+die()  { printf '[ERRO] %s\n' "$*" >&2; exit 1; }
+
+pause() {
+    read -r -p $'\nPressione Enter para continuar...' _ || true
+}
+
+header() {
+    clear 2>/dev/null || true
+    say "======================================================"
+    say "              ${APP_NAME} v${VERSION}"
+    say "======================================================"
+    say "Gerencia as FONTES do menu GRUB, não edita grub.cfg"
+    say "manualmente. Operações destrutivas exigem confirmação."
+    say "======================================================"
+}
+
+need_cmd() {
+    command -v "$1" >/dev/null 2>&1 || die "Comando obrigatório não encontrado: $1"
+}
+
+require_grub() {
+    need_cmd grub-mkconfig
+    [[ -d "$GRUB_D" ]] || die "$GRUB_D não existe."
+    [[ -f "$GRUB_DEFAULT" ]] || die "$GRUB_DEFAULT não existe."
+}
+
+confirm() {
+    local prompt="${1:-Confirmar?}"
+    local answer
+    read -r -p "$prompt [s/N]: " answer
+    [[ "$answer" =~ ^[sS]([iI][mM])?$ ]]
+}
+
+boot_mode() {
+    if [[ -d /sys/firmware/efi/efivars ]]; then
+        say "UEFI"
+    else
+        say "BIOS/Legacy"
+    fi
+}
+
+read_grub_cfg() {
+    [[ -f "$GRUB_CFG" ]] || return 1
+
+    if [[ -r "$GRUB_CFG" ]]; then
+        cat "$GRUB_CFG"
+    else
+        info "$GRUB_CFG exige privilégio de leitura; solicitando sudo..." >&2
+        sudo cat "$GRUB_CFG"
+    fi
+}
+
+grub_cfg_sha256() {
+    read_grub_cfg | sha256sum | awk '{print $1}'
+}
+
+backup_grub() {
+    local stamp dest
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    dest="${BACKUP_ROOT}/${stamp}"
+
+    info "Criando backup em ${dest}..."
+    sudo mkdir -p "$dest"
+
+    [[ -f "$GRUB_DEFAULT" ]] && sudo cp -a "$GRUB_DEFAULT" "$dest/default-grub"
+    [[ -d "$GRUB_D" ]] && sudo cp -a "$GRUB_D" "$dest/grub.d"
+    [[ -f "$GRUB_CFG" ]] && sudo cp -a "$GRUB_CFG" "$dest/grub.cfg"
+
+    sudo sh -c "printf '%s\n' \
+        'Data: $(date -Is)' \
+        'Kernel: $(uname -r)' \
+        'Boot mode: $(boot_mode)' \
+        > '$dest/INFO.txt'"
+
+    ok "Backup criado: $dest"
+}
+
+menuentry_stream() {
+    read_grub_cfg | awk '
+        /^### BEGIN \/etc\/grub\.d\// {
+            src=$0
+            sub(/^### BEGIN /, "", src)
+            sub(/ ###$/, "", src)
+        }
+        /^[[:space:]]*(menuentry|submenu)[[:space:]]/ {
+            line=$0
+            kind=line
+            sub(/^[[:space:]]*/, "", kind)
+            sub(/[[:space:]].*$/, "", kind)
+
+            title=line
+            sub(/^[[:space:]]*(menuentry|submenu)[[:space:]]+/, "", title)
+
+            if (substr(title,1,1) == sprintf("%c",39)) {
+                title=substr(title,2)
+                split(title,a,sprintf("%c",39))
+                title=a[1]
+            } else if (substr(title,1,1) == "\"") {
+                title=substr(title,2)
+                split(title,a,"\"")
+                title=a[1]
+            } else {
+                split(title,a,/ --| \{/)
+                title=a[1]
+            }
+
+            printf "%s\t%s\t%s\n", kind, title, (src ? src : "?")
+        }
+    '
+}
+
+list_entries() {
+    say "--- Entradas presentes no grub.cfg atual ---"
+
+    if [[ ! -f "$GRUB_CFG" ]]; then
+        warn "$GRUB_CFG não existe."
+        return 0
+    fi
+
+    local n=0 kind title source
+    while IFS=$'\t' read -r kind title source; do
+        ((n+=1))
+        printf '%3d) %-9s %s\n' "$n" "$kind" "$title"
+        printf '     origem: %s\n' "$source"
+    done < <(menuentry_stream)
+
+    if (( n == 0 )); then
+        warn "Nenhuma menuentry/submenu encontrada."
+    else
+        say ""
+        say "Total: $n"
+    fi
+}
+
+detect_duplicate_titles() {
+    say "--- Títulos repetidos no grub.cfg ---"
+
+    local tmp found title
+    tmp="$(mktemp)"
+
+    if ! menuentry_stream \
+        | awk -F '\t' '$1=="menuentry" {print $2 "\t" $3}' \
+        > "$tmp"; then
+        rm -f "$tmp"
+        warn "Não foi possível analisar o grub.cfg."
+        return 1
+    fi
+
+    found=0
+    while IFS= read -r title; do
+        [[ -n "$title" ]] || continue
+        found=1
+        printf '\nDuplicada: %s\n' "$title"
+        awk -F '\t' -v t="$title" '$1==t {print "  - " $2}' "$tmp" | sort -u
+    done < <(
+        cut -f1 "$tmp" \
+            | sort \
+            | uniq -d
+    )
+
+    rm -f "$tmp"
+
+    if (( found == 0 )); then
+        ok "Não há títulos menuentry idênticos repetidos."
+    fi
+}
+
+bootnext_entry_count() {
+    local count
+    count="$(
+        menuentry_stream 2>/dev/null \
+            | awk -F '\t' '$3=="/etc/grub.d/31_efi_bootnext" && $1=="menuentry" {n++} END{print n+0}'
+    )"
+    printf '%s\n' "${count:-0}"
+}
+
+list_grub_scripts() {
+    say "--- Geradores em /etc/grub.d ---"
+    local f base mode state
+
+    while IFS= read -r f; do
+        base="${f##*/}"
+        mode="$(stat -c '%A' "$f" 2>/dev/null || printf '?')"
+        if [[ -x "$f" ]]; then
+            state="ATIVO"
+        else
+            state="inativo"
+        fi
+        printf '%-28s %-8s %s\n' "$base" "$state" "$mode"
+    done < <(find "$GRUB_D" -maxdepth 1 -type f -print 2>/dev/null | sort)
+}
+
+list_kernels() {
+    say "--- Kernels detectados ---"
+
+    say ""
+    say "/boot:"
+    find /boot -maxdepth 1 -type f \
+        \( -name 'vmlinuz-*' -o -name 'initramfs-*.img' -o -name '*-ucode.img' \) \
+        -printf '  %f\n' 2>/dev/null | sort || true
+
+    say ""
+    say "pkgbase em /usr/lib/modules:"
+    local f
+    for f in /usr/lib/modules/*/pkgbase; do
+        [[ -r "$f" ]] || continue
+        printf '  %-28s %s\n' "$(cat "$f")" "${f%/pkgbase}"
+    done
+
+    say ""
+    say "Pacotes kernel conhecidos pelo pacman:"
+    pacman -Qq 2>/dev/null \
+        | grep -E '^linux($|-lts$|-zen$|-hardened$|[0-9])' \
+        | sed 's/^/  /' || true
+}
+
+grub_default_value() {
+    local key="$1"
+    sed -nE "s/^[[:space:]]*${key}=(.*)$/\1/p" "$GRUB_DEFAULT" | tail -n1
+}
+
+diagnostics() {
+    require_grub
+
+    say "--- Sistema ---"
+    printf 'Boot mode: %s\n' "$(boot_mode)"
+    printf 'Kernel atual: %s\n' "$(uname -r)"
+    printf 'GRUB package: '
+    pacman -Q grub 2>/dev/null || say "não identificado pelo pacman"
+    printf 'grub-mkconfig: %s\n' "$(command -v grub-mkconfig)"
+    printf 'grub.cfg: %s\n' "$GRUB_CFG"
+
+    if [[ -f "$GRUB_CFG" ]]; then
+        printf 'grub.cfg modificado em: %s\n' "$(stat -c '%y' "$GRUB_CFG")"
+        printf 'grub.cfg SHA256: %s\n' "$(grub_cfg_sha256)"
+    fi
+
+    say ""
+    say "--- /etc/default/grub relevante ---"
+    grep -E '^[[:space:]]*GRUB_(DEFAULT|TIMEOUT|DISABLE_SUBMENU|DISABLE_OS_PROBER|DISABLE_BOOTNEXT|TOP_LEVEL|SAVEDEFAULT|CMDLINE_LINUX|CMDLINE_LINUX_DEFAULT)=' \
+        "$GRUB_DEFAULT" 2>/dev/null || true
+
+    say ""
+    list_kernels
+
+    say ""
+    list_grub_scripts
+
+    say ""
+    detect_duplicate_titles
+
+    if [[ -x "$GRUB_D/31_efi_bootnext" ]]; then
+        local bn_count bn_setting
+        bn_count="$(bootnext_entry_count)"
+        bn_setting="$(grub_default_value GRUB_DISABLE_BOOTNEXT)"
+        say ""
+        say "--- EFI BootNext (GRUB 2.16+) ---"
+        printf 'Gerador 31_efi_bootnext: ATIVO\n'
+        printf 'GRUB_DISABLE_BOOTNEXT: %s\n' "${bn_setting:-<não definido>}"
+        printf 'Entradas BootNext atuais: %s\n' "$bn_count"
+
+        if (( bn_count > 0 )) && [[ "$bn_setting" != "true" ]]; then
+            warn "Há entradas EFI BootNext no menu. Se forem apenas ruído, use a opção"
+            warn "'Gerenciar EFI BootNext' e desative-as de forma persistente."
+        fi
+    fi
+}
+
+regenerate_grub() {
+    require_grub
+    need_cmd grub-script-check
+
+    local tmp count
+    tmp="$(sudo mktemp /tmp/wolf-grub.cfg.XXXXXX)"
+
+    info "Gerando configuração temporária..."
+    if ! sudo grub-mkconfig -o "$tmp"; then
+        sudo rm -f "$tmp"
+        die "grub-mkconfig falhou. O grub.cfg atual NÃO foi alterado."
+    fi
+
+    info "Validando sintaxe com grub-script-check..."
+    if ! sudo grub-script-check "$tmp"; then
+        sudo rm -f "$tmp"
+        die "A nova configuração falhou na validação. O grub.cfg atual NÃO foi alterado."
+    fi
+
+    count="$(sudo grep -cE '^[[:space:]]*menuentry[[:space:]]' "$tmp" || true)"
+    if [[ "$count" -lt 1 ]]; then
+        sudo rm -f "$tmp"
+        die "A configuração nova não contém menuentry. Recusando instalar."
+    fi
+
+    say ""
+    say "A nova configuração contém ${count} menuentry(s)."
+
+    if ! confirm "Substituir $GRUB_CFG por esta configuração validada?"; then
+        sudo rm -f "$tmp"
+        warn "Operação cancelada."
+        return 0
+    fi
+
+    backup_grub
+    sudo install -m 0644 "$tmp" "$GRUB_CFG"
+    sudo rm -f "$tmp"
+    ok "GRUB regenerado e validado."
+}
+
+set_grub_key() {
+    local key="$1" value="$2"
+    local tmp
+
+    tmp="$(mktemp)"
+    awk -v key="$key" -v value="$value" '
+        BEGIN {done=0}
+        $0 ~ "^[[:space:]]*" key "=" {
+            print key "=" value
+            done=1
+            next
+        }
+        {print}
+        END {
+            if (!done) print key "=" value
+        }
+    ' "$GRUB_DEFAULT" > "$tmp"
+
+    sudo install -m 0644 "$tmp" "$GRUB_DEFAULT"
+    rm -f "$tmp"
+}
+
+manage_bootnext() {
+    require_grub
+
+    local current count
+    current="$(grub_default_value GRUB_DISABLE_BOOTNEXT)"
+    count="$(bootnext_entry_count)"
+
+    say "--- EFI BootNext ---"
+    printf 'Gerador: %s\n' "$([[ -x "$GRUB_D/31_efi_bootnext" ]] && printf ATIVO || printf inativo)"
+    printf 'GRUB_DISABLE_BOOTNEXT=%s\n' "${current:-<não definido>}"
+    printf 'Entradas atuais vindas de 31_efi_bootnext: %s\n' "$count"
+    say ""
+    say "EFI BootNext permite que o GRUB ofereça atalhos para entradas UEFI."
+    say "Isso NÃO é necessário para iniciar normalmente o Wolf Linux, Windows"
+    say "ou acessar UEFI Firmware Settings."
+    say ""
+    say "1) Ocultar entradas EFI BootNext (recomendado para menu limpo)"
+    say "2) Reativar entradas EFI BootNext"
+    say "0) Voltar"
+
+    local opt
+    read -r -p "Opção: " opt
+    case "$opt" in
+        1)
+            backup_grub
+            set_grub_key GRUB_DISABLE_BOOTNEXT true
+            ok "GRUB_DISABLE_BOOTNEXT=true definido."
+            info "Agora regenere o GRUB para remover as entradas do menu."
+            ;;
+        2)
+            backup_grub
+            set_grub_key GRUB_DISABLE_BOOTNEXT false
+            ok "GRUB_DISABLE_BOOTNEXT=false definido."
+            info "Agora regenere o GRUB para aplicar."
+            ;;
+        0) return 0 ;;
+        *) warn "Opção inválida." ;;
+    esac
+}
+
+manage_os_prober() {
+    require_grub
+
+    local current
+    current="$(grub_default_value GRUB_DISABLE_OS_PROBER)"
+
+    say "Estado atual em /etc/default/grub:"
+    printf '  GRUB_DISABLE_OS_PROBER=%s\n' "${current:-<não definido>}"
+    say ""
+    say "1) Habilitar detecção de outros sistemas (false)"
+    say "2) Desabilitar os-prober (true)"
+    say "0) Voltar"
+
+    local opt
+    read -r -p "Opção: " opt
+    case "$opt" in
+        1)
+            backup_grub
+            set_grub_key GRUB_DISABLE_OS_PROBER false
+            ok "os-prober habilitado. Regenere o GRUB para aplicar."
+            ;;
+        2)
+            backup_grub
+            set_grub_key GRUB_DISABLE_OS_PROBER true
+            ok "os-prober desabilitado. Regenere o GRUB para aplicar."
+            ;;
+        0) return 0 ;;
+        *) warn "Opção inválida." ;;
+    esac
+}
+
+toggle_generator_script() {
+    require_grub
+
+    local -a files=()
+    mapfile -t files < <(find "$GRUB_D" -maxdepth 1 -type f -printf '%f\n' 2>/dev/null | sort)
+
+    ((${#files[@]} > 0)) || { warn "Nenhum script encontrado."; return 0; }
+
+    say "Geradores:"
+    local i state
+    for i in "${!files[@]}"; do
+        if [[ -x "$GRUB_D/${files[$i]}" ]]; then
+            state="ATIVO"
+        else
+            state="inativo"
+        fi
+        printf '%3d) %-28s %s\n' "$((i+1))" "${files[$i]}" "$state"
+    done
+
+    say ""
+    local choice base target
+    read -r -p "Número do script (0 cancela): " choice
+    [[ "$choice" =~ ^[0-9]+$ ]] || { warn "Seleção inválida."; return 0; }
+    (( choice == 0 )) && return 0
+    (( choice >= 1 && choice <= ${#files[@]} )) || { warn "Seleção inválida."; return 0; }
+
+    base="${files[$((choice-1))]}"
+    target="$GRUB_D/$base"
+
+    case "$base" in
+        00_header|10_linux)
+            warn "O Wolf GRUB Manager não permite desativar $base."
+            warn "Isso poderia remover componentes essenciais ou todas as entradas Linux geradas."
+            return 0
+            ;;
+        31_efi_bootnext)
+            warn "Não altere o bit executável de 31_efi_bootnext."
+            warn "Uma atualização do pacote GRUB pode restaurá-lo."
+            warn "Use a opção 'Gerenciar EFI BootNext', que grava GRUB_DISABLE_BOOTNEXT."
+            return 0
+            ;;
+    esac
+
+    if [[ -x "$target" ]]; then
+        warn "Desativar $base impede que ele gere entradas no próximo grub-mkconfig."
+        confirm "Desativar este gerador?" || return 0
+        backup_grub
+        sudo chmod a-x "$target"
+        ok "$base desativado. Regenere o GRUB para aplicar."
+    else
+        confirm "Ativar novamente $base?" || return 0
+        backup_grub
+        sudo chmod a+x "$target"
+        ok "$base ativado. Regenere o GRUB para aplicar."
+    fi
+}
+
+ensure_wolf_custom_generator() {
+    local tmp
+    tmp="$(mktemp)"
+    cat > "$tmp" <<'EOF'
+#!/bin/sh
+# Wolf Linux: emite entradas customizadas gerenciadas em arquivos .cfg.
+for f in /etc/grub.d/wolf-entries.d/*.cfg; do
+    [ -r "$f" ] || continue
+    cat "$f"
+    printf '\n'
+done
+EOF
+    sudo mkdir -p "$WOLF_ENTRIES_DIR"
+    sudo install -m 0755 "$tmp" "$WOLF_CUSTOM_SCRIPT"
+    rm -f "$tmp"
+}
+
+list_wolf_entries() {
+    if [[ ! -d "$WOLF_ENTRIES_DIR" ]]; then
+        say "Nenhuma entrada Wolf customizada."
+        return 0
+    fi
+
+    local -a files=()
+    mapfile -t files < <(find "$WOLF_ENTRIES_DIR" -maxdepth 1 -type f -name '*.cfg' -printf '%f\n' 2>/dev/null | sort)
+
+    if ((${#files[@]} == 0)); then
+        say "Nenhuma entrada Wolf customizada."
+        return 0
+    fi
+
+    local i title
+    for i in "${!files[@]}"; do
+        title="$(sed -nE "s/^[[:space:]]*menuentry[[:space:]]+'([^']+)'.*/\1/p" \
+            "$WOLF_ENTRIES_DIR/${files[$i]}" 2>/dev/null | head -n1)"
+        printf '%3d) %-32s %s\n' "$((i+1))" "${title:-?}" "${files[$i]}"
+    done
+}
+
+slugify() {
+    local s="$1"
+    s="${s,,}"
+    s="$(sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' <<<"$s")"
+    [[ -n "$s" ]] || s="entrada"
+    printf '%s\n' "$s"
+}
+
+add_custom_entry() {
+    require_grub
+
+    warn "Modo avançado: esta função cria uma entrada GRUB customizada."
+    warn "Use principalmente para entradas especiais que não são geradas automaticamente."
+    say ""
+
+    local title
+    read -r -p "Título da entrada: " title
+    [[ -n "$title" ]] || { warn "Título vazio."; return 0; }
+    [[ "$title" != *"'"* ]] || { warn "O título não pode conter apóstrofo nesta versão."; return 0; }
+
+    say ""
+    say "Digite o CORPO da menuentry, uma linha por vez."
+    say "Digite apenas um ponto (.) para finalizar."
+    say ""
+
+    local body="" line
+    while IFS= read -r line; do
+        [[ "$line" == "." ]] && break
+        body+=$'    '"$line"$'\n'
+    done
+
+    [[ -n "$body" ]] || { warn "Corpo vazio. Cancelado."; return 0; }
+
+    local slug tmp dest
+    slug="$(slugify "$title")"
+    tmp="$(mktemp)"
+    dest="$WOLF_ENTRIES_DIR/${slug}.cfg"
+
+    {
+        printf "menuentry '%s' --class wolf-custom {\n" "$title"
+        printf '%s' "$body"
+        printf '}\n'
+    } > "$tmp"
+
+    say ""
+    say "--- Entrada proposta ---"
+    cat "$tmp"
+    say ""
+
+    if ! confirm "Salvar esta entrada?"; then
+        rm -f "$tmp"
+        return 0
+    fi
+
+    backup_grub
+    ensure_wolf_custom_generator
+    sudo install -m 0644 "$tmp" "$dest"
+    rm -f "$tmp"
+
+    ok "Entrada salva em $dest"
+    info "Use 'Regenerar GRUB' para validar e aplicar."
+}
+
+remove_custom_entry() {
+    [[ -d "$WOLF_ENTRIES_DIR" ]] || { warn "Nenhuma entrada Wolf customizada."; return 0; }
+
+    local -a files=()
+    mapfile -t files < <(find "$WOLF_ENTRIES_DIR" -maxdepth 1 -type f -name '*.cfg' -printf '%f\n' 2>/dev/null | sort)
+    ((${#files[@]} > 0)) || { warn "Nenhuma entrada Wolf customizada."; return 0; }
+
+    list_wolf_entries
+    say ""
+
+    local choice target
+    read -r -p "Número para remover (0 cancela): " choice
+    [[ "$choice" =~ ^[0-9]+$ ]] || { warn "Seleção inválida."; return 0; }
+    (( choice == 0 )) && return 0
+    (( choice >= 1 && choice <= ${#files[@]} )) || { warn "Seleção inválida."; return 0; }
+
+    target="$WOLF_ENTRIES_DIR/${files[$((choice-1))]}"
+    confirm "Remover $target?" || return 0
+
+    backup_grub
+    sudo rm -f "$target"
+    ok "Entrada removida. Regenere o GRUB para aplicar."
+}
+
+show_source_advice() {
+    cat <<'EOF'
+Como interpretar as origens:
+
+  /etc/grub.d/10_linux
+      Entradas dos kernels Linux instalados. NÃO apague no grub.cfg.
+      Zen + LTS é esperado quando ambos os kernels estão instalados.
+
+  /etc/grub.d/30_os-prober
+      Sistemas encontrados pelo os-prober, como Windows.
+
+  /etc/grub.d/30_uefi-firmware
+      Atalho "UEFI Firmware Settings".
+
+  /etc/grub.d/31_efi_bootnext
+      GRUB 2.16+: atalhos para entradas UEFI BootNext.
+      Para ocultá-los persistentemente, use GRUB_DISABLE_BOOTNEXT=true.
+      Não é recomendado apenas chmod -x no script, pois atualização do pacote
+      pode restaurar a permissão.
+
+  /etc/grub.d/40_custom, 41_custom ou outros *_custom
+      Entradas customizadas.
+
+  /etc/grub.d/42_wolf_custom
+      Entradas criadas pelo Wolf GRUB Manager.
+
+O grub.cfg é um ARQUIVO GERADO. Alterações diretas nele podem desaparecer no
+próximo grub-mkconfig.
+EOF
+}
+
+main_menu() {
+    require_grub
+
+    while true; do
+        header
+        say "1) Diagnóstico completo"
+        say "2) Listar entradas e origem"
+        say "3) Detectar títulos duplicados"
+        say "4) Listar kernels e initramfs"
+        say "5) Listar scripts geradores /etc/grub.d"
+        say "6) Gerenciar EFI BootNext (GRUB 2.16+)"
+        say "7) Ativar/desativar outro script gerador"
+        say "8) Configurar os-prober"
+        say "9) Adicionar entrada customizada Wolf"
+        say "10) Remover entrada customizada Wolf"
+        say "11) Listar entradas customizadas Wolf"
+        say "12) Regenerar GRUB com backup + validação"
+        say "13) Explicar como remover entradas corretamente"
+        say "0) Sair"
+        say ""
+
+        local opt
+        read -r -p "Opção: " opt
+        case "$opt" in
+            1) diagnostics; pause ;;
+            2) list_entries; pause ;;
+            3) detect_duplicate_titles; pause ;;
+            4) list_kernels; pause ;;
+            5) list_grub_scripts; pause ;;
+            6) manage_bootnext; pause ;;
+            7) toggle_generator_script; pause ;;
+            8) manage_os_prober; pause ;;
+            9) add_custom_entry; pause ;;
+            10) remove_custom_entry; pause ;;
+            11) list_wolf_entries; pause ;;
+            12) regenerate_grub; pause ;;
+            13) show_source_advice; pause ;;
+            0) exit 0 ;;
+            *) warn "Opção inválida."; sleep 1 ;;
+        esac
+    done
+}
+
+require_grub
+main_menu
+WOLF_GRUB_MANAGER
+
+    chmod 755 /mnt/usr/local/bin/wolf-grub-manager
+
+    install -Dm755 \
+        /mnt/usr/local/bin/wolf-grub-manager \
+        /mnt/usr/local/share/wolf-linux/tools/wolf-grub-manager-0.3.sh
+
+    ok "Wolf GRUB Manager instalado: /usr/local/bin/wolf-grub-manager"
+}
+
 configure_bootloader() {
     if [[ "$BOOT_MODE" == "UEFI" ]]; then
         info "Instalando GRUB UEFI..."
@@ -6816,7 +10368,7 @@ configure_bootloader() {
 
         # Na VM instalamos também o caminho UEFI fallback.
         # Assim ela consegue iniciar mesmo sem uma entrada NVRAM válida.
-        if [[ "$VM_TYPE" == "qemu" || "$VM_TYPE" == "kvm" ]]; then
+        if is_supported_test_vm; then
             info "VM UEFI: instalando fallback EFI/BOOT/BOOTX64.EFI..."
 
             arch-chroot /mnt grub-install \
@@ -6837,6 +10389,25 @@ configure_bootloader() {
         's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="loglevel=3 quiet splash"/' \
         /mnt/etc/default/grub
 
+    # Sempre deixe o menu visível por alguns segundos. O linux-lts é instalado
+    # em paralelo ao linux-zen e funciona como kernel independente de recuperação
+    # caso uma atualização do kernel principal seja interrompida.
+    if grep -q '^GRUB_TIMEOUT_STYLE=' /mnt/etc/default/grub; then
+        sed -i 's/^GRUB_TIMEOUT_STYLE=.*/GRUB_TIMEOUT_STYLE=menu/' /mnt/etc/default/grub
+    else
+        printf '\nGRUB_TIMEOUT_STYLE=menu\n' >> /mnt/etc/default/grub
+    fi
+    if grep -q '^GRUB_TIMEOUT=' /mnt/etc/default/grub; then
+        sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=5/' /mnt/etc/default/grub
+    else
+        printf 'GRUB_TIMEOUT=5\n' >> /mnt/etc/default/grub
+    fi
+    if grep -q '^GRUB_TOP_LEVEL=' /mnt/etc/default/grub; then
+        sed -i 's|^GRUB_TOP_LEVEL=.*|GRUB_TOP_LEVEL="/boot/vmlinuz-linux-zen"|' /mnt/etc/default/grub
+    else
+        printf 'GRUB_TOP_LEVEL="/boot/vmlinuz-linux-zen"\n' >> /mnt/etc/default/grub
+    fi
+
     arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg
 }
 
@@ -6846,6 +10417,8 @@ validate_boot_installation() {
 
     local kernel="/mnt/boot/vmlinuz-linux-zen"
     local initramfs="/mnt/boot/initramfs-linux-zen.img"
+    local recovery_kernel="/mnt/boot/vmlinuz-linux-lts"
+    local recovery_initramfs="/mnt/boot/initramfs-linux-lts.img"
     local grub_cfg="/mnt/boot/grub/grub.cfg"
 
     [[ -s "$kernel" ]] ||
@@ -6853,6 +10426,12 @@ validate_boot_installation() {
 
     [[ -s "$initramfs" ]] ||
         die "Initramfs linux-zen ausente ou vazio: /boot/initramfs-linux-zen.img"
+
+    [[ -s "$recovery_kernel" ]] ||
+        die "Kernel de recuperação linux-lts ausente ou vazio."
+
+    [[ -s "$recovery_initramfs" ]] ||
+        die "Initramfs de recuperação linux-lts ausente ou vazio."
 
     [[ -s "$grub_cfg" ]] ||
         die "grub.cfg ausente ou vazio."
@@ -6864,6 +10443,9 @@ validate_boot_installation() {
 
     grep -q 'initramfs-linux-zen.img' "$grub_cfg" ||
         die "grub.cfg não referencia initramfs-linux-zen.img."
+
+    grep -q 'vmlinuz-linux-lts' "$grub_cfg" ||
+        die "grub.cfg não contém o kernel de recuperação linux-lts."
 
     echo
     echo "Arquivos de boot:"
@@ -6893,7 +10475,7 @@ validate_boot_installation() {
             -iname '*.efi' \
             -print 2>/dev/null || true
 
-        if [[ "$VM_TYPE" == "qemu" || "$VM_TYPE" == "kvm" ]]; then
+        if is_supported_test_vm; then
             [[ -s "$fallback_efi" ]] ||
                 die "Fallback UEFI da VM ausente: EFI/BOOT/BOOTX64.EFI"
 
@@ -6908,12 +10490,940 @@ validate_boot_installation() {
     ok "GRUB, kernel, initramfs e arquivos de boot validados."
 }
 
+install_wolf_multimonitor_all_desktops() {
+    info "Instalando suporte Wolf MultiMonitor para $DESKTOP..."
+
+    mkdir -p /mnt/usr/local/bin /mnt/etc/xdg/autostart
+
+    if [[ "$DESKTOP" == "plasma" ]]; then
+        cat > /mnt/usr/local/bin/wolf-plasma-multimonitor <<'WOLF_PLASMA_MM'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+VERSION="0.2"
+STATE_ROOT="${XDG_STATE_HOME:-$HOME/.local/state}/wolf-linux/plasma-multimonitor"
+CONFIG_ROOT="${XDG_CONFIG_HOME:-$HOME/.config}/wolf-linux"
+DISABLED_MARKER="$CONFIG_ROOT/plasma-multimonitor.disabled"
+PID_FILE="${XDG_RUNTIME_DIR:-/tmp}/wolf-plasma-multimonitor-${UID}.pid"
+PLASMA_CONFIG="$HOME/.config/plasma-org.kde.plasma.desktop-appletsrc"
+LOG_FILE="$STATE_ROOT/watch.log"
+
+log()  { printf '\033[1;34m[Wolf Plasma MultiMonitor]\033[0m %s\n' "$*"; }
+ok()   { printf '\033[1;32m[OK]\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m[AVISO]\033[0m %s\n' "$*" >&2; }
+die()  { printf '\033[1;31m[ERRO]\033[0m %s\n' "$*" >&2; exit 1; }
+
+check_environment() {
+    case "${XDG_CURRENT_DESKTOP:-${XDG_SESSION_DESKTOP:-}}" in
+        *KDE*|*Plasma*) ;;
+        *) die "Este helper é somente para KDE Plasma." ;;
+    esac
+    command -v qdbus6 >/dev/null 2>&1 || die "qdbus6 não encontrado."
+}
+
+plasma_eval() {
+    local script="$1"
+    qdbus6 org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript "$script"
+}
+
+topology_signature() {
+    if command -v kscreen-doctor >/dev/null 2>&1; then
+        kscreen-doctor -o 2>/dev/null \
+            | grep -E '^[[:space:]]*Output:|^[[:space:]]*enabled|^[[:space:]]*connected|^[[:space:]]*Geometry:' \
+            | tr '\n' '|' || true
+    elif command -v xrandr >/dev/null 2>&1; then
+        xrandr --listmonitors 2>/dev/null | tail -n +2 | tr '\n' '|' || true
+    else
+        printf 'plasma-only'
+    fi
+}
+
+make_backup() {
+    mkdir -p "$STATE_ROOT"
+    local stamp dir
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    dir="$STATE_ROOT/$stamp"
+    mkdir -p "$dir"
+    [[ -f "$PLASMA_CONFIG" ]] && cp -a "$PLASMA_CONFIG" "$dir/plasma-org.kde.plasma.desktop-appletsrc"
+    printf '%s\n' "$dir" > "$STATE_ROOT/latest"
+    ok "Backup salvo em $dir"
+}
+
+ensure_baseline_backup() {
+    local marker="$STATE_ROOT/automatic-baseline"
+    [[ -f "$marker" ]] && return 0
+    make_backup
+    cp "$STATE_ROOT/latest" "$marker"
+}
+
+reconcile_plasma() {
+    check_environment
+
+    local js
+    read -r -d '' js <<'JS' || true
+function uniqueScreens() {
+    var seen = {};
+    var out = [];
+    desktops().forEach(function(d) {
+        var s = d.screen;
+        if (s >= 0 && !seen[s]) {
+            seen[s] = true;
+            out.push(s);
+        }
+    });
+    out.sort(function(a, b) { return a - b; });
+    return out;
+}
+
+function isTaskWidget(w) {
+    return w.type === "org.kde.plasma.taskmanager" ||
+           w.type === "org.kde.plasma.icontasks";
+}
+
+function makeTasksLocal(panel) {
+    panel.widgets().forEach(function(w) {
+        if (!isTaskWidget(w)) return;
+        w.currentConfigGroup = ["General"];
+        w.writeConfig("showOnlyCurrentScreen", true);
+        w.reloadConfig();
+    });
+}
+
+function makeKickoffWolf(panel) {
+    panel.widgets().forEach(function(w) {
+        if (w.type !== "org.kde.plasma.kickoff") return;
+        w.currentConfigGroup = ["General"];
+        w.writeConfig("icon", "wolf-linux");
+        w.reloadConfig();
+    });
+}
+
+var screens = uniqueScreens();
+var allPanels = panels();
+var panelForScreen = {};
+
+allPanels.forEach(function(p) {
+    if (p.screen >= 0 && panelForScreen[p.screen] === undefined) {
+        panelForScreen[p.screen] = p;
+    }
+    makeTasksLocal(p);
+    makeKickoffWolf(p);
+});
+
+screens.forEach(function(screen) {
+    if (panelForScreen[screen] !== undefined) return;
+
+    var panel = new Panel;
+    panel.screen = screen;
+    panel.location = "bottom";
+    panel.height = Math.round(gridUnit * 2.2);
+
+    var kickoff = panel.addWidget("org.kde.plasma.kickoff");
+    kickoff.currentConfigGroup = ["General"];
+    kickoff.writeConfig("icon", "wolf-linux");
+    kickoff.reloadConfig();
+
+    var tasks = panel.addWidget("org.kde.plasma.icontasks");
+    tasks.currentConfigGroup = ["General"];
+    tasks.writeConfig("showOnlyCurrentScreen", true);
+    tasks.writeConfig("showOnlyCurrentActivity", true);
+    tasks.reloadConfig();
+
+    panel.addWidget("org.kde.plasma.panelspacer");
+    panel.addWidget("org.kde.plasma.digitalclock");
+    panel.addWidget("org.kde.plasma.showdesktop");
+
+    print("Wolf Plasma MultiMonitor: painel criado na tela " + screen + " (id=" + panel.id + ")");
+});
+
+// Reafirma filtro e identidade em todas as instâncias após a criação.
+panels().forEach(function(p) { makeTasksLocal(p); makeKickoffWolf(p); });
+JS
+    plasma_eval "$js" >/dev/null
+}
+
+show_state() {
+    check_environment
+    echo
+    echo "======================================================"
+    echo "       WOLF PLASMA MULTIMONITOR v${VERSION}"
+    echo "======================================================"
+    echo
+    if [[ -e "$DISABLED_MARKER" ]]; then
+        log "Gerenciamento automático: DESATIVADO"
+    else
+        log "Gerenciamento automático: ATIVADO"
+    fi
+    echo
+    plasma_eval '
+        print("Painéis:");
+        panels().forEach(function(p) {
+            print("  panel" + p.id + " screen=" + p.screen + " location=" + p.location);
+            p.widgets().forEach(function(w) {
+                if (w.type === "org.kde.plasma.taskmanager" || w.type === "org.kde.plasma.icontasks") {
+                    w.currentConfigGroup = ["General"];
+                    print("    " + w.type + " showOnlyCurrentScreen=" + w.readConfig("showOnlyCurrentScreen"));
+                }
+            });
+        });
+    '
+}
+
+stop_watcher() {
+    if [[ -f "$PID_FILE" ]]; then
+        local pid
+        pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+        if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null || true
+        fi
+        rm -f "$PID_FILE"
+    fi
+}
+
+disable_automatic() {
+    mkdir -p "$CONFIG_ROOT"
+    : > "$DISABLED_MARKER"
+    stop_watcher
+    ok "Gerenciamento automático do Plasma desativado; painéis existentes foram preservados."
+}
+
+enable_automatic() {
+    check_environment
+    mkdir -p "$CONFIG_ROOT" "$STATE_ROOT"
+    rm -f "$DISABLED_MARKER"
+    ensure_baseline_backup
+    reconcile_plasma
+    nohup "$0" watch >/dev/null 2>&1 &
+    ok "Gerenciamento automático do Plasma ativado."
+}
+
+restore_latest() {
+    check_environment
+    disable_automatic >/dev/null
+    [[ -f "$STATE_ROOT/latest" ]] || die "Nenhum backup encontrado."
+    local dir
+    dir="$(cat "$STATE_ROOT/latest")"
+    [[ -f "$dir/plasma-org.kde.plasma.desktop-appletsrc" ]] || die "Backup inválido: $dir"
+    cp -a "$dir/plasma-org.kde.plasma.desktop-appletsrc" "$PLASMA_CONFIG"
+    if systemctl --user restart plasma-plasmashell.service >/dev/null 2>&1; then
+        :
+    else
+        kquitapp6 plasmashell >/dev/null 2>&1 || true
+        nohup plasmashell --replace >/dev/null 2>&1 &
+    fi
+    ok "Layout Plasma restaurado; gerenciamento automático ficou desativado."
+}
+
+watch_loop() {
+    check_environment
+    mkdir -p "$CONFIG_ROOT" "$STATE_ROOT"
+    [[ ! -e "$DISABLED_MARKER" ]] || exit 0
+
+    if [[ -f "$PID_FILE" ]]; then
+        local old_pid
+        old_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+        if [[ "$old_pid" =~ ^[0-9]+$ ]] && kill -0 "$old_pid" 2>/dev/null; then
+            exit 0
+        fi
+    fi
+    printf '%s\n' "$$" > "$PID_FILE"
+    trap 'rm -f "$PID_FILE"' EXIT INT TERM
+
+    exec >>"$LOG_FILE" 2>&1
+    echo "[$(date '+%F %T')] watcher v${VERSION} iniciado"
+
+    sleep 8
+    local previous="" current
+    while :; do
+        [[ ! -e "$DISABLED_MARKER" ]] || exit 0
+        current="$(topology_signature)"
+        if [[ "$current" != "$previous" ]]; then
+            sleep 2
+            current="$(topology_signature)"
+            ensure_baseline_backup || true
+            if reconcile_plasma; then
+                echo "[$(date '+%F %T')] topologia reconciliada: $current"
+                previous="$current"
+            else
+                echo "[$(date '+%F %T')] falha na reconciliação; nova tentativa em 3s"
+                # Não marque a topologia como processada: no login o plasmashell
+                # pode ainda não estar pronto para evaluateScript.
+                previous=""
+            fi
+        fi
+        sleep 3
+    done
+}
+
+apply_now() {
+    check_environment
+    make_backup
+    reconcile_plasma
+    ok "Painéis Plasma reconciliados; cada Task Manager mostra apenas a tela atual."
+}
+
+usage() {
+    cat <<EOF2
+Uso: $(basename "$0") {status|apply|reconcile|watch|enable|disable|restore}
+EOF2
+}
+
+case "${1:-status}" in
+    status) show_state ;;
+    apply) apply_now ;;
+    reconcile) reconcile_plasma ;;
+    watch) watch_loop ;;
+    enable) enable_automatic ;;
+    disable) disable_automatic ;;
+    restore) restore_latest ;;
+    *) usage; exit 2 ;;
+esac
+WOLF_PLASMA_MM
+        chmod 755 /mnt/usr/local/bin/wolf-plasma-multimonitor
+
+        cat > /mnt/etc/xdg/autostart/wolf-plasma-multimonitor.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Wolf Linux - Plasma MultiMonitor
+Comment=Painel funcional por monitor e tarefas limitadas à tela atual
+Exec=/usr/local/bin/wolf-plasma-multimonitor watch
+OnlyShowIn=KDE;
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+
+        ok "Wolf MultiMonitor para Plasma instalado e habilitado por padrão."
+    fi
+
+    if [[ "$DESKTOP" == "mate" ]]; then
+        mkdir -p /mnt/usr/lib/wolf-linux/mate
+        mkdir -p /mnt/usr/share/mate-panel/applets
+        mkdir -p /mnt/usr/share/dbus-1/services
+
+        cat > /mnt/usr/lib/wolf-linux/mate/wolf-monitor-tasks.py <<'WOLF_MATE_APPLET'
+#!/usr/bin/env python3
+# Wolf Linux - MATE Monitor Tasks
+# Lista de janelas limitada ao monitor onde a instância do applet está.
+
+import gi
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+gi.require_version("GdkPixbuf", "2.0")
+gi.require_version("Wnck", "3.0")
+gi.require_version("MatePanelApplet", "4.0")
+
+from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, MatePanelApplet, Pango, Wnck
+
+try:
+    Wnck.set_client_type(Wnck.ClientType.PAGER)
+except Exception:
+    pass
+
+
+class MonitorTasks:
+    def __init__(self, applet):
+        self.applet = applet
+        self.screen = Wnck.Screen.get_default()
+        self.box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        self.box.set_hexpand(True)
+        self.applet.add(self.box)
+
+        try:
+            self.applet.set_flags(MatePanelApplet.AppletFlags.EXPAND_MAJOR)
+        except Exception:
+            pass
+
+        self.applet.connect("realize", self._schedule_refresh)
+        self.applet.connect("size-allocate", self._schedule_refresh)
+
+        for signal in ("window-opened", "window-closed", "active-window-changed", "active-workspace-changed"):
+            try:
+                self.screen.connect(signal, self._schedule_refresh)
+            except Exception:
+                pass
+
+        self._last_signature = None
+        GLib.timeout_add(700, self._poll)
+        self.applet.show_all()
+
+    def _schedule_refresh(self, *args):
+        GLib.idle_add(self.refresh)
+
+    def _monitor_geometry(self):
+        gdk_window = self.applet.get_window()
+        if gdk_window is None:
+            return None
+        display = gdk_window.get_display()
+        monitor = display.get_monitor_at_window(gdk_window)
+        if monitor is None:
+            return None
+        return monitor.get_geometry()
+
+    @staticmethod
+    def _window_center(window):
+        x, y, w, h = window.get_geometry()
+        return x + max(w, 1) // 2, y + max(h, 1) // 2
+
+    def _is_on_this_monitor(self, window, geom):
+        cx, cy = self._window_center(window)
+        return geom.x <= cx < geom.x + geom.width and geom.y <= cy < geom.y + geom.height
+
+    def _visible_windows(self):
+        self.screen.force_update()
+        geom = self._monitor_geometry()
+        if geom is None:
+            return []
+
+        workspace = self.screen.get_active_workspace()
+        windows = []
+        for window in self.screen.get_windows_stacked():
+            try:
+                if window.is_skip_tasklist():
+                    continue
+                if workspace is not None and not (window.is_pinned() or window.is_on_workspace(workspace)):
+                    continue
+                if not self._is_on_this_monitor(window, geom):
+                    continue
+                windows.append(window)
+            except Exception:
+                continue
+        return windows
+
+    @staticmethod
+    def _signature(windows):
+        items = []
+        for w in windows:
+            try:
+                items.append((w.get_xid(), w.get_name(), w.is_active(), w.is_minimized(), w.get_geometry()))
+            except Exception:
+                pass
+        return tuple(items)
+
+    def _poll(self):
+        try:
+            windows = self._visible_windows()
+            sig = self._signature(windows)
+            if sig != self._last_signature:
+                self.refresh(windows)
+        except Exception:
+            pass
+        return True
+
+    def _on_clicked(self, button, window):
+        timestamp = Gtk.get_current_event_time()
+        try:
+            if window.is_active() and not window.is_minimized():
+                window.minimize()
+            else:
+                window.unminimize(timestamp)
+                window.activate(timestamp)
+        except Exception:
+            pass
+
+    def _on_button_press(self, button, event, window):
+        if event.button == 2:
+            try:
+                window.close(getattr(event, "time", Gtk.get_current_event_time()))
+            except Exception:
+                pass
+            return True
+        return False
+
+    def _make_button(self, window):
+        button = Gtk.Button()
+        button.set_relief(Gtk.ReliefStyle.NONE)
+        button.set_can_focus(False)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        try:
+            icon = window.get_mini_icon()
+            if icon is not None:
+                if icon.get_width() > 20 or icon.get_height() > 20:
+                    icon = icon.scale_simple(20, 20, GdkPixbuf.InterpType.BILINEAR)
+                content.pack_start(Gtk.Image.new_from_pixbuf(icon), False, False, 0)
+        except Exception:
+            pass
+
+        title = window.get_name() or "Aplicativo"
+        label_text = title if len(title) <= 26 else title[:23] + "…"
+        label = Gtk.Label(label=label_text)
+        label.set_ellipsize(Pango.EllipsizeMode.END)
+        label.set_max_width_chars(26)
+        content.pack_start(label, False, False, 0)
+
+        button.add(content)
+        button.set_tooltip_text(title)
+        button.connect("clicked", self._on_clicked, window)
+        button.connect("button-press-event", self._on_button_press, window)
+        return button
+
+    def refresh(self, windows=None):
+        if windows is None:
+            windows = self._visible_windows()
+        self._last_signature = self._signature(windows)
+
+        for child in self.box.get_children():
+            self.box.remove(child)
+            child.destroy()
+
+        for window in windows:
+            self.box.pack_start(self._make_button(window), False, False, 0)
+
+        self.box.show_all()
+        return False
+
+
+def applet_factory(applet, iid, data):
+    if iid != "WolfMonitorTasksApplet":
+        return False
+    MonitorTasks(applet)
+    return True
+
+
+MatePanelApplet.Applet.factory_main(
+    "WolfMonitorTasksFactory",
+    True,
+    MatePanelApplet.Applet.__gtype__,
+    applet_factory,
+    None,
+)
+WOLF_MATE_APPLET
+        chmod 755 /mnt/usr/lib/wolf-linux/mate/wolf-monitor-tasks.py
+
+        cat > /mnt/usr/share/mate-panel/applets/org.wolflinux.panel.WolfMonitorTasks.mate-panel-applet <<'EOF'
+[Applet Factory]
+Id=WolfMonitorTasksFactory
+InProcess=false
+Location=/usr/lib/wolf-linux/mate/wolf-monitor-tasks.py
+Name=Wolf Monitor Tasks Factory
+Description=Task list filtered to the monitor containing the MATE panel
+
+[WolfMonitorTasksApplet]
+Name=Wolf Monitor Tasks
+Description=Mostra apenas as janelas do monitor deste painel
+Icon=preferences-system-windows
+MateComponentId=OAFIID:WolfLinux_WolfMonitorTasksApplet;
+EOF
+
+        cat > /mnt/usr/share/dbus-1/services/org.mate.panel.applet.WolfMonitorTasksFactory.service <<'EOF'
+[D-BUS Service]
+Name=org.mate.panel.applet.WolfMonitorTasksFactory
+Exec=/usr/bin/python3 /usr/lib/wolf-linux/mate/wolf-monitor-tasks.py
+EOF
+
+        cat > /mnt/usr/local/bin/wolf-mate-multimonitor <<'WOLF_MATE_MM'
+#!/usr/bin/env python3
+# Wolf Linux - MATE MultiMonitor
+# Experimental until validated on real multi-monitor MATE hardware.
+
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import gi
+
+gi.require_version("Gio", "2.0")
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gio, Gdk
+
+VERSION = "0.3"
+STATE_ROOT = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "wolf-linux" / "mate-multimonitor"
+CONFIG_ROOT = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "wolf-linux"
+ENABLED_MARKER = CONFIG_ROOT / "mate-multimonitor.enabled"
+PID_FILE = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / f"wolf-mate-multimonitor-{os.getuid()}.pid"
+APPLET_DESCRIPTOR = Path("/usr/share/mate-panel/applets/org.wolflinux.panel.WolfMonitorTasks.mate-panel-applet")
+
+
+def die(msg):
+    print(f"[ERRO] {msg}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def check_env():
+    desktop = os.environ.get("XDG_CURRENT_DESKTOP", os.environ.get("XDG_SESSION_DESKTOP", ""))
+    if "MATE" not in desktop.upper():
+        die("Este helper é somente para MATE.")
+    if os.environ.get("XDG_SESSION_TYPE", "x11") != "x11":
+        die("O Wolf MultiMonitor para MATE foi projetado para X11.")
+    if Gdk.Display.get_default() is None:
+        die("Não foi possível acessar o display GTK/GDK atual.")
+    if not APPLET_DESCRIPTOR.exists():
+        die("Wolf Monitor Tasks não está instalado.")
+
+
+def gdk_monitor_records():
+    """Return monitors exactly as GTK/MATE sees them.
+
+    mate-panel places panels by GDK/Xinerama monitor index.  RandR 1.5
+    logical monitors created with `xrandr --setmonitor` are not necessarily
+    exposed as distinct GdkMonitor objects, so using xrandr here can create
+    unusable/overlapping panels.
+    """
+    display = Gdk.Display.get_default()
+    if display is None:
+        return []
+
+    records = []
+    for idx in range(display.get_n_monitors()):
+        mon = display.get_monitor(idx)
+        geo = mon.get_geometry()
+        records.append({
+            "index": idx,
+            "x": geo.x,
+            "y": geo.y,
+            "width": geo.width,
+            "height": geo.height,
+            "scale": mon.get_scale_factor(),
+            "manufacturer": mon.get_manufacturer() or "",
+            "model": mon.get_model() or "",
+        })
+    return records
+
+
+def gdk_monitors():
+    return [m["index"] for m in gdk_monitor_records()]
+
+
+def topology_signature():
+    rows = []
+    for m in gdk_monitor_records():
+        rows.append(
+            f"{m['index']}:{m['width']}x{m['height']}+{m['x']}+{m['y']}"
+            f":scale={m['scale']}:{m['manufacturer']}:{m['model']}"
+        )
+    return "\n".join(rows)
+
+
+def general_settings():
+    return Gio.Settings.new("org.mate.panel")
+
+
+def toplevel_settings(tid):
+    return Gio.Settings.new_with_path("org.mate.panel.toplevel", f"/org/mate/panel/toplevels/{tid}/")
+
+
+def object_settings(oid):
+    return Gio.Settings.new_with_path("org.mate.panel.object", f"/org/mate/panel/objects/{oid}/")
+
+
+def make_backup():
+    STATE_ROOT.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    dest = STATE_ROOT / stamp
+    dest.mkdir(parents=True, exist_ok=True)
+    with (dest / "mate-panel.dconf").open("w") as f:
+        subprocess.run(["dconf", "dump", "/org/mate/panel/"], stdout=f, check=True)
+    (STATE_ROOT / "latest").write_text(str(dest) + "\n")
+    print(f"[OK] Backup salvo em {dest}")
+    return dest
+
+
+def ensure_baseline_backup():
+    marker = STATE_ROOT / "automatic-baseline"
+    if marker.exists():
+        return
+    dest = make_backup()
+    marker.write_text(str(dest) + "\n")
+
+
+def set_applet_object(oid, panel_id, iid, pack="start", index=0, position=0):
+    s = object_settings(oid)
+    # MATE 1.28 (Arch atual) ainda usa position/panel-right-stick.
+    # MATE mais novo adicionou pack-type/pack-index. Detectamos as chaves
+    # em runtime para o helper funcionar nas duas gerações do schema.
+    keys = set(s.list_keys())
+
+    s.set_string("object-type", "applet")
+    s.set_string("applet-iid", iid)
+    s.set_string("toplevel-id", panel_id)
+
+    if "pack-type" in keys:
+        s.set_string("pack-type", pack)
+    if "pack-index" in keys:
+        s.set_int("pack-index", index)
+    if "position" in keys:
+        s.set_int("position", position)
+    if "panel-right-stick" in keys:
+        s.set_boolean("panel-right-stick", pack == "end")
+    if "locked" in keys:
+        s.set_boolean("locked", True)
+
+
+def reconcile():
+    check_env()
+    monitors = gdk_monitors()
+    if not monitors:
+        die("Nenhum monitor ativo detectado.")
+
+    general = general_settings()
+    toplevel_ids = list(general.get_strv("toplevel-id-list"))
+    object_ids = list(general.get_strv("object-id-list"))
+
+    panel_by_monitor = {}
+    for tid in toplevel_ids:
+        try:
+            s = toplevel_settings(tid)
+            mon = s.get_int("monitor")
+            if mon not in panel_by_monitor:
+                panel_by_monitor[mon] = tid
+        except Exception:
+            continue
+
+    created_panels = []
+    for mon in monitors:
+        if mon in panel_by_monitor:
+            continue
+        tid = f"wolf-monitor-{mon}"
+        suffix = 1
+        while tid in toplevel_ids:
+            suffix += 1
+            tid = f"wolf-monitor-{mon}-{suffix}"
+        s = toplevel_settings(tid)
+        s.set_string("name", f"Wolf Monitor {mon}")
+        s.set_int("screen", 0)
+        s.set_int("monitor", mon)
+        s.set_boolean("expand", True)
+        s.set_string("orientation", "bottom")
+        s.set_int("size", 28)
+        s.set_boolean("auto-hide", False)
+        toplevel_ids.append(tid)
+        panel_by_monitor[mon] = tid
+        created_panels.append((mon, tid))
+
+    # Remove Window List nativa apenas dos painéis em monitores ativos e
+    # substitua pelo applet Wolf, preservando as configurações antigas no dconf.
+    active_panels = {panel_by_monitor[m] for m in monitors}
+    filtered_objects = []
+    for oid in object_ids:
+        try:
+            s = object_settings(oid)
+            iid = s.get_string("applet-iid")
+            panel_id = s.get_string("toplevel-id")
+        except Exception:
+            filtered_objects.append(oid)
+            continue
+        if panel_id in active_panels and iid == "WnckletFactory::WindowListApplet":
+            continue
+        filtered_objects.append(oid)
+    object_ids = filtered_objects
+
+    def has_iid(panel_id, iid):
+        for oid in object_ids:
+            try:
+                s = object_settings(oid)
+                if s.get_string("toplevel-id") == panel_id and s.get_string("applet-iid") == iid:
+                    return True
+            except Exception:
+                pass
+        return False
+
+    def add_unique(base):
+        oid = base
+        n = 1
+        while oid in object_ids:
+            n += 1
+            oid = f"{base}-{n}"
+        object_ids.append(oid)
+        return oid
+
+    for mon in monitors:
+        panel = panel_by_monitor[mon]
+
+        if not has_iid(panel, "BriskMenuFactory::BriskMenu"):
+            oid = add_unique(f"wolf-brisk-m{mon}")
+            set_applet_object(oid, panel, "BriskMenuFactory::BriskMenu", "start", 0, 0)
+
+        if not has_iid(panel, "WolfMonitorTasksFactory::WolfMonitorTasksApplet"):
+            oid = add_unique(f"wolf-tasks-m{mon}")
+            set_applet_object(oid, panel, "WolfMonitorTasksFactory::WolfMonitorTasksApplet", "start", 1, 42)
+
+        if not has_iid(panel, "ClockAppletFactory::ClockApplet"):
+            oid = add_unique(f"wolf-clock-m{mon}")
+            set_applet_object(oid, panel, "ClockAppletFactory::ClockApplet", "end", 0, 42)
+
+        if not has_iid(panel, "WnckletFactory::ShowDesktopApplet"):
+            oid = add_unique(f"wolf-showdesktop-m{mon}")
+            set_applet_object(oid, panel, "WnckletFactory::ShowDesktopApplet", "end", 1, 0)
+
+    general.set_strv("toplevel-id-list", toplevel_ids)
+    general.set_strv("object-id-list", object_ids)
+    Gio.Settings.sync()
+
+    for mon, tid in created_panels:
+        print(f"Wolf MATE MultiMonitor: painel criado no monitor {mon}: {tid}")
+
+
+def show_status():
+    check_env()
+    print(f"Wolf MATE MultiMonitor v{VERSION}")
+    print(f"Experimental habilitado: {'sim' if ENABLED_MARKER.exists() else 'não'}")
+    records = gdk_monitor_records()
+    print("Monitores GTK/GDK:", [m["index"] for m in records])
+    for m in records:
+        print(f"  GDK {m['index']}: {m['width']}x{m['height']}+{m['x']}+{m['y']} modelo={m['model'] or '?'}")
+    g = general_settings()
+    for tid in g.get_strv("toplevel-id-list"):
+        s = toplevel_settings(tid)
+        print(f"  painel {tid}: monitor={s.get_int('monitor')} orientação={s.get_string('orientation')}")
+    print("Wolf Monitor Tasks:")
+    for oid in g.get_strv("object-id-list"):
+        s = object_settings(oid)
+        if s.get_string("applet-iid") == "WolfMonitorTasksFactory::WolfMonitorTasksApplet":
+            print(f"  {oid} -> {s.get_string('toplevel-id')}")
+
+
+def stop_watch():
+    if PID_FILE.exists():
+        try:
+            pid = int(PID_FILE.read_text().strip())
+            os.kill(pid, signal.SIGTERM)
+        except Exception:
+            pass
+        PID_FILE.unlink(missing_ok=True)
+
+
+def enable():
+    check_env()
+    CONFIG_ROOT.mkdir(parents=True, exist_ok=True)
+    STATE_ROOT.mkdir(parents=True, exist_ok=True)
+    ENABLED_MARKER.touch()
+    ensure_baseline_backup()
+    reconcile()
+    subprocess.Popen([sys.argv[0], "watch"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    print("[OK] Wolf MultiMonitor experimental para MATE habilitado.")
+
+
+def disable():
+    ENABLED_MARKER.unlink(missing_ok=True)
+    stop_watch()
+    print("[OK] Wolf MultiMonitor para MATE desativado; painéis existentes foram preservados.")
+
+
+def restore():
+    disable()
+    latest = STATE_ROOT / "latest"
+    if not latest.exists():
+        die("Nenhum backup encontrado.")
+    src = Path(latest.read_text().strip()) / "mate-panel.dconf"
+    if not src.exists():
+        die("Backup inválido.")
+    subprocess.run(["dconf", "reset", "-f", "/org/mate/panel/"], check=True)
+    with src.open() as f:
+        subprocess.run(["dconf", "load", "/org/mate/panel/"], stdin=f, check=True)
+    subprocess.Popen(["mate-panel", "--replace"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    print("[OK] Configuração MATE restaurada e automação desativada.")
+
+
+def watch():
+    check_env()
+    if not ENABLED_MARKER.exists():
+        return
+    if PID_FILE.exists():
+        try:
+            old = int(PID_FILE.read_text().strip())
+            os.kill(old, 0)
+            return
+        except Exception:
+            pass
+    PID_FILE.write_text(str(os.getpid()) + "\n")
+
+    def cleanup(*_):
+        PID_FILE.unlink(missing_ok=True)
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, cleanup)
+    signal.signal(signal.SIGINT, cleanup)
+    time.sleep(8)
+    previous = ""
+    while ENABLED_MARKER.exists():
+        current = topology_signature()
+        if current and current != previous:
+            time.sleep(2)
+            ensure_baseline_backup()
+            try:
+                reconcile()
+            except Exception as exc:
+                print(f"Wolf MATE MultiMonitor: {exc}", file=sys.stderr)
+            previous = current
+        time.sleep(3)
+    cleanup()
+
+
+def apply():
+    check_env()
+    make_backup()
+    reconcile()
+    print("[OK] Configuração multi-monitor MATE aplicada.")
+
+
+def usage():
+    print(f"Uso: {Path(sys.argv[0]).name} status|apply|reconcile|enable|disable|restore|watch")
+
+
+cmd = sys.argv[1] if len(sys.argv) > 1 else "status"
+if cmd == "status":
+    show_status()
+elif cmd == "apply":
+    apply()
+elif cmd == "reconcile":
+    reconcile()
+elif cmd == "enable":
+    enable()
+elif cmd == "disable":
+    disable()
+elif cmd == "restore":
+    restore()
+elif cmd == "watch":
+    watch()
+else:
+    usage()
+    raise SystemExit(2)
+WOLF_MATE_MM
+        chmod 755 /mnt/usr/local/bin/wolf-mate-multimonitor
+
+        cat > /mnt/etc/xdg/autostart/wolf-mate-multimonitor.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Wolf Linux - MATE MultiMonitor (experimental)
+Comment=Gerenciamento multi-monitor experimental para MATE
+Exec=/usr/local/bin/wolf-mate-multimonitor watch
+OnlyShowIn=MATE;
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+
+        ok "Wolf MultiMonitor para MATE instalado em modo experimental (não habilitado automaticamente)."
+        info "Após teste em hardware: wolf-mate-multimonitor enable"
+    fi
+
+    cat > /mnt/usr/local/bin/wolf-multimonitor <<'EOF'
+#!/usr/bin/env bash
+set -e
+DESKTOP="${XDG_CURRENT_DESKTOP:-${XDG_SESSION_DESKTOP:-}}"
+case "$DESKTOP" in
+    *Cinnamon*) exec /usr/local/bin/wolf-cinnamon-multimonitor "$@" ;;
+    *MATE*) exec /usr/local/bin/wolf-mate-multimonitor "$@" ;;
+    *KDE*|*Plasma*) exec /usr/local/bin/wolf-plasma-multimonitor "$@" ;;
+    *XFCE*|*Xfce*) exec /usr/local/bin/wolf-xfce-multimonitor "$@" ;;
+    *) echo "[ERRO] Desktop não suportado pelo Wolf MultiMonitor: $DESKTOP" >&2; exit 1 ;;
+esac
+EOF
+    chmod 755 /mnt/usr/local/bin/wolf-multimonitor
+}
+
 finalize_vm_install() {
     sync
 
     echo
     echo "============================================================"
-    if [[ "$VM_TYPE" == "qemu" || "$VM_TYPE" == "kvm" ]]; then
+    if is_supported_test_vm; then
         echo "       INSTALAÇÃO WOLF LINUX CONCLUÍDA NA VM"
     else
         echo "      INSTALAÇÃO WOLF LINUX CONCLUÍDA NO HARDWARE"
@@ -6921,7 +11431,7 @@ finalize_vm_install() {
     echo "============================================================"
     echo "Desktop ....: $DESKTOP"
     echo "Usuário ....: $USERNAME_VALUE"
-    echo "Kernel .....: linux-zen"
+    echo "Kernel .....: linux-zen (linux-lts disponível para recuperação)"
     echo "SDDM .......: habilitado"
     echo "PipeWire ...: instalado"
     echo "sudo .......: wheel + pwfeedback"
@@ -6938,7 +11448,7 @@ finalize_vm_install() {
     echo "  - Octopi + Octopi Notifier após o login"
     echo "  - perfil gráfico automático: $GPU_PROFILE"
     echo "  - Vulkan 64/32-bit adequado à GPU"
-    echo "  - Steam / Lutris / Wine / Proton tools / GameMode"
+    echo "  - Steam / Lutris / Wine / Proton tools / GameMode / xpadneo"
     echo
     echo "Ambiente do usuário:"
     echo "  - Flutter stable em /opt/flutter"
@@ -6950,7 +11460,9 @@ finalize_vm_install() {
     echo "Identidade visual:"
     [[ "$DESKTOP" == "mate" ]] && echo "  - painel MATE inferior estilo Windows + Brisk Menu"
     echo "  - wallpaper Wolf Linux"
+    [[ "$DESKTOP" == "cinnamon" || "$DESKTOP" == "plasma" ]] && echo "  - símbolo Wolf Linux no menu de aplicativos"
     echo "  - GRUB Wolf Linux"
+    echo "  - Wolf GRUB Manager + menu BootNext limpo"
     echo "  - Plymouth Wolf Linux"
     echo "  - SDDM Wolf Linux"
     echo "============================================================"
@@ -7000,13 +11512,18 @@ main() {
     stage "68a-mate-session" install_mate_session_setup
     stage "68b-flutter" install_flutter_sdk
     stage "68c-zsh" install_oh_my_zsh_and_profile
+    stage "68c-keybindings" install_wolf_desktop_keybindings
+    stage "68c-xfce" install_xfce_defaults
     stage "68d-terminal" install_terminal_defaults
     stage "68e-mate-layout" install_mate_windows_layout
     stage "68f-desktop-extras" install_desktop_productivity_extras
+    stage "68g-multimonitor" install_wolf_multimonitor_all_desktops
     stage "69-video" install_gpu_profile
     stage "69b-validar-video" validate_graphics_stack
     stage "69c-gaming" install_gaming_stack
     stage "69d-branding" install_wolf_branding
+    stage "69d2-menu-branding" install_wolf_desktop_branding
+    stage "69e-grub-manager" install_wolf_grub_manager
     stage "70-bootloader" configure_bootloader
     stage "72-validar-boot" validate_boot_installation
     stage "80-finalizar" finalize_vm_install

@@ -1,3 +1,147 @@
+
+## DevKit 1.0.52
+
+Revisão mínima do smoke test: as verificações de `SELF_DIR` agora usam strings com `$` escapado em aspas duplas, evitando o falso-positivo ShellCheck SC2016. Nenhuma lógica funcional do XFCE/Picom/branding foi alterada; o fixer ativo continua `wolf-fix-xfce-polish-1.0.51.sh`.
+
+# Wolf Linux DevKit 1.0.48
+
+Revisão corretiva mínima sobre a 1.0.46: remove a variável `VERSION` não utilizada do helper `wolf-xfce-super-setup-0.2.sh`, eliminando o SC2034 do ShellCheck. Não há mudança funcional no XFCE.
+
+# Wolf Linux DevKit 1.0.43
+
+
+
+
+## Wolf Linux DevKit 1.0.51
+
+- Corrige o warning `SC2034` do helper de branding (`attempt` não utilizado).
+- Promove **Picom/XRender** a compositor padrão do XFCE após validação em hardware real NVIDIA/X11.
+- Mantém o compositor nativo do `xfwm4` desligado.
+- `wolf-xfce-compositor-0.1.sh` continua oferecendo `xrender`, `glx`, `off`, `persist-xrender` e `persist-glx`.
+- O padrão XRender é aplicado **uma única vez** por usuário; escolhas posteriores do usuário são preservadas.
+- `picom` passa a fazer parte do perfil oficial de pacotes XFCE.
+- Mantém branding Wolf Linux no CinnVII/Cinnamon e Kickoff/Plasma.
+- Inclui fixers `wolf-fix-xfce-polish-1.0.51.sh` e `wolf-fix-desktop-branding-1.0.50.sh`.
+
+
+## 1.0.43 — correção ShellCheck sem mudança funcional
+
+- Corrige SC2034 no `wolf-xfce-whisker-placement-0.2.sh`: o campo `out` do contexto continua sendo lido para manter o formato TSV compatível, mas agora é descartado em `_` em vez de criar `CTX_OUT` sem uso.
+- A mesma correção foi sincronizada no instalador e no fixer XFCE.
+- Nenhuma política de painel, placement, Whisker, MultiMonitor, fontes, áudio ou gamepad foi alterada em relação à 1.0.42.
+
+## 1.0.42 — XFCE orientado a eventos + painel preservado + lançamento por monitor
+
+- **Desempenho:** remove o polling agressivo que consultava janelas/mouse a cada 100 ms e o `xrandr` a cada 3 s. `wolf-xfce-whisker-placement` v0.2 agora bloqueia em eventos EWMH via `xprop -root -spy`; `wolf-xfce-multimonitor` v0.5 bloqueia em eventos RandR via `xev -root -event randr`.
+- **Painéis persistentes:** o MultiMonitor deixa de reiniciar `xfce4-panel` no login e não faz mais upgrade destrutivo de painéis existentes. Tamanho, scroll, autohide, plugins e outras preferências ficam sob controle do usuário; o helper só associa outputs e cria painel quando surge um monitor que realmente precisa dele.
+- `wolf-xfce-desktop-setup` sobe para **v0.7**. Qualquer marker `xfce-layout-v*.done` existente é suficiente para impedir reconstrução automática; aparência e layout passam definitivamente a ser política de primeiro login.
+- **Whisker:** `wolf-xfce-whisker-current` v0.3 força `popup:bool:false`, seleciona a instância do painel do monitor sob o ponteiro e nunca usa `--pointer`. Um autostart próprio do `xcape` garante o mesmo caminho após reboot e bindings legados de Super que chamem `xfce4-popup-whiskermenu` diretamente são removidos.
+- **Chrome/launchers:** novo `wolf-xfce-launch-here` v0.1 arma o monitor do ponteiro antes de Chrome, Terminal e Pasta pessoal. O daemon orientado a eventos também observa janela ativa para aplicativos já existentes e faz duas correções curtas apenas no nascimento/reativação da janela para neutralizar restauração tardia de geometria do Chromium, sem polling contínuo.
+- **Volume:** corrige o seletor GTK do `xfce4-pulseaudio-plugin` para a hierarquia atual (`#pulseaudio-button > box > image`) e aplica escala menor somente ao ícone, mantendo PipeWire/pipewire-pulse/WirePlumber.
+- **Fontes:** mantém Noto, Noto CJK e Noto Emoji e acrescenta `ttf-nerd-fonts-symbols` + `ttf-nerd-fonts-symbols-mono` como fallbacks para ícones/glyphs de terminal.
+- **Gamepad:** `wolf-gamepad-setup` v0.3 preserva o reparo de bonding/input validado em hardware real e troca o último `sed` simples por expansão Bash, eliminando o SC2001.
+- O fixer 1.0.42 é migratório e não executa mais `wolf-xfce-desktop-setup force`: atualiza helpers, launchers e CSS no lugar e reinicia o painel uma única vez durante a aplicação para carregar o CSS; não há restart automático do painel no login.
+
+## 1.0.41 — aparência de primeiro login + Whisker ancorado + diagnóstico real de gamepad
+
+- **XFCE:** tema, ícones, cursor, decoração, terminal e wallpaper passam a ser política de **primeiro login**. Depois que `xfce-appearance-v1.done` existe, o autostart não reaplica preferências visuais e respeita as alterações do usuário.
+- O `wolf-xfce-multimonitor` continua recorrente e independente: hotplug de monitores ainda cria/reaproveita painéis Wolf sem exigir que o setup de aparência rode novamente.
+- `wolf-xfce-desktop-setup` sobe para **v0.6** e separa `xfce-layout-v6.done` de `xfce-appearance-v1.done`. Um `force` pode reconstruir o painel sem sobrescrever a aparência já concluída.
+- `wolf-fix-xfce-polish-1.0.41.sh` migra usuários existentes marcando a aparência como concluída antes de reconstruir o layout, preservando wallpaper/tema escolhidos.
+- `wolf-xfce-whisker-current` sobe para **v0.2**: escolhe o monitor pelo ponteiro e prioriza o **remote event do próprio painel** (`whiskermenu-ID:popup`), mantendo o menu ancorado ao botão daquele monitor. `--instance` fica somente como fallback e `--pointer` nunca é usado em multimonitor.
+- Mantém o daemon de placement 1.0.40: aplicativos iniciados pelo Whisker continuam seguindo o monitor onde o menu foi aberto.
+- O painel principal passa a incluir explicitamente `xfce4-pulseaudio-plugin`; um bloco CSS gerenciado reduz somente o ícone do botão para manter proporção com tray/relógio. O backend de áudio continua **PipeWire + pipewire-pulse + WirePlumber**.
+- Adiciona `wolf-gamepad-setup-0.2.sh`: o helper agora diferencia `Connected=yes` de um gamepad realmente operacional e valida `Paired/Bonded`, `ServicesResolved`, `/dev/uhid`, binding HID/xpadneo, `/proc/bus/input/devices` e os nós `/dev/input/event*` antes de considerar o controle pronto para Steam. Também oferece reparo/repareamento limpo sem enfraquecer automaticamente `ClassicBondedOnly`.
+- O `+32` do xpadneo continua sendo usado somente para o layout Nintendo; ele não é tratado como mecanismo de criação do input device.
+
+
+
+## 1.0.40 — lançamento do Whisker segue o monitor do menu
+
+- Mantém a baseline 1.0.39 já validada: smoke test, painéis multi-monitor e Alt+Tab por monitor não sofrem alterações funcionais.
+- Adiciona `wolf-xfce-whisker-placement` v0.1. O daemon detecta em qual monitor o Whisker foi aberto e corrige somente novas janelas criadas logo após um lançamento pelo menu.
+- A correção cobre tanto o Whisker aberto por `Super` quanto o clique direto no botão de qualquer painel, porque a origem é inferida pela própria janela do menu.
+- O helper preserva a posição relativa da janela entre monitores e trata janelas maximizadas/fullscreen removendo temporariamente o estado, movendo e restaurando-o.
+- Adiciona `wmctrl` e `xorg-xprop` ao perfil oficial do XFCE para manipulação EWMH segura.
+- `placement_mode=mouse` continua habilitado como primeira camada; o novo daemon funciona apenas como fallback para aplicações que ignoram a política de posicionamento do `xfwm4`.
+
+
+## 1.0.39 — correção da reconstrução XFCE + Alt+Tab por monitor
+
+- Corrige a segunda regressão da reconstrução do painel: `configure_all_whiskers()` agora sempre retorna sucesso após a varredura. Na 1.0.38, se o último plugin não fosse Whisker, a condição final retornava `1` e o `set -e` encerrava o setup antes do MultiMonitor.
+- Mantém o fail-safe que relança `xfce4-panel` e adiciona diagnóstico de erro com linha, comando e status antes da recuperação.
+- Atualiza `wolf-xfce-desktop-setup` para v0.5 e o marker de layout para v5.
+- Corrige o próprio smoke test para não gerar SC2016 nas verificações de regressão adicionadas na 1.0.38.
+- Adiciona `alttab` ao perfil XFCE via Chaotic-AUR/AUR e configura `Alt+Tab` para mostrar somente janelas do workspace atual e do monitor onde o ponteiro está (`-w 1 -d 0 -sc 0 -vp pointer`).
+- O helper `wolf-xfce-alttab` libera `Alt+Tab`/`Alt+Shift+Tab` do `xfwm4`, inicia o switcher por autostart e mantém o ciclo reverso com Shift.
+- O fixer 1.0.39 reconstrói novamente o painel principal, executa o MultiMonitor em seguida e recria o painel do segundo monitor que ficou ausente após a falha da 1.0.38.
+
+
+## 1.0.38 — hotfix de segurança do painel XFCE
+
+- Corrige a regressão `set -u`/ShellCheck SC2318 em `configure_whisker`: `id` e o caminho `rc` agora são declarados em linhas separadas, evitando a expansão de `${id}` antes da atribuição.
+- O helper do painel agora possui um **fail-safe de saída**: depois que a reconstrução encerra `xfce4-panel`, qualquer aborto inesperado relança o painel automaticamente.
+- A geração do ícone do Whisker é antecipada para antes da etapa destrutiva da reconstrução do painel.
+- Corrige SC2053 em `wolf-xfce-default-apps`: filtros `image/*`, `text/*`, `video/*` e `audio/*` continuam funcionando sem depender de expansão glob insegura no `[[ ... ]]`.
+- Sincroniza as correções no helper standalone, no fixer para hardware real e nas cópias embutidas em `wolf-install.sh`, evitando que uma ISO nova reinstale código antigo.
+- O smoke test passa a bloquear explicitamente o padrão SC2318, o padrão SC2053 e a ausência do fail-safe do painel.
+
+
+## 1.0.37 — foco no XFCE em hardware real
+
+- MATE foi marcado como **legado / para remoção** e fica apenas como opção de transição nesta revisão; Cinnamon e KDE permanecem na baseline já validada.
+- XFCE: corrige tema `Materia-dark` instalando explicitamente o pacote no perfil XFCE.
+- Painéis secundários não recebem mais `systray` nem `showdesktop`; o tray fica exclusivamente no monitor principal.
+- `Super` continua tap-only via `xcape`, mas agora abre a instância do Whisker pertencente ao monitor do ponteiro **ancorada ao botão no painel**, sem `--pointer`.
+- XFWM usa `placement_mode=mouse` para novas janelas tenderem a nascer no monitor onde o usuário acionou o Whisker.
+- Aplicativos padrão XFCE consolidados: Ristretto (imagens), Xreader (PDF/leitura), Mousepad (texto), MPC-QT (vídeo), Audacious (áudio), Xarchiver, Transmission, LibreOffice, Chrome e Thunar.
+- Thunar recebe a ação **Abrir esta pasta no VS Code**.
+- Mouse X11/libinput recebe perfil `flat` também no XFCE, com regra Xorg e reforço por sessão.
+- O ícone do Whisker é gerado em formato redondo a partir da arte transparente do Plymouth Wolf Linux.
+
+## 1.0.36 — polimento XFCE
+
+- Launchers do painel XFCE agora são launchers reais por plugin, na ordem **Chrome → Pasta pessoal → Terminal**, sem ícones genéricos.
+- Painel principal: Whisker + launchers fixos + tasklist local + tray + relógio + mostrar desktop.
+- Painéis secundários: mesma base sem o botão global "Mostrar Área de Trabalho".
+- Terminal XFCE padronizado com **MesloLGS Nerd Font 11**, preto/branco, geometria 120x30 e sem menubar/scrollbar.
+- Wallpaper Wolf aplicado dinamicamente a todos os outputs XRandR no XFCE 4.20.
+- `xdg-user-dirs-gtk` + `gvfs` e bookmarks GTK garantem Documentos/Downloads/Músicas/Imagens/Vídeos em Locais do Thunar.
+- Tema Materia-dark/Papirus-Dark reforçado também via GTK/GSettings.
+
+## Revisão XFCE
+
+- XFCE agora é **X11-only**: `xfce-wayland.desktop` é removido e um hook do pacman reaplica a política após upgrades do `xfce4-session`.
+- SDDM é preparado para iniciar `xfce.desktop` quando XFCE é o desktop escolhido.
+- O layout padrão do XFCE passa a ter **um único painel inferior** no monitor principal; o painel superior e o dock/painel secundário padrão do XFCE não são usados.
+- Painel principal: Whisker Menu, launchers fixos (Chrome, Pasta pessoal e Terminal), tasklist do monitor atual, tray, relógio e Mostrar Área de Trabalho.
+- Painéis de monitores secundários: mesma base, mas sem `showdesktop`, para não minimizar janelas de todas as telas.
+- Workspaces são reduzidos para **1** e o pager não é adicionado.
+- Tema XFCE reforçado para `Materia-dark`, `Papirus-Dark`, `breeze_cursors` e decoração `Materia-dark`.
+- `wolf-xfce-multimonitor` v0.3 acompanha o monitor principal, cria/reaproveita painéis por saída e monitora hotplug.
+- Incluído `wolf-fix-xfce-polish-1.0.36.sh` para aplicar launchers, tema, wallpaper, terminal e integração XDG/Thunar em uma instalação de teste existente.
+
+# Wolf Linux DevKit
+## 1.0.34 — MATE/GDK + suporte de instalação no VirtualBox
+
+- Atualiza o Wolf MATE MultiMonitor para v0.3: a topologia passa a vir do GTK/GDK, a mesma visão usada pelo `mate-panel`, evitando painéis sobrepostos quando RandR anuncia monitores lógicos que o MATE não reconhece.
+- Mantém o MultiMonitor do MATE experimental/opt-in até validação com duas telas GDK reais.
+- `--vm-install` passa a aceitar VirtualBox (`oracle`/`virtualbox`/`vbox`) além de QEMU/KVM.
+- Em VirtualBox, instala automaticamente `virtualbox-guest-utils`, habilita `vboxservice.service` e usa um perfil gráfico Mesa próprio. O XDG Autostart fornecido pelo pacote inicia `VBoxClient-all` na sessão gráfica.
+- Instala também o fallback UEFI `EFI/BOOT/BOOTX64.EFI` em VMs VirtualBox, facilitando testes EFI.
+- O smoke test valida o uso de GDK no MATE e a presença da integração VirtualBox.
+
+## 1.0.32 — correção do smoke test MPC-QT / SC2016
+
+- Corrige o teste que procura literalmente `${MULTIMEDIA_THIRD_PARTY_PACKAGES[@]}` no instalador.
+- Mantém a busca literal, mas usa `"\${MULTIMEDIA_THIRD_PARTY_PACKAGES[@]}"` para que o ShellCheck não interprete a intenção como expansão esquecida.
+- Nenhuma mudança funcional no fluxo de instalação em relação à 1.0.30.
+
+
+## 1.0.30 — correção MPC-QT / Chaotic-AUR
+
+O `mpc-qt` foi movido do conjunto base/pacstrap para `MULTIMEDIA_THIRD_PARTY_PACKAGES`. O Chaotic-AUR é habilitado somente após o pacstrap, portanto o player agora é instalado na etapa de aplicativos de terceiros, com fallback AUR. O smoke test impede que `mpc-qt` volte ao conjunto pré-Chaotic.
+
 # Wolf Linux 1.0
 
 <p align="center">
@@ -6,7 +150,7 @@
 
 **Wolf Linux** é um projeto pessoal baseado em **Arch Linux**, criado para automatizar uma instalação completa, reproduzível e personalizada para uso diário, desenvolvimento, jogos e multimídia.
 
-A distribuição usa o Arch Linux como base, `linux-zen` como kernel padrão, PipeWire como stack de áudio, SDDM como display manager e oferece escolha entre **MATE**, **Cinnamon** e **KDE Plasma** no momento da instalação.
+A distribuição usa o Arch Linux como base, `linux-zen` como kernel padrão, PipeWire como stack de áudio, SDDM como display manager e oferece **Cinnamon**, **KDE Plasma** e **XFCE** como perfis principais; **MATE está marcado como legado/para remoção** durante a transição para XFCE.
 
 A versão 1.0 foi desenvolvida e validada em máquinas virtuais UEFI/BIOS e em hardware real, com especial atenção a detecção de GPU, preservação de `/home`, dual boot, múltiplos monitores, Bluetooth, NVIDIA e identidade visual própria.
 
@@ -55,22 +199,23 @@ O MATE é o ambiente mais personalizado do projeto e inclui:
 - mouse sem aceleração no X11/libinput.
 
 
-### Wolf MultiMonitor (Cinnamon)
+### Wolf MultiMonitor
 
-O perfil Cinnamon inclui o **Wolf MultiMonitor**, validado em hardware real com duas telas.
+O **Wolf MultiMonitor** busca deixar cada tela útil de forma independente: painel/menu local, lista de tarefas da própria tela e detecção de monitores conectados depois do login. A reconciliação é aditiva: uma tela desconectada não causa a exclusão automática de painéis/configurações, preservando personalizações para quando ela voltar.
 
-Na sessão X11 ele mantém uma experiência independente por monitor:
+#### Cinnamon — automático e validado em hardware
+
+O perfil Cinnamon X11 foi validado em hardware real com duas telas e inclui:
 
 - painel inferior em cada monitor ativo;
 - CinnVIIStarkMenu em cada painel;
 - Grouped Window List mostrando somente as janelas da própria tela;
 - relógio nos painéis criados automaticamente;
 - Alt+Tab limitado ao monitor ativo;
-- detecção de novos monitores durante a sessão por XRandR.
+- detecção de novos monitores durante a sessão por XRandR;
+- `status`, `enable`, `disable` e `restore`.
 
-O watcher é aditivo e conservador: ao desconectar uma tela, o Wolf Linux **não apaga** o painel associado, preservando personalizações para quando ela voltar. Ao conectar uma tela nova, o painel que estiver faltando é criado automaticamente.
-
-Comandos disponíveis no sistema instalado:
+Comandos:
 
 ```bash
 wolf-cinnamon-multimonitor status
@@ -79,7 +224,51 @@ wolf-cinnamon-multimonitor disable
 wolf-cinnamon-multimonitor restore
 ```
 
-`restore` restaura o último backup e desativa o gerenciamento automático para que a configuração restaurada não seja reaplicada imediatamente.
+#### KDE Plasma — automático usando recursos nativos
+
+No Plasma o Wolf Linux evita substituir componentes do desktop: o helper usa o scripting do próprio Plasma para garantir um painel nos monitores ativos e ativa `showOnlyCurrentScreen=true` em cada Task Manager. Painéis novos recebem Kickoff, Icons-only Task Manager, relógio e Show Desktop. A topologia é observada com KScreen (com fallback para XRandR em X11).
+
+Comandos:
+
+```bash
+wolf-plasma-multimonitor status
+wolf-plasma-multimonitor enable
+wolf-plasma-multimonitor disable
+wolf-plasma-multimonitor restore
+```
+
+Esse modo é habilitado automaticamente no Plasma, mas ainda aguarda um ciclo longo de validação em hardware multi-monitor.
+
+#### MATE — implementação pronta, ativação experimental
+
+A Window List padrão do MATE não oferece filtro por monitor. Por isso o Wolf Linux inclui o applet próprio **Wolf Monitor Tasks**, baseado em `libwnck`, que lista apenas as janelas cuja geometria pertence ao monitor do painel. O gerenciador cria painéis adicionais com Brisk Menu, Wolf Monitor Tasks, relógio e Show Desktop.
+
+Como essa implementação ainda não foi validada em hardware real multi-monitor, ela é instalada mas **não é ativada automaticamente**. Para testar:
+
+```bash
+wolf-mate-multimonitor status
+wolf-mate-multimonitor enable
+```
+
+Para interromper o watcher sem apagar os painéis:
+
+```bash
+wolf-mate-multimonitor disable
+```
+
+E para voltar ao backup anterior:
+
+```bash
+wolf-mate-multimonitor restore
+```
+
+Também existe o dispatcher comum:
+
+```bash
+wolf-multimonitor status
+```
+
+que chama automaticamente o helper correspondente ao desktop da sessão.
 
 ### Áudio e Bluetooth
 
@@ -1334,3 +1523,188 @@ A revisão 1.0.24 integra o Wolf MultiMonitor ao perfil Cinnamon após validaç�
 - oferece `status`, `enable`, `disable`, `reconcile` e `restore`;
 - `restore` desativa o watcher para impedir que o estado restaurado seja imediatamente reaplicado.
 
+
+
+## 1.0.26 — Wolf MultiMonitor em Cinnamon, Plasma e MATE
+
+A revisão 1.0.26 amplia o conceito validado no Cinnamon para os três ambientes gráficos.
+
+- **Cinnamon:** mantém o MultiMonitor v0.3 já validado em hardware, com CinnVII, lista de janelas por tela, Alt+Tab local e hotplug.
+- **KDE Plasma:** usa recursos nativos do Plasma; painéis são associados às telas e os Task Managers recebem `showOnlyCurrentScreen=true`. O watcher é habilitado por padrão e preserva painéis quando uma tela desaparece temporariamente.
+- **MATE:** adiciona o applet `Wolf Monitor Tasks`, que filtra janelas pelo monitor usando `libwnck`, mais um watcher de hotplug. A funcionalidade é instalada, porém permanece desabilitada por padrão até validação em hardware real.
+- O perfil Plasma passa a instalar explicitamente `kscreen` e `qt6-tools`; o perfil MATE instala `python-gobject` para o applet.
+- O comando `wolf-multimonitor` funciona como dispatcher entre Cinnamon, MATE e Plasma.
+
+A política continua não destrutiva: conectar uma nova tela pode criar o painel que falta; desconectar uma tela não apaga automaticamente o layout associado.
+
+## 1.0.27 — Tecla Super abre o menu do monitor do ponteiro no Cinnamon
+
+A revisão 1.0.27 melhora a experiência multi-monitor validada no Cinnamon.
+
+O `CinnVIIStarkMenu` ainda usa a API antiga `Main.keybindingManager.addHotKey()`
+para a opção `overlay-key`. Em múltiplas instâncias isso faz a tecla `Super`
+ser resolvida por uma instância específica, normalmente a do painel principal.
+O Cinnamon 6.6 já possui a API multi-instância `addXletHotKey()`, cujo próprio
+`KeybindingManager` seleciona a instância localizada no monitor atual antes de
+executar o callback.
+
+O Wolf Linux aplica uma correção mínima e reversível no CinnVII:
+
+- `addHotKey(...)` passa a `addXletHotKey(this, "overlay-key", ...)`;
+- `removeHotKey(...)` passa a `removeXletHotKey(this, "overlay-key")`;
+- o arquivo original recebe backup `.wolf-before-monitor-hotkey.bak`;
+- o patch é idempotente e reaplicável;
+- `wolf-cinnamon-multimonitor` v0.4 verifica o patch ao reconciliar a sessão.
+
+Com isso, ao pressionar `Super`, o Cinnamon usa sua lógica nativa de
+multi-instância e abre o CinnVII do monitor onde está o ponteiro do mouse. Se
+não houver instância do menu naquela tela, a própria lógica do Cinnamon usa a
+instância do monitor principal como fallback.
+
+O helper `wolf-fix-cinnvii-super-monitor-0.1.sh` permite aplicar a mesma
+correção em uma instalação existente. Após alterar o código do applet é
+necessário recarregar o Cinnamon X11 (`Alt+F2`, `r`, Enter) ou fazer logout/login.
+
+## 1.0.28 — Correção de qualidade do helper CinnVII
+
+A revisão 1.0.28 não altera o comportamento funcional do MultiMonitor. Ela usa
+explicitamente a variável `VERSION` do helper `wolf-fix-cinnvii-super-monitor-0.1.sh`
+na mensagem de execução, eliminando o aviso ShellCheck `SC2034` que bloqueava o
+smoke test da 1.0.27.
+
+## 1.0.30 — CinnVII multiversão: hotkey por monitor robusto
+
+Corrige o patch da tecla Super em instalações onde o Cinnamon seleciona a árvore
+`3.2/applet.js` do CinnVIIStarkMenu. Essa variante omite o ponto-e-vírgula em
+`removeHotKey(...)`, enquanto a árvore 4.2 o inclui. O helper agora usa padrões
+por expressão regular e aceita diferenças de whitespace/ponto-e-vírgula entre
+as revisões 3.2/3.4/4.2, inclusive estados parcialmente corrigidos.
+
+O smoke test ganhou fixtures 3.2 e 4.2 para impedir que essa regressão volte a
+passar despercebida.
+
+Nota: o arquivo legado `wolf-fix-cinnvii-super-monitor-0.1.sh` é mantido no
+DevKit apenas como compatibilidade para upgrades antigos, mas contém o mesmo
+patch multiversão robusto da v0.2. Novas instalações e upgrades usam v0.2.
+
+## Teste MATE com dois monitores no VirtualBox
+
+Para validar o Wolf MultiMonitor do MATE em uma topologia que o GTK/GDK reconheça
+como duas telas reais, configure a VM do VirtualBox com:
+
+- firmware EFI;
+- controlador gráfico VMSVGA;
+- 128 MiB de memória de vídeo;
+- 2 monitores;
+- 4 CPUs e 8 GiB de RAM (sugestão);
+- disco virtual de 80 GiB ou maior;
+- ISO Wolf Linux 1.0.34 anexada ao drive óptico.
+
+O instalador detecta VirtualBox como VM, aceita `--vm-install`, instala
+`virtualbox-guest-utils` e habilita `vboxservice.service`. O pacote também fornece
+o autostart do `VBoxClient-all`, necessário para integração gráfica e redimensionamento.
+
+Após instalar e iniciar o MATE, valide primeiro:
+
+```bash
+systemctl status vboxservice --no-pager
+pgrep -a VBoxClient
+
+python3 - <<'PY'
+import gi
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gdk
+
+d = Gdk.Display.get_default()
+print("Monitores GDK:", d.get_n_monitors())
+for i in range(d.get_n_monitors()):
+    m = d.get_monitor(i)
+    g = m.get_geometry()
+    print(f"{i}: {g.width}x{g.height}+{g.x}+{g.y} modelo={m.get_model()}")
+PY
+```
+
+Somente se `Monitores GDK: 2` aparecer, ative o recurso experimental:
+
+```bash
+wolf-mate-multimonitor status
+wolf-mate-multimonitor enable
+```
+
+O helper usa GDK como fonte de verdade, exatamente para não criar painéis sobrepostos
+quando RandR anuncia monitores lógicos que o MATE não considera telas distintas.
+
+
+## 1.0.34
+- linux-lts instalado em paralelo como kernel de recuperação; GRUB visível por 5 s.
+- identidade Wolf Linux publicada via LOGO=wolf-linux e ícones do sistema.
+- MATE: atalhos Super+E/Ctrl+Alt+T, Brisk Super duplicado desabilitado, Wolf Monitor Tasks clicável.
+- XFCE adicionado ao instalador com Whisker Menu, Super tap-only via xcape e perfil multi-monitor nativo.
+
+## Wolf Linux DevKit 1.0.45
+
+Revisão corretiva focada no XFCE sem alterar compositor ou stack gráfica:
+
+- Super/Whisker: novo `wolf-xfce-super-setup-0.1.sh` revalida a combinação privada a cada login e elimina bindings legados que abriam o Whisker com `--pointer`.
+- Aplicativos padrão: `text/plain` é reafirmado como `org.xfce.mousepad.desktop` depois das associações do LibreOffice.
+- Placement: o contexto de um lançamento pelo Whisker é consumido após a primeira nova janela, reduzindo interferência sobre abas destacadas/diálogos posteriores.
+- Chrome: nenhuma política de compositor ou aceleração gráfica é modificada; diagnóstico de drag/tab continua separado.
+
+
+## 1.0.45 — Whisker imediato no login
+
+- Remove a janela de ~4 s em que o binding legado do Whisker podia vencer logo após o login.
+- O autostart global `wolf-desktop-keybindings` não atua mais no XFCE; os atalhos XFCE ficam sob uma única autoridade.
+- `wolf-xfce-super-setup 0.2` configura Ctrl+Alt+T, Super+E e o toque isolado de Super, aguardando apenas o xfconf ficar disponível.
+- Nenhuma alteração de compositor, NVIDIA ou Octopi é aplicada nesta revisão.
+
+
+## 1.0.47 — Empacotamento do Super + compositor XFCE de baixa latência
+
+- Corrige o empacotamento/upgrade para exigir `wolf-xfce-super-setup-0.2.sh`,
+  `wolf-xfce-default-apps-0.3.sh` e o fixer atual antes de executar o smoke test.
+- O smoke test não ignora silenciosamente helpers XFCE ausentes.
+- O compositor nativo do `xfwm4` fica desligado por padrão no XFCE (`use_compositing=false`).
+  A decisão foi baseada em teste real NVIDIA/X11: `glx`, `xpresent` e `off` mantiveram
+  o arraste lento, enquanto desativar a composição eliminou o stutter e melhorou a fluidez.
+- Picom não é instalado: o perfil prioriza simplicidade, baixa latência e menor número de daemons.
+
+
+## 1.0.48 — Wolf GRUB Manager integrado
+
+- Integra `wolf-grub-manager-0.3.sh` em `tools/` e no smoke test.
+- A ISO transporta o helper em `/root/wolf-linux/tools/`.
+- O sistema instalado recebe `/usr/local/bin/wolf-grub-manager`.
+- Novas instalações definem `GRUB_DISABLE_BOOTNEXT=true`, evitando que o GRUB 2.16 transforme entradas EFI/NVRAM temporárias (inclusive pendrives) em itens persistentes do menu.
+- `GRUB_DISABLE_OS_PROBER=false` permanece ativo, preservando Windows/dual boot.
+- O helper mantém backup, geração temporária e `grub-script-check` antes de substituir `/boot/grub/grub.cfg`.
+
+## 1.0.49 — Branding Wolf no Cinnamon/Plasma e laboratório Picom para XFCE
+
+### Identidade visual nos menus de aplicativos
+
+O Wolf Linux passa a aplicar o símbolo da distribuição também nos principais menus dos desktops já suportados:
+
+- **Cinnamon / CinnVIIStarkMenu:** ativa o ícone customizado do menu e usa `/usr/share/pixmaps/wolf-linux.png`, mantendo o rótulo vazio. O helper também cobre o menu nativo do Cinnamon como fallback.
+- **KDE Plasma / Kickoff:** define `General/icon=wolf-linux` nos Kickoffs existentes e nos novos painéis criados pelo Wolf MultiMonitor.
+- A aplicação inicial usa marcador por usuário/desktop para não sobrescrever indefinidamente personalizações posteriores do usuário.
+
+O helper `wolf-desktop-branding-0.1.sh` é instalado como `/usr/local/bin/wolf-desktop-branding` e possui autostart apenas para Cinnamon e KDE Plasma. O fixer `wolf-fix-desktop-branding-1.0.49.sh` permite aplicar a mudança em instalações já existentes.
+
+### Wolf MultiMonitor
+
+O MultiMonitor do Cinnamon passa para v0.5 e o helper Plasma para v0.2. Painéis/menus criados depois de um hotplug também recebem o símbolo Wolf, sem reconstruir configurações existentes além do necessário para o novo painel.
+
+### Laboratório Picom no XFCE
+
+O compositor nativo do `xfwm4` continua **desabilitado por padrão**, conforme a validação em hardware NVIDIA/X11 que mostrou melhor fluidez sem composição.
+
+A revisão adiciona `wolf-xfce-compositor-0.1.sh` como ferramenta manual e reversível para testar:
+
+- `xrender` — Picom com backend XRender;
+- `glx` — Picom com backend GLX e `xrender-sync-fence`;
+- `off` — encerra Picom e mantém o compositor do XFWM desligado;
+- `persist-xrender` / `persist-glx` — somente para tornar permanente um modo já validado pelo usuário;
+- `status` — mostra o estado atual.
+
+O pacote `picom` não é instalado automaticamente pela ISO apenas por existir o laboratório; ele é instalado sob demanda pelo helper quando um modo Picom é solicitado. Dessa forma uma instalação nova continua simples e sem um compositor extra até que o usuário opte explicitamente por testá-lo.

@@ -33,6 +33,7 @@ mkdir -p \
     "$AIROOT/etc" \
     "$AIROOT/root/wolf-linux/install" \
     "$AIROOT/root/wolf-linux/package-profiles" \
+    "$AIROOT/root/wolf-linux/tools" \
     "$AIROOT/root/wolf-linux/assets" \
     "$AIROOT/usr/local/bin"
 
@@ -102,6 +103,28 @@ cp -f \
     "$PROJECT/package-profiles/packages.conf" \
     "$AIROOT/root/wolf-linux/package-profiles/packages.conf"
 
+[[ -f "$PROJECT/tools/wolf-grub-manager-0.3.sh" ]] || {
+    echo "[ERRO] Wolf GRUB Manager ausente do projeto."
+    exit 1
+}
+
+cp -f \
+    "$PROJECT/tools/wolf-grub-manager-0.3.sh" \
+    "$AIROOT/root/wolf-linux/tools/wolf-grub-manager-0.3.sh"
+chmod 755 "$AIROOT/root/wolf-linux/tools/wolf-grub-manager-0.3.sh"
+
+for tool in \
+    wolf-desktop-branding-0.1.sh \
+    wolf-xfce-compositor-0.1.sh
+do
+    [[ -f "$PROJECT/tools/$tool" ]] || {
+        echo "[ERRO] Tool ausente do projeto: $tool"
+        exit 1
+    }
+    cp -f "$PROJECT/tools/$tool" "$AIROOT/root/wolf-linux/tools/$tool"
+    chmod 755 "$AIROOT/root/wolf-linux/tools/$tool"
+done
+
 rm -rf "$AIROOT/root/wolf-linux/assets"
 mkdir -p "$AIROOT/root/wolf-linux/assets"
 
@@ -122,7 +145,7 @@ if (($# == 0)); then
     virt="$(systemd-detect-virt 2>/dev/null || true)"
 
     case "$virt" in
-        qemu|kvm)
+        qemu|kvm|oracle|virtualbox|vbox)
             set -- --vm-install
             ;;
         *)
@@ -311,6 +334,9 @@ for key, value in replacements.items():
 required_permissions = {
     "/usr/local/bin/wolf-install": "0:0:755",
     "/root/wolf-linux/install/wolf-install.sh": "0:0:755",
+    "/root/wolf-linux/tools/wolf-grub-manager-0.3.sh": "0:0:755",
+    "/root/wolf-linux/tools/wolf-desktop-branding-0.1.sh": "0:0:755",
+    "/root/wolf-linux/tools/wolf-xfce-compositor-0.1.sh": "0:0:755",
 }
 
 perm_block = re.search(
@@ -358,6 +384,20 @@ if [[ -f "$PROFILEDEF" ]]; then
             echo "[ERRO] profiledef.sh não contém permissão 755 para wolf-install.sh."
             exit 1
         }
+
+    grep -Fq '["/root/wolf-linux/tools/wolf-grub-manager-0.3.sh"]="0:0:755"' "$PROFILEDEF" \
+        || {
+            echo "[ERRO] profiledef.sh não contém permissão 755 para Wolf GRUB Manager."
+            exit 1
+        }
+
+    for tool in wolf-desktop-branding-0.1.sh wolf-xfce-compositor-0.1.sh; do
+        grep -Fq "[\"/root/wolf-linux/tools/$tool\"]=\"0:0:755\"" "$PROFILEDEF" \
+            || {
+                echo "[ERRO] profiledef.sh não contém permissão 755 para $tool."
+                exit 1
+            }
+    done
 fi
 
 # ------------------------------------------------------------

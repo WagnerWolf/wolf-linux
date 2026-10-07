@@ -56,8 +56,27 @@ chmod 755 "$PROJECT/install/wolf-install.sh"
 for tool in \
     wolf-fix-directory-handler-1.0.22.sh \
     wolf-apply-current-system-hooks-1.0.21.sh \
-    wolf-multimonitor-setup-0.3.sh \
-    wolf-install-multimonitor-auto-0.3.sh
+    wolf-multimonitor-setup-0.5.sh \
+    wolf-install-multimonitor-auto-0.5.sh \
+    wolf-fix-cinnvii-super-monitor-0.2.sh \
+    wolf-plasma-multimonitor-0.2.sh \
+    wolf-mate-multimonitor-0.3.py \
+    wolf-monitor-tasks.py \
+    wolf-xfce-multimonitor-0.5.sh \
+    wolf-xfce-desktop-setup-0.7.sh \
+    wolf-xfce-whisker-current-0.3.sh \
+    wolf-xfce-whisker-placement-0.2.sh \
+    wolf-xfce-default-apps-0.3.sh \
+    wolf-xfce-alttab-0.1.sh \
+    wolf-xfce-launch-here-0.1.sh \
+    wolf-xfce-super-setup-0.2.sh \
+    wolf-gamepad-setup-0.3.sh \
+    wolf-grub-manager-0.3.sh \
+    wolf-desktop-branding-0.1.sh \
+    wolf-xfce-compositor-0.1.sh \
+    wolf-fix-desktop-branding-1.0.50.sh \
+    wolf-fix-xfce-polish-1.0.51.sh \
+    wolf-repair-kernels-1.0.35.sh
 do
     if [[ -f "$SELF_DIR/$tool" ]]; then
         cp -f "$SELF_DIR/$tool" "$PROJECT/tools/$tool"

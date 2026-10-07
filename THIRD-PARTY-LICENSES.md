@@ -38,3 +38,16 @@ CinnVIIStarkMenu is distributed under the GNU General Public License, version 2
 or later. The applet is downloaded from upstream during installation; Wolf Linux
 only configures it as the default Cinnamon menu.
 
+
+## alttab
+
+Wolf Linux XFCE can install `alttab`, the standalone X11 task switcher from:
+
+https://github.com/sagb/alttab
+
+Copyright (C) Alexander Kulak and contributors.
+
+License: GPL-3.0.
+
+The package is installed from the configured Arch/Chaotic-AUR/AUR sources;
+Wolf Linux only configures its XFCE integration and startup arguments.
