@@ -2875,6 +2875,7 @@ install_wolf_kde_personal_defaults() {
     [[ -d "$asset_dir/zsh" ]] || die "Assets de terminal/Zsh ausentes: $asset_dir/zsh"
     if stack_selected daily; then options+=(--daily); fi
     if stack_selected development; then options+=(--development); fi
+    if stack_selected extras; then options+=(--extras); fi
     python "$defaults_script" "${options[@]}" || die "Falha ao aplicar preferencias KDE para o usuario"
 
     if stack_selected daily; then
@@ -2894,6 +2895,10 @@ install_wolf_kde_personal_defaults() {
         fi
         [[ -f /mnt/usr/share/zsh-theme-powerlevel10k/powerlevel10k.zsh-theme ]] || \
             die "Powerlevel10k ausente apos resolver a stack daily."
+        [[ -f /mnt/usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh ]] || \
+            die "zsh-autosuggestions ausente apos resolver a stack Daily."
+        grep -Fq 'zsh-autosuggestions.zsh' "/mnt/home/$USERNAME_VALUE/.zshrc" || \
+            die "Perfil Zsh nao carrega o zsh-autosuggestions."
         arch-chroot /mnt chsh -s /usr/bin/zsh "$USERNAME_VALUE" || \
             die "Falha ao definir Zsh como shell de $USERNAME_VALUE"
     fi
@@ -5866,7 +5871,7 @@ case "$DESKTOP" in
         TEXT_EDITOR_DESKTOP="org.x.editor.desktop"
         ;;
     *KDE*|*Plasma*)
-        TEXT_EDITOR_DESKTOP="org.kde.kwrite.desktop"
+        TEXT_EDITOR_DESKTOP="org.kde.kate.desktop"
         ;;
     *XFCE*|*Xfce*)
         TEXT_EDITOR_DESKTOP="org.xfce.mousepad.desktop"
@@ -11334,6 +11339,22 @@ install_wolf_helper_bundle() {
         die 'Configurador one-shot do Plasma ausente.'
     fi
 
+    # Control Center usa PySide6 dos repos oficiais. UI não executa watchers.
+    local gui_source="$source_root/control-center"
+    local gui_target="/mnt/usr/local/lib/wolf-linux/control-center"
+    [[ -f "$gui_source/main.py" && -f "$gui_source/backend.py" ]] || \
+        die "Fontes do Wolf Control Center ausentes."
+    install -d "$gui_target" /mnt/usr/share/applications
+    install -m 0644 "$gui_source/main.py" "$gui_target/main.py"
+    install -m 0644 "$gui_source/backend.py" "$gui_target/backend.py"
+    cat > /mnt/usr/local/bin/wolf-control-center <<'WOLF_CC_WRAPPER'
+#!/usr/bin/env sh
+exec /usr/bin/python3 /usr/local/lib/wolf-linux/control-center/main.py "$@"
+WOLF_CC_WRAPPER
+    chmod 0755 /mnt/usr/local/bin/wolf-control-center
+    install -m 0644 "$gui_source/wolf-control-center.desktop" \
+        /mnt/usr/share/applications/wolf-control-center.desktop
+
     # Stable tools get friendly command names; they are still manual tools.
     [[ -f "$target_root/stable/wolf-grub-manager-0.3.sh" ]] && \
         ln -sfn ../lib/wolf-linux/helpers/stable/wolf-grub-manager-0.3.sh /mnt/usr/local/bin/wolf-grub-manager
@@ -11372,6 +11393,7 @@ finalize_vm_install() {
     echo "Após o primeiro boot:"
     echo "  wolf-helper list"
     echo "  wolf-helper validate"
+    echo "  wolf-control-center"
     echo "  wolf-grub-manager"
     echo "  wolf-gamepad-setup"
     echo "============================================================"

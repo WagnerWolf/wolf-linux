@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-VERSION="0.3.1"
+VERSION="0.3.2"
 STATE_ROOT="${XDG_STATE_HOME:-$HOME/.local/state}/wolf-linux/plasma-multimonitor"
 CONFIG_ROOT="${XDG_CONFIG_HOME:-$HOME/.config}/wolf-linux"
 DISABLED_MARKER="$CONFIG_ROOT/plasma-multimonitor.disabled"
@@ -106,47 +106,77 @@ function findExistingKickoffIcon(existingPanels) {
     return "/usr/share/icons/hicolor/scalable/apps/wolf-linux-kickoff.svg";
 }
 
+// Screen IDs and panel.screen may not agree at the very first login.
+// Never treat an unassigned default panel as permission to add another one.
 var screens = uniqueScreens();
 var allPanels = panels();
-var newPanelKickoffIcon = findExistingKickoffIcon(allPanels);
-var panelForScreen = {};
+if (screens.length === 0) {
+    print("WOLF_MM_ERROR: nenhuma tela ativa identificada; tente novamente após o Plasma inicializar");
+} else {
+    var pendingPanels = allPanels.filter(function(p) {
+        return p.screen < 0 || screens.indexOf(p.screen) === -1;
+    });
+    if (screens.length > 1 && pendingPanels.length > 0) {
+        // Deferred assignment is normal during startup; don't mutate that layout.
+        print("WOLF_MM_ERROR: painéis ainda sem associação estável às telas; tente novamente em alguns segundos");
+    } else {
+        var newPanelKickoffIcon = findExistingKickoffIcon(allPanels);
+        var panelForScreen = {};
+        var created = 0;
 
-allPanels.forEach(function(p) {
-    if (p.screen >= 0 && panelForScreen[p.screen] === undefined) {
-        panelForScreen[p.screen] = p;
+        allPanels.forEach(function(p) {
+            if (screens.indexOf(p.screen) !== -1 && panelForScreen[p.screen] === undefined) {
+                panelForScreen[p.screen] = p;
+            }
+            makeTasksLocal(p);
+        });
+
+        // Single display: an existing panel ALWAYS covers the desktop, even if
+        // Plasma temporarily reports p.screen=-1 (or a different numeric ID).
+        // Never delete panels: existing duplicates must be handled with restore.
+        if (screens.length === 1 && allPanels.length > 0) {
+            if (allPanels.length > 1) {
+                print("WOLF_MM_WARN: vários painéis existentes em uma tela; nenhum será removido automaticamente");
+            }
+            print("WOLF_MM_OK: tela única com painel existente; nenhuma criação necessária");
+        } else {
+            screens.forEach(function(screen) {
+                if (panelForScreen[screen] !== undefined) return;
+
+                var panel = new Panel;
+                panel.screen = screen;
+                panel.location = "bottom";
+                panel.height = Math.round(gridUnit * 2.2);
+
+                var kickoff = panel.addWidget("org.kde.plasma.kickoff");
+                kickoff.currentConfigGroup = ["General"];
+                kickoff.writeConfig("icon", newPanelKickoffIcon);
+                kickoff.reloadConfig();
+
+                var tasks = panel.addWidget("org.kde.plasma.icontasks");
+                tasks.currentConfigGroup = ["General"];
+                tasks.writeConfig("showOnlyCurrentScreen", true);
+                tasks.writeConfig("showOnlyCurrentActivity", true);
+                tasks.reloadConfig();
+
+                panel.addWidget("org.kde.plasma.panelspacer");
+                panel.addWidget("org.kde.plasma.digitalclock");
+                panel.addWidget("org.kde.plasma.showdesktop");
+                created++;
+            });
+            print("WOLF_MM_OK: telas=" + screens.length + " painéis novos=" + created);
+        }
+        panels().forEach(function(p) { makeTasksLocal(p); });
     }
-    makeTasksLocal(p);
-});
-
-screens.forEach(function(screen) {
-    if (panelForScreen[screen] !== undefined) return;
-
-    var panel = new Panel;
-    panel.screen = screen;
-    panel.location = "bottom";
-    panel.height = Math.round(gridUnit * 2.2);
-
-    var kickoff = panel.addWidget("org.kde.plasma.kickoff");
-    kickoff.currentConfigGroup = ["General"];
-    kickoff.writeConfig("icon", newPanelKickoffIcon);
-    kickoff.reloadConfig();
-
-    var tasks = panel.addWidget("org.kde.plasma.icontasks");
-    tasks.currentConfigGroup = ["General"];
-    tasks.writeConfig("showOnlyCurrentScreen", true);
-    tasks.writeConfig("showOnlyCurrentActivity", true);
-    tasks.reloadConfig();
-
-    panel.addWidget("org.kde.plasma.panelspacer");
-    panel.addWidget("org.kde.plasma.digitalclock");
-    panel.addWidget("org.kde.plasma.showdesktop");
-
-    print("Wolf Plasma MultiMonitor: painel criado na tela " + screen + " (id=" + panel.id + ")");
-});
-
-panels().forEach(function(p) { makeTasksLocal(p); });
+}
 JS
-    plasma_eval "$js" >/dev/null
+    local result
+    result="$(plasma_eval "$js")" || die "Falha na comunicação com Plasma Shell."
+    if [[ "$result" == *WOLF_MM_ERROR:* ]]; then
+        die "$result"
+    fi
+    [[ "$result" == *WOLF_MM_OK:* ]] || die "Plasma não confirmou a reconciliação: $result"
+    log "$result"
 }
 
 show_state() {
@@ -195,11 +225,11 @@ enable_automatic() {
 
 restore_latest() {
     check_environment
-    disable_automatic >/dev/null
     [[ -f "$STATE_ROOT/latest" ]] || die "Nenhum backup encontrado."
     local dir
     dir="$(cat "$STATE_ROOT/latest")"
     [[ -f "$dir/plasma-org.kde.plasma.desktop-appletsrc" ]] || die "Backup inválido: $dir"
+    disable_automatic >/dev/null
     cp -a "$dir/plasma-org.kde.plasma.desktop-appletsrc" "$PLASMA_CONFIG"
     if systemctl --user restart plasma-plasmashell.service >/dev/null 2>&1; then
         :
@@ -213,10 +243,21 @@ restore_latest() {
 apply_now() {
     check_environment
     mkdir -p "$CONFIG_ROOT" "$STATE_ROOT"
-    [[ ! -e "$DISABLED_MARKER" ]] || exit 0
+    if [[ -e "$DISABLED_MARKER" ]]; then
+        warn "Reconciliação automática desativada após restore; utilize 'reconcile' para execução manual, ou 'enable' para reativar."
+        return 3
+    fi
     ensure_baseline_backup
     reconcile_plasma
     ok "Painéis Plasma reconciliados; sem watcher/polling permanente."
+}
+
+reconcile_manual() {
+    check_environment
+    mkdir -p "$STATE_ROOT"
+    make_backup
+    reconcile_plasma
+    ok "Reconciliação manual concluída; política automática não foi alterada."
 }
 
 watch_compat() {
@@ -234,7 +275,7 @@ EOF2
 case "${1:-status}" in
     status) show_state ;;
     apply) apply_now ;;
-    reconcile) reconcile_plasma ;;
+    reconcile) reconcile_manual ;;
     watch) watch_compat ;;
     enable) enable_automatic ;;
     disable) disable_automatic ;;

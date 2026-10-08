@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Wolf Control Center
+GenericName=Configurações Wolf Linux
+Comment=Configure painéis, gamepads, GRUB e inicialização de aplicativos
+Exec=wolf-control-center
+Icon=wolf-linux-kickoff
+Categories=Settings;System;
+Terminal=false
+StartupNotify=true

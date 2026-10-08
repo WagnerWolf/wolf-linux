@@ -26,6 +26,7 @@ if [[ -z "${DISPLAY:-}" &&
     RPROMPT=''
     bindkey -e
 
+    ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE="fg=250"
     [[ -r /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh ]] &&
         source /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh
 
@@ -68,6 +69,7 @@ plugins=(
 source "/usr/share/zsh-theme-powerlevel10k/powerlevel10k.zsh-theme"
 
 # Plugins distribuídos como pacotes do Arch.
+ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE="fg=250"
 [[ -r /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh ]] &&
     source /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh
 
@@ -86,3 +88,6 @@ export PATH="/opt/flutter/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/c
 
 [[ -f ~/.p10k.zsh ]] && source ~/.p10k.zsh
 
+
+# Wolf Linux: cor validada em Konsole escuro (prevalece sobre temas/plugins).
+typeset -g ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=250'

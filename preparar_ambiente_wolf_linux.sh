@@ -125,7 +125,6 @@ say
 [[ -f "$SELF_DIR/package-profiles/packages.conf" ]] || err 'DevKit incompleto: package-profiles/packages.conf ausente.'
 [[ -f "$SELF_DIR/tests/wolf-customize-iso-profile.sh" ]] || err 'DevKit incompleto: customizador ausente.'
 [[ -f "$SELF_DIR/tests/wolf-enable-ssh-live.sh" ]] || err 'DevKit incompleto: helper SSH live ausente.'
-[[ -d "$RELENG" ]] || err "Perfil releng não encontrado: $RELENG. Instale o pacote archiso."
 
 if (( SKIP_DEPS == 0 )); then
     say '[1/8] Instalando/verificando ferramentas de desenvolvimento...'
@@ -141,6 +140,18 @@ if (( SKIP_DEPS == 0 )); then
 else
     say '[1/8] Dependências: ignoradas por --skip-deps.'
 fi
+
+# Necessário somente DEPOIS de instalar archiso; antes de qualquer remoção
+# do projeto anterior. Se --skip-deps foi solicitado, não instalamos nada.
+if [[ ! -d "$RELENG" ]]; then
+    if (( SKIP_DEPS == 1 )); then
+        err "Perfil releng não encontrado: $RELENG. Retire --skip-deps ou instale archiso manualmente."
+    fi
+    err "O pacote archiso foi verificado/instalado, mas o perfil releng não existe em $RELENG. Confira: pacman -Q archiso; pacman -Ql archiso."
+fi
+[[ -f "$RELENG/profiledef.sh" && -f "$RELENG/packages.x86_64" ]] || \
+    err "Perfil releng incompleto em $RELENG (faltam profiledef.sh ou packages.x86_64)."
+ok "Perfil Archiso releng disponível: $RELENG"
 
 if [[ -e "$PROJECT" ]]; then
     if (( FORCE == 0 )); then

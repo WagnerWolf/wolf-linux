@@ -41,15 +41,28 @@ def apply_mime(config: Path, daily: bool) -> None:
     mime = {
         "inode/directory": "org.kde.dolphin.desktop",
         "application/pdf": "org.kde.okular.desktop",
-        "text/plain": "org.kde.kwrite.desktop",
-        "text/markdown": "org.kde.kwrite.desktop",
-        "text/x-log": "org.kde.kwrite.desktop",
-        "text/x-readme": "org.kde.kwrite.desktop",
-        "application/json": "org.kde.kwrite.desktop",
-        "application/xml": "org.kde.kwrite.desktop",
-        "text/xml": "org.kde.kwrite.desktop",
-        "application/x-shellscript": "org.kde.kwrite.desktop",
-        "text/x-python": "org.kde.kwrite.desktop",
+        "text/plain": "org.kde.kate.desktop",
+        "text/markdown": "org.kde.kate.desktop",
+        "text/x-log": "org.kde.kate.desktop",
+        "text/x-readme": "org.kde.kate.desktop",
+        "application/json": "org.kde.kate.desktop",
+        "application/xml": "org.kde.kate.desktop",
+        "text/xml": "org.kde.kate.desktop",
+        "application/x-shellscript": "org.kde.kate.desktop",
+        "text/x-python": "org.kde.kate.desktop",
+        # Gwenview no KDE baseline (inclui instalações Minimal).
+        "image/png": "org.kde.gwenview.desktop",
+        "image/jpeg": "org.kde.gwenview.desktop",
+        "image/webp": "org.kde.gwenview.desktop",
+        "image/gif": "org.kde.gwenview.desktop",
+        "image/svg+xml": "org.kde.gwenview.desktop",
+        "image/bmp": "org.kde.gwenview.desktop",
+        "image/x-ms-bmp": "org.kde.gwenview.desktop",
+        "image/tiff": "org.kde.gwenview.desktop",
+        "image/avif": "org.kde.gwenview.desktop",
+        "image/heif": "org.kde.gwenview.desktop",
+        "image/heic": "org.kde.gwenview.desktop",
+        "image/x-xcf": "org.kde.gwenview.desktop",
     }
     if daily:
         for item in (
@@ -91,7 +104,7 @@ def copy_profile(source: Path, target: Path) -> None:
     shutil.copyfile(source, target)
 
 
-def configure(root: Path, user: str, assets: Path, daily: bool, development: bool) -> None:
+def configure(root: Path, user: str, assets: Path, daily: bool, development: bool, extras: bool = False) -> None:
     if not root.is_dir():
         raise RuntimeError(f"Sysroot não encontrado: {root}")
     if not user or "/" in user or user in (".", ".."):
@@ -145,6 +158,23 @@ Terminal=false
 X-KDE-autostart-phase=2
 """, encoding="utf-8")
 
+    octopi_autostart = config / "autostart" / "octopi-notifier.desktop"
+    if extras and (root / "usr/bin/octopi-notifier").is_file():
+        octopi_autostart.write_text("""[Desktop Entry]
+Type=Application
+Name=Octopi Notifier
+Comment=Avisos de atualizações no Plasma
+Exec=/usr/bin/octopi-notifier
+TryExec=/usr/bin/octopi-notifier
+Icon=octopi
+Terminal=false
+OnlyShowIn=KDE;
+Hidden=false
+X-KDE-autostart-phase=2
+""", encoding="utf-8")
+    elif extras:
+        print("[AVISO] Octopi Notifier indisponível; autostart não criado.", file=sys.stderr)
+
     if development:
         service_dir = home / ".local" / "share" / "kio" / "servicemenus"
         copy_profile(assets / "kde" / "wolf-open-vscode.desktop", service_dir / "wolf-open-vscode.desktop")
@@ -169,6 +199,8 @@ X-KDE-autostart-phase=2
                         config / "fastfetch" / "config.jsonc", config / "fastfetch" / "config-tty.jsonc"]
         if development:
             targets.append(home / ".local" / "share" / "kio" / "servicemenus" / "wolf-open-vscode.desktop")
+        if octopi_autostart.is_file() and extras:
+            targets.append(octopi_autostart)
         for p in targets:
             os.chown(p, uid, gid)
             parent = p.parent
@@ -185,8 +217,9 @@ def main() -> None:
     parser.add_argument("--assets", type=Path, required=True)
     parser.add_argument("--daily", action="store_true")
     parser.add_argument("--development", action="store_true")
+    parser.add_argument("--extras", action="store_true")
     args = parser.parse_args()
-    configure(args.root, args.user, args.assets, args.daily, args.development)
+    configure(args.root, args.user, args.assets, args.daily, args.development, args.extras)
     print(f"[OK] Preferências Plasma aplicadas a {args.user}: KWin, mouse, MIME, Konsole, Zsh={args.daily}, VSCode={args.development}")
 
 

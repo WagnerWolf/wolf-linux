@@ -1,4 +1,4 @@
-# Wolf Linux DevKit 2.0.0-alpha15
+# Wolf Linux DevKit 2.0.0-alpha18
 
 Baseline **KDE Plasma / Wayland** com preparação limpa, helpers completos porém
 **Branding/MultiMonitor automáticos uma vez no primeiro login**, demais helpers manuais,
@@ -206,3 +206,55 @@ echo "$SHELL"
 - Smoke test agora falha se o manifesto voltar a declarar `kwrite`
   como pacote separado.
 - Nenhum outro componente do instalador foi modificado.
+
+
+## Alpha16 — Wolf Control Center 0.1
+
+A central gráfica usa PySide6 do repositório oficial e reúne MultiMonitor, Gamepad e GRUB Manager.
+Também exibe o estado do Octopi Notifier e do Zsh Autosuggestions. Os helpers GRUB e Gamepad
+continuam interativos no Konsole; reconciliação de monitores exige confirmação.
+
+Para testar na instalação física atual, sem alterar o sistema instalado:
+
+```bash
+sudo pacman -S --needed pyside6
+cd tools/control-center
+./install-local.sh
+~/.local/bin/wolf-control-center
+```
+
+Para desfazer a instalação local, execute `tools/control-center/uninstall-local.sh`.
+O instalador da alpha16 integra a central durante uma instalação futura.
+
+## Alpha17 — consolidação para instalação final
+
+- O `preparar_ambiente_wolf_linux.sh` instala/verifica o pacote Archiso **antes** de testar `/usr/share/archiso/configs/releng`.
+- Kate (`org.kde.kate.desktop`) é agora o editor padrão de arquivos de texto, inclusive Markdown/logs/JSON; KWrite não é instalado separadamente.
+- Zsh autosuggestions utiliza `fg=250` ao final do `.zshrc`, validado em hardware real.
+- Wolf Control Center 0.1.1 com páginas roláveis, botões visíveis e gestão do autostart do Octopi; continua sob demanda, sem watchers.
+- O preparador pode destruir `~/wolf-linux` **somente após confirmação**; preserve imagens de VM antes de reconstruir.
+
+### Alpha17 — aplicativos padrão e preparação limpa
+
+O KDE base instala **Kate** como editor padrão de texto (incluindo Markdown e
+logs), **Gwenview** como visualizador padrão de imagens (PNG/JPEG/WebP/GIF/SVG/
+BMP/TIFF etc.), Dolphin como gerenciador de diretórios e Okular para PDFs.
+O perfil Daily mantém MPC-QT para vídeo e Audacious para áudio.
+
+O preparador instala/valida o pacote `archiso` **antes** de exigir que
+`/usr/share/archiso/configs/releng` exista. Ao usar `--skip-deps`, você deve
+instalar archiso manualmente. Falhas de dependências não apagam o projeto atual.
+
+O .zshrc aplica `typeset -g ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=250'` ao final,
+conforme validado no Konsole físico. O Wolf Control Center 0.1.1 inclui
+acompanhamento do Octopi Notifier e diagnóstico do carregamento do Zsh.
+
+
+## Hotfix alpha18 — reconciliação MultiMonitor
+
+- Com uma tela ativa, um painel já existente impede a criação de um segundo painel, mesmo que `panel.screen` ainda esteja indefinido no primeiro login.
+- Em várias telas, painéis com associação de tela transitória bloqueiam alterações e produzem erro verificável, em vez de duplicar painéis.
+- `apply` respeita a política desativada após restore **com aviso e código não-zero**, não silenciosamente.
+- `reconcile` é sempre uma ação manual, com backup antes de alterações, e não reativa o autostart.
+- Wolf Control Center 0.1.2 usa `reconcile` para o botão *Reconciliar painéis*.
+- Nenhum painel é apagado automaticamente. O usuário pode restaurar o último backup pelo Control Center.

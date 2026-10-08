@@ -43,7 +43,18 @@ if [[ -f "$PREPARER" ]]; then
     grep -Fq 'wolf-stage-live-ssh.sh' "$PREPARER" || err 'Preparador não executa o staging SSH'
     grep -Fq 'wolf-enable-ssh-live' "$PREPARER" || err 'Preparador não valida o SSH live no airootfs'
     grep -Fq 'rm -rf -- "$PROJECT"' "$PREPARER" || err 'Preparador não suporta reconstrução realmente limpa'
-    ok 'Preparador clean-room presente e validado'
+    python - "$PREPARER" <<'PY_PREFLIGHT'
+from pathlib import Path
+import sys
+t=Path(sys.argv[1]).read_text()
+a=t.find('sudo pacman -S --needed --noconfirm')
+b=t.find('if [[ ! -d "$RELENG" ]]')
+c=t.find('rm -rf -- "$PROJECT"')
+assert 0 <= a < b < c, 'Verificação de releng deve ocorrer após instalação e antes de remoção do projeto'
+assert 'SKIP_DEPS == 1' in t[b:c], 'Erro de --skip-deps sem diagnóstico'
+PY_PREFLIGHT
+python "$PROJECT/tests/wolf-test-preparer-deps.py" || err 'Preflight dependências/releng falhou'
+ok 'Preparador clean-room presente e validado'
 else
     err 'preparar_ambiente_wolf_linux.sh ausente na raiz do projeto'
 fi
@@ -169,7 +180,16 @@ if grep -Fq 'makeKickoffWolf' "$MULTIMONITOR" || grep -Fq 'writeConfig("icon", "
 fi
 grep -Fq 'findExistingKickoffIcon' "$MULTIMONITOR" || err 'MultiMonitor não preserva ícone existente'
 grep -Fq 'kickoff.writeConfig("icon", newPanelKickoffIcon)' "$MULTIMONITOR" || err 'Novo painel não herda o Kickoff existente'
-ok 'MultiMonitor preserva Kickoff existente'
+grep -Fq 'screens.length === 1 && allPanels.length > 0' "$MULTIMONITOR" || err 'MultiMonitor nao protege painel existente com tela unica'
+grep -Fq 'WOLF_MM_ERROR:' "$MULTIMONITOR" || err 'MultiMonitor nao trata estado transitorio como erro'
+grep -Fq 'reconcile) reconcile_manual' "$MULTIMONITOR" || err 'Reconciliacao manual nao e independente da politica automatica'
+grep -Fq 'self._confirm_helper("monitor", "reconcile"' "$PROJECT/tools/control-center/main.py" || err 'Control Center ainda chama apply ao reconciliar'
+ok 'MultiMonitor preserva Kickoff existente e nao duplica paineis em tela unica'
+if command -v node >/dev/null 2>&1; then
+    python "$PROJECT/tests/wolf-test-multimonitor.py" || err 'Regressões no MultiMonitor 0.3.2'
+else
+    printf '[AVISO] node não disponível; testes JavaScript MultiMonitor devem ser executados onde houver Node.js.\n'
+fi
 
 printf '\n>> Validando limpeza Discover nos layouts Plasma...\n'
 python - "$PROJECT/tests/wolf-prune-discover-launchers.py" <<'PYCODE' || err 'Script Python do painel inválido'
@@ -218,7 +238,9 @@ grep -Eq '^[[:space:]]+dolphin[[:space:]]+konsole[[:space:]]+kate([[:space:]]|$)
 if grep -Eq '^[[:space:]]+kwrite([[:space:]]|$)|[[:space:]]kwrite[[:space:]]' "$PACKAGES"; then
     err 'kwrite não deve constar como pacote separado: já é fornecido por kate'
 fi
-grep -Fq 'org.kde.kwrite.desktop' "$DEFAULTS" || err 'Associação MIME KWrite deve continuar disponível via kate'
+grep -Fq 'org.kde.kate.desktop' "$DEFAULTS" || err 'Associação MIME deve usar Kate como editor padrão'
+grep -Eq '^[[:space:]]+dolphin[[:space:]]+konsole[[:space:]]+kate[[:space:]]+gwenview([[:space:]]|$)' "$PACKAGES" || err 'Gwenview não está declarado no KDE baseline'
+grep -Fq 'org.kde.gwenview.desktop' "$DEFAULTS" || err 'Associação MIME de imagens não usa Gwenview'
 grep -Fq 'mpc-qt' "$PACKAGES" || err 'MPC-QT nao declarado'
 if grep -Fq 'smplayer' "$PACKAGES"; then err 'SMPlayer reintroduzido ao projeto'; fi
 ok 'KWin, mouse, MIME, Dolphin, Zsh, Konsole e assets alpha13 declarados'
@@ -251,6 +273,19 @@ if grep -Eq 'unsquashfs .*\|[[:space:]]*grep[[:space:]]+-[^[:space:]]*q' "$BUILD
 else
     ok 'validação SquashFS deixa unsquashfs concluir normalmente'
 fi
+
+printf '\n>> Validando Wolf Control Center 0.1.2 e integração no instalador...\n'
+for component in main.py backend.py wolf-control-center.desktop install-local.sh uninstall-local.sh; do
+    [[ -f "$PROJECT/tools/control-center/$component" ]] || err "Control Center ausente: $component"
+done
+python -m py_compile "$PROJECT/tools/control-center/main.py" "$PROJECT/tools/control-center/backend.py" || err 'Control Center Python inválido'
+bash -n "$PROJECT/tools/control-center/install-local.sh" || err 'Instalador local do Control Center inválido'
+python "$PROJECT/tests/wolf-test-control-center.py" || err 'Testes do Control Center falharam'
+grep -Fq 'pyside6' "$PACKAGES" || err 'Pacote PySide6 não declarado no KDE'
+grep -Fq 'gui_source="$source_root/control-center"' "$INSTALLER" || err 'Control Center não integrado ao instalador'
+grep -Fq 'options+=(--extras)' "$INSTALLER" || err 'Extra não aciona Octopi no perfil do usuário'
+[[ -f "$PROJECT/assets/zsh/zshrc" ]] && grep -Fq "typeset -g ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=250'" "$PROJECT/assets/zsh/zshrc" || err 'Correção fg=250 de autosuggestions ausente ao final do perfil'
+ok 'Control Center integrado; extras e plugin Zsh verificados'
 
 if (( ERRORS )); then
     printf '\n[ERRO] Há itens a corrigir antes do teste em VM.\n'
