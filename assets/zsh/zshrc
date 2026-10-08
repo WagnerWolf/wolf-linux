@@ -1,0 +1,88 @@
+# ============================================================
+# Wolf Linux - Zsh / Oh My Zsh / Powerlevel10k
+# ============================================================
+
+# ------------------------------------------------------------
+# Console virtual Linux (Ctrl+Alt+F2/F3/F4...)
+# ------------------------------------------------------------
+# O TTY não usa Meslo Nerd Font. Usamos Terminus + logo ASCII e
+# um prompt simples para evitar glifos quebrados do Powerlevel10k.
+if [[ -z "${DISPLAY:-}" &&
+      -z "${WAYLAND_DISPLAY:-}" &&
+      "${TTY:-}" == /dev/tty* ]]; then
+
+    export ANDROID_HOME=/opt/android-sdk
+    export ANDROID_SDK_ROOT=/opt/android-sdk
+    export CHROME_EXECUTABLE=/usr/bin/google-chrome-stable
+    export PATH="/opt/flutter/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/cmdline-tools/latest/bin:$PATH"
+
+    if [[ -t 1 && "${WOLF_FASTFETCH:-1}" != "0" ]] &&
+       command -v fastfetch >/dev/null 2>&1; then
+        fastfetch --config "$HOME/.config/fastfetch/config-tty.jsonc"
+        echo
+    fi
+
+    PROMPT='%F{white}%n@%m%f:%F{cyan}%~%f %# '
+    RPROMPT=''
+    bindkey -e
+
+    [[ -r /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh ]] &&
+        source /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh
+
+    [[ -r /usr/share/zsh/plugins/zsh-history-substring-search/zsh-history-substring-search.zsh ]] &&
+        source /usr/share/zsh/plugins/zsh-history-substring-search/zsh-history-substring-search.zsh
+
+    [[ -r /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]] &&
+        source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+
+    return
+fi
+
+# Wolf Linux Fastfetch startup v2
+# .zshrc já é carregado apenas em shells interativos.
+# Mantemos a saída ANTES do instant prompt do Powerlevel10k.
+# Para desativar: export WOLF_FASTFETCH=0
+if [[ -t 1 && "${WOLF_FASTFETCH:-1}" != "0" ]] &&
+   command -v fastfetch >/dev/null 2>&1; then
+    fastfetch
+    echo
+fi
+
+# Powerlevel10k instant prompt. Deve permanecer próximo ao topo.
+if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
+    source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
+fi
+
+export ZSH="/usr/share/oh-my-zsh"
+ZSH_THEME=""
+zstyle ':omz:update' mode disabled
+
+plugins=(
+    git
+    sudo
+)
+
+[[ -r "$ZSH/oh-my-zsh.sh" ]] && source "$ZSH/oh-my-zsh.sh"
+
+# Tema Powerlevel10k empacotado pelo Arch/Chaotic-AUR.
+source "/usr/share/zsh-theme-powerlevel10k/powerlevel10k.zsh-theme"
+
+# Plugins distribuídos como pacotes do Arch.
+[[ -r /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh ]] &&
+    source /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh
+
+[[ -r /usr/share/zsh/plugins/zsh-history-substring-search/zsh-history-substring-search.zsh ]] &&
+    source /usr/share/zsh/plugins/zsh-history-substring-search/zsh-history-substring-search.zsh
+
+# Syntax highlighting deve ser carregado por último.
+[[ -r /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]] &&
+    source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+
+# Flutter / Android
+export ANDROID_HOME=/opt/android-sdk
+export ANDROID_SDK_ROOT=/opt/android-sdk
+export CHROME_EXECUTABLE=/usr/bin/google-chrome-stable
+export PATH="/opt/flutter/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/cmdline-tools/latest/bin:$PATH"
+
+[[ -f ~/.p10k.zsh ]] && source ~/.p10k.zsh
+
