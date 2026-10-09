@@ -174,6 +174,7 @@ mkdir -p \
     "$PROJECT/tools/stable" \
     "$PROJECT/tools/experimental" \
     "$PROJECT/docs" \
+    "$PROJECT/live-gui" \
     "$PROJECT/assets" \
     "$PROJECT/out" \
     "$PROJECT/work" \
@@ -188,6 +189,7 @@ cp -f "$SELF_DIR/package-profiles/packages.conf" "$PROJECT/package-profiles/pack
 cp -a "$SELF_DIR/tests/." "$PROJECT/tests/"
 cp -a "$SELF_DIR/tools/." "$PROJECT/tools/"
 cp -a "$SELF_DIR/docs/." "$PROJECT/docs/"
+cp -a "$SELF_DIR/live-gui/." "$PROJECT/live-gui/"
 cp -a "$SELF_DIR/branding-assets/." "$PROJECT/assets/"
 cp -f "$SELF_DIR/README.md" "$PROJECT/README.md"
 cp -f "$SELF_DIR/THIRD-PARTY-LICENSES.md" "$PROJECT/THIRD-PARTY-LICENSES.md"

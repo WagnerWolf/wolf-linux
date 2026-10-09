@@ -1,0 +1,3 @@
+# Mídia local de instalação/recuperação. Não usar fora da ISO.
+Defaults:wolf env_keep += "DISPLAY XAUTHORITY"
+wolf ALL=(ALL:ALL) NOPASSWD: ALL

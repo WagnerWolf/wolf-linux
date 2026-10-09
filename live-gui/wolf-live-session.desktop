@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Wolf Live (Openbox)
+Comment=Ambiente Live leve do Wolf Linux
+Exec=/usr/bin/openbox-session
+TryExec=/usr/bin/openbox-session
+Type=Application
+DesktopNames=OPENBOX

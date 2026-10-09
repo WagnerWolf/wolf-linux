@@ -31,6 +31,8 @@ WOLF_PROJECT="$PROJECT" WOLF_ISO_PROFILE="$PROFILE" \
     "$PROJECT/tests/wolf-customize-iso-profile.sh"
 WOLF_PROJECT="$PROJECT" WOLF_ISO_PROFILE="$PROFILE" \
     "$PROJECT/tests/wolf-stage-live-ssh.sh"
+WOLF_PROJECT="$PROJECT" WOLF_ISO_PROFILE="$PROFILE" \
+    "$PROJECT/tests/wolf-stage-live-desktop.sh"
 
 SSH_PROFILE="$PROFILE/airootfs/usr/local/bin/wolf-enable-ssh-live"
 SSH_ALIAS_PROFILE="$PROFILE/airootfs/usr/local/bin/wolf-ssh"
@@ -46,6 +48,9 @@ grep -Fxq openssh "$PROFILE/packages.x86_64" || {
     echo "[ERRO] Preflight ISO: openssh não está em packages.x86_64." >&2
     exit 1
 }
+# Preflight da GUI antes de chamar mkarchiso.
+[[ -x "$PROFILE/airootfs/usr/local/bin/wolf-live-installer" ]] || { echo '[ERRO] Wolf Live GUI ausente.' >&2; exit 1; }
+[[ -e "$PROFILE/airootfs/etc/systemd/system/multi-user.target.wants/wolf-live-user.service" ]] || { echo '[ERRO] Usuário Live não configurado.' >&2; exit 1; }
 
 echo "======================================================"
 echo "             WOLF LINUX - BUILD DA ISO"
@@ -97,5 +102,17 @@ fi
 
 echo
 printf '[OK] SSH live confirmado dentro do squashfs final.\n'
+# A ISO final deve conter o launcher GUI e o ambiente do usuário temporário.
+for expected in \
+  /usr/local/bin/wolf-live-installer \
+  /usr/local/share/wolf-linux-live/gui/main.py \
+  /usr/local/share/wolf-linux-live/gui/wolf_plan.py \
+  /usr/local/bin/wolf-live-create-user; do
+    if ! unsquashfs -ll "$SFS" 2>/dev/null | grep -F "$expected" >/dev/null; then
+        echo "[ERRO] Pós-build: $expected não está no squashfs." >&2
+        exit 1
+    fi
+done
+printf '[OK] Wolf Live GUI confirmado dentro do squashfs final.\n'
 echo "ISOs encontradas:"
 find "$OUT" -maxdepth 1 -type f -name '*.iso' -printf '  %p\n'

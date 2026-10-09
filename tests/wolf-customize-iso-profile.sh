@@ -59,15 +59,20 @@ ln -sfn ../wolf-loadkeys.service "$AIROOT/etc/systemd/system/multi-user.target.w
 cat > "$AIROOT/etc/os-release" <<'OSR'
 NAME="Wolf Linux Live"
 PRETTY_NAME="Wolf Linux Live"
-ID=arch
+ID=wolf-linux
 ID_LIKE=arch
-VARIANT="Wolf Linux 2.0 KDE Installer"
+VARIANT="Wolf Linux 2.0 Live Graphical Installer"
 VARIANT_ID=wolf-linux-live
 BUILD_ID=rolling
 ANSI_COLOR="1;37"
-HOME_URL="https://archlinux.org/"
-DOCUMENTATION_URL="https://wiki.archlinux.org/"
 OSR
+cat > "$AIROOT/etc/issue" <<'ISSUE'
+Wolf Linux Live — instalacao e recuperacao  \n \l
+ISSUE
+cat > "$AIROOT/etc/motd" <<'MOTD'
+Wolf Linux Live — abra Wolf Installer para iniciar o pre-planejamento grafico.
+O instalador CLI continua disponivel com sudo wolf-install --help.
+MOTD
 printf '%s\n' wolf-live > "$AIROOT/etc/hostname"
 printf 'Wolf Linux %s KDE/Wayland Clean Baseline\n' "$DEVKIT_VERSION" > "$AIROOT/etc/wolf-linux-live-build"
 cp -f "$VERSION_FILE" "$AIROOT/root/wolf-linux/VERSION"
@@ -91,7 +96,7 @@ export WOLF_ASSET_DIR="/root/wolf-linux/assets"
 needs_mode=1
 for arg in "$@"; do
     case "$arg" in
-        --install|--vm-install|--dry-run|--plan-only|--list-stacks|-h|--help) needs_mode=0 ;;
+        --install|--vm-install|--dry-run|--plan-only|--review-gui-plan|--simulate-gui-plan|--preflight-gui-plan-vm|--execute-gui-plan-vm|--list-stacks|-h|--help) needs_mode=0 ;;
     esac
 done
 if (( needs_mode == 1 )); then
@@ -150,7 +155,7 @@ for k,v in {
     'iso_name':'"wolf-linux"',
     'iso_label':'"WOLFLINUX_$(date +%Y%m)"',
     'iso_publisher':'"Wolf Linux"',
-    'iso_application':'"Wolf Linux 2.0 KDE Baseline Installer"',
+    'iso_application':'"Wolf Linux 2.0 Graphical Live Installer"',
 }.items():
     pat=rf'^{re.escape(k)}=.*$'; line=f'{k}={v}'
     t=re.sub(pat,line,t,flags=re.M) if re.search(pat,t,flags=re.M) else t+'\n'+line+'\n'
@@ -180,12 +185,17 @@ p.write_text(t)
 PY
 fi
 
+# Branding de títulos GRUB/Syslinux/loader somente em strings visíveis.
+# Conserva os nomes técnicos archiso necessários ao boot.
+python3 "$PROJECT/tests/wolf-brand-live-boot.py" "$PROFILE" --assets "$PROJECT/assets"
+
 # O estágio final é a fonte de verdade para o SSH live. Ele é idempotente e
 # também é chamado novamente pelo build imediatamente antes do mkarchiso.
 WOLF_PROJECT="$PROJECT" WOLF_ISO_PROFILE="$PROFILE" "$PROJECT/tests/wolf-stage-live-ssh.sh"
+WOLF_PROJECT="$PROJECT" WOLF_ISO_PROFILE="$PROFILE" "$PROJECT/tests/wolf-stage-live-desktop.sh"
 
 [[ -x "$AIROOT/usr/local/bin/wolf-enable-ssh-live" ]] || { echo "[ERRO] SSH live não foi instalado no airootfs." >&2; exit 1; }
 [[ -L "$AIROOT/usr/local/bin/wolf-ssh" ]] || { echo "[ERRO] Alias wolf-ssh ausente no airootfs." >&2; exit 1; }
 grep -Fxq openssh "$PACKAGES_FILE" || { echo "[ERRO] openssh ausente de packages.x86_64." >&2; exit 1; }
 
-echo "[OK] Perfil ISO KDE-only personalizado; helpers presentes e inativos."
+echo "[OK] Perfil ISO Wolf Live GUI 0.9 e identidade do boot; backend KDE/Wayland preservado."

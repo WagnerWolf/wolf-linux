@@ -1,4 +1,63 @@
-# Wolf Linux DevKit 2.0.0-alpha18
+## alpha29 — piloto de particionamento manual em VM UEFI
+
+- **Instalação manual gráfica experimental:** após preparar as partições no GParted, escolha raiz `/` (formatada em ext4), EFI FAT32 com flag GPT `esp` (preservada), e `/home` opcional (preservada). Somente em VM QEMU/KVM com disco VirtIO e boot UEFI. Não usar em hardware real.
+- **Apagar disco inteiro** agora funciona mesmo com partições preexistentes, se não estiverem montadas ou em uso. `/home` fica dentro de `/` e nenhuma partição `/home` separada é criada.
+- Confirmação curta `APAGAR` na GUI e no terminal; o resumo mostra os dispositivos e a extensão da perda de dados.
+- `Minimal` não deve gerar chamada AUR vazia: o resolvedor filtra entradas em branco e há autoteste específico. O erro informado anteriormente ainda exige validação em instalação real.
+- **Reutilizar partições existentes** continua no planejamento/simulação. Primeiro validar a preservação dos dados no modo manual.
+- Instruções e limitações completas: [CHANGELOG-alpha29.md](CHANGELOG-alpha29.md).
+
+## alpha28 — conclusão gráfica após instalar com sucesso
+
+- Após a instalação real no QTerminal, pressione Enter para fechar o terminal. Somente se o instalador Bash terminou com código zero, a GUI exibe **Wolf Linux instalado com sucesso** e oferece **Reiniciar agora** ou **Continuar na Live**.
+- A janela principal é fechada depois da decisão; a reinicialização nunca é automática e requer clique explícito.
+- Em falhas o terminal informa o erro e a GUI NÃO exibe sucesso. O resultado é transmitido por um marcador privado da execução, não pelo fechamento do QTerminal.
+- A mídia ISO deverá ser ejetada ou o disco instalado selecionado no boot após reiniciar.
+- Motor Bash, partições, pacotes e desktops não foram alterados nesta revisão.
+- A instalação completa da alpha27 foi validada pelo usuário; o encerramento gráfico da alpha28 ainda requer teste na VM.
+
+## Alpha24 — simulação guiada e seleção explícita de /home
+
+- Wolf Installer GUI 0.5.1. Inclui confirmação explícita para intenções de formatação, aviso persistente de perda de dados, limpeza da seleção anterior de `/home` e quebra de linhas na revisão. `/home` pode ficar como diretório dentro de `/` (padrão, sem partição dedicada) ou em partição própria.
+- Novos controles de GParted e explicações dos modos **reutilizar** e **manual**. O manual Bash ainda exige preparar/montar `/mnt` externamente.
+- Contrato JSON `wolf.install.preview.v2`, `execution=disabled`, verificado contra `lsblk` novo.
+- `sudo wolf-install --simulate-gui-plan /caminho/preview.json`: simulação declarativa; relata bloqueios reais do backend, não chama a rotina `main` e não executa particionamento, mounts, formatadores nem pacman.
+- A GUI pode validar ou simular o mesmo documento JSON. Não executa a instalação. GParted é uma ferramenta separada e *pode* escrever alterações se confirmado pelo operador.
+- Alpha18 estável e alpha22 aprovada não são modificadas.
+
+## Alpha23 — Contrato de pré-planejamento GUI ⇄ Bash (somente leitura)
+
+- A interface gera um documento JSON versionado com disco, partições, flags de intenção de formatação, teclado, identidade e stacks.
+- O botão **Validar plano JSON no backend** encaminha a escolha ao Bash via `wolf-install --review-gui-plan`, com verificação independente do inventário atual.
+- O arquivo é privado no usuário Live e **não autoriza instalação ou formatação**.
+- A linha alpha18 permanece congelada; desenvolva em diretório separado.
+- Detalhes: `docs/WOLF-GUI-PLAN-CONTRACT.md`.
+
+## alpha22 — layout brasileiro ThinkPad na Live
+
+- Nova opção **Português (Brasil) — ThinkPad (IBM/Lenovo)** no seletor de teclado inicial.
+- Usa a variante XKB oficial `br(thinkpad)` (`setxkbmap -model abnt2 -layout br -variant thinkpad`), para tratar o posicionamento de `/` e `?` em ThinkPads brasileiros.
+- **ABNT2 continua sendo a seleção padrão**, sem alterações para outros teclados.
+- O mesmo layout pode ser escolhido novamente por *Alterar layout do teclado* na GUI.
+- Mantida a política de pré-planejamento somente de leitura; nenhuma operação de instalação destrutiva pela GUI.
+
+## alpha21 — usabilidade da Live gráfica
+
+- Seletor inicial do teclado Xorg (`xorg-setxkbmap`), com ABNT2 por padrão e campo de teste; aparece antes da janela principal do instalador.
+- Resumo de pré-planejamento atualizado automaticamente após mudanças; botão redundante removido.
+- GParted renomeado para **GParted — Particionador**.
+- Wi-Fi gráfico via NetworkManager (`nm-applet` e `stalonetray`), com ícone na bandeja superior direita e editor de conexões para configuração avançada.
+- NetworkManager ativo na Live para evitar conflito com o serviço iwd independente. Nenhuma dessas dependências entra na instalação KDE.
+- A interface ainda não executa instalação, formatação ou reparação destrutiva.
+
+## alpha20 — pré-planejamento gráfico e identidade da Live
+
+- Wolf Live GUI 0.2 exibe inventário real de discos, partições, perfis, stacks e um pré-plano não executável.
+- O botão de planejamento Bash abre `wolf-install --plan-only` em um terminal para confirmação independente; escolhas da GUI não são transmitidas ao backend nesta versão.
+- Branding de entradas de boot (GRUB/Syslinux/loader), identidade do login e splash Syslinux.
+- Não executa formatação ou instalação pela interface gráfica.
+
+# Wolf Linux DevKit 2.0.0-alpha29
 
 Baseline **KDE Plasma / Wayland** com preparação limpa, helpers completos porém
 **Branding/MultiMonitor automáticos uma vez no primeiro login**, demais helpers manuais,
@@ -6,12 +65,11 @@ validação guiada e VM persistente fácil de retomar.
 
 ## Fluxo recomendado
 
-Não faça upgrade incremental nesta fase. Recrie o projeto:
+Preserve a baseline estável e prepare uma árvore separada:
 
 ```bash
-rm -rf ~/wolf-linux
 chmod +x preparar_ambiente_wolf_linux.sh
-./preparar_ambiente_wolf_linux.sh
+./preparar_ambiente_wolf_linux.sh --project "$HOME/wolf-linux-alpha29"
 ```
 
 O preparador parte de `/usr/share/archiso/configs/releng`, recria
@@ -20,7 +78,7 @@ O preparador parte de `/usr/share/archiso/configs/releng`, recria
 ## Build
 
 ```bash
-cd ~/wolf-linux
+cd ~/wolf-linux-alpha29
 ./tests/wolf-build-iso.sh
 ```
 
@@ -258,3 +316,16 @@ acompanhamento do Octopi Notifier e diagnóstico do carregamento do Zsh.
 - `reconcile` é sempre uma ação manual, com backup antes de alterações, e não reativa o autostart.
 - Wolf Control Center 0.1.2 usa `reconcile` para o botão *Reconciliar painéis*.
 - Nenhum painel é apagado automaticamente. O usuário pode restaurar o último backup pelo Control Center.
+
+
+## Alpha19 — Wolf Live GUI (experimental)
+
+Consulte `docs/WOLF-LIVE-GUI.md`: Openbox/Xorg exclusivo da live, preview PySide6 não destrutivo.
+A baseline instalada continua KDE/Wayland da alpha18.
+
+
+### Alpha26 — execução gráfica piloto **somente** em VM descartável
+A aba de revisão pode iniciar o backend Bash com `--execute-gui-plan-vm`
+somente após validação. Apenas disco VirtIO vazio, modo apagar disco, /home
+na raiz, VM QEMU/KVM. Confirmação digitada no terminal antes de apagar.
+Não usar com instalações/discos existentes; outros modos da GUI ainda simulam.

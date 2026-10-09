@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+# Só reabre os componentes gráficos já instalados na Live.
+# A seleção da rede e o diálogo de senha são feitos pelo nm-applet.
+command -v nm-applet >/dev/null || { echo '[ERRO] nm-applet ausente.' >&2; exit 1; }
+if ! pgrep -u "$(id -u)" -x stalonetray >/dev/null 2>&1; then
+    stalonetray --geometry 1x1-0+0 --icon-size 24 >/dev/null 2>&1 &
+fi
+if ! pgrep -u "$(id -u)" -x nm-applet >/dev/null 2>&1; then
+    nm-applet >/dev/null 2>&1 &
+fi
+if command -v nm-connection-editor >/dev/null 2>&1; then
+    # Abre o editor para redes ocultas, IP manual etc.; redes disponíveis
+    # são selecionadas clicando no ícone de rede da bandeja superior direita.
+    nm-connection-editor >/dev/null 2>&1 &
+fi
+printf '%s\n' '[Wolf Live] Clique no ícone de rede na bandeja superior direita para ver as redes Wi-Fi.'

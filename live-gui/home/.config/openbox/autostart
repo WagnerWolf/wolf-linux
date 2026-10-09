@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Só inicia os aplicativos do desktop Live; nenhuma operação de disco automática.
+feh --no-fehbg --bg-fill /usr/share/backgrounds/wolf-linux/wallpaper.png &
+xsetroot -cursor_name left_ptr &
+/usr/local/bin/wolf-live-installer &
+
+# NetworkManager controla Ethernet e Wi-Fi; bandeja simples para seleção gráfica.
+lxqt-policykit-agent &
+stalonetray --geometry 1x1-0+0 --icon-size 24 &
+(sleep 1; nm-applet) &

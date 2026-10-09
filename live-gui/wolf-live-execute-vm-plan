@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# TESTE destrutivo real SOMENTE em VM descartável com disco VirtIO descartável.
+# A GUI só recebe sucesso se o instalador Bash terminar com código ZERO.
+set -Eeuo pipefail
+if (( $# < 1 || $# > 2 )); then
+    echo '[ERRO] Uso: wolf-live-execute-vm-plan preview.json [arquivo-resultado]' >&2
+    exit 2
+fi
+plan="$1"
+result_file="${2:-}"
+# O marcador é fornecido pela GUI, já existe e pertence ao usuário Live.
+# Jamais confiar no código de saída do emulador de terminal para declarar sucesso.
+if [[ -n "$result_file" ]]; then
+    if [[ ! -f "$result_file" || -L "$result_file" || ! -O "$result_file" ]]; then
+        echo '[ERRO] Arquivo de resultado inválido.' >&2
+        exit 2
+    fi
+fi
+printf '%s\n' 'WOLF INSTALLER GUI 0.9 — EXECUÇÃO EXPERIMENTAL VM' \
+                'ATENÇÃO: esta operação poderá apagar o disco INTEIRO ou FORMATAR a raiz selecionada.'
+status=0
+sudo wolf-install --execute-gui-plan-vm "$plan" || status=$?
+printf '\nInstalador finalizado (código %s).\n' "$status"
+if (( status == 0 )); then
+    printf '%s\n' 'Instalação concluída com sucesso.' \
+       'Pressione Enter para fechar o terminal e abrir a tela de reinicialização.'
+    read -r _ || true
+    if [[ -n "$result_file" ]]; then
+        printf 'success\n' > "$result_file"
+    else
+        echo 'Para iniciar o sistema instalado, reinicie a Live e remova a ISO.'
+    fi
+else
+    if [[ -n "$result_file" ]]; then
+        printf 'failed %s\n' "$status" > "$result_file"
+    fi
+    read -r -p 'Instalação interrompida. Confira os erros; Enter para fechar o terminal...' _ || true
+fi
+exit "$status"

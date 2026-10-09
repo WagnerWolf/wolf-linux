@@ -1,0 +1,12 @@
+[Unit]
+Description=Wolf Live - criar usuário temporário da sessão gráfica
+Before=getty@tty1.service
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/wolf-live-create-user
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

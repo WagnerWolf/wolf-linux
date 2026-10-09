@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+printf '%s\n' '====== Wolf Linux Live - diagnóstico ======'
+cat /etc/wolf-linux-live-build || true
+printf '\nFirmware: '
+[[ -d /sys/firmware/efi ]] && echo UEFI || echo BIOS
+printf '\nRede:\n'
+ip -br a || true
+printf '\nDiscos (somente leitura):\n'
+lsblk -o NAME,PATH,SIZE,FSTYPE,MOUNTPOINTS,MODEL || true
+printf '\nGPU:\n'
+lspci -nn | grep -Ei 'vga|3d|display' || true
+
+printf '\nPressione Enter para fechar este diagnóstico...'
+read -r _ || true

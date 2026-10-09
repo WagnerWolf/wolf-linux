@@ -26,7 +26,7 @@ printf '%s\n' '======================================================'
 printf '%s\n' '    WOLF LINUX 2.0 KDE BASELINE - SMOKE TEST'
 printf '%s\n' '======================================================'
 
-for f in "$INSTALLER" "$CUSTOMIZER" "$STAGE_SSH" "$PROJECT/tests/wolf-build-iso.sh" "$PROJECT/tests/wolf-test-iso.sh" "$PROJECT/tests/wolf-vm.sh" "$PROJECT/tests/wolf-enable-ssh-live.sh" "$PROJECT/tests/wolf-vm-ssh.sh" "$PROJECT/tools/wolf-helper-manager-0.2.sh" "$PROJECT/tools/wolf-validate-helpers-0.1.sh"; do
+for f in "$INSTALLER" "$CUSTOMIZER" "$STAGE_SSH" "$PROJECT/tests/wolf-build-iso.sh" "$PROJECT/tests/wolf-test-iso.sh" "$PROJECT/tests/wolf-vm.sh" "$PROJECT/tests/wolf-enable-ssh-live.sh" "$PROJECT/tests/wolf-vm-ssh.sh" "$PROJECT/tests/wolf-stage-live-desktop.sh" "$PROJECT/tests/wolf-test-live-desktop.sh" "$PROJECT/tools/wolf-helper-manager-0.2.sh" "$PROJECT/tools/wolf-validate-helpers-0.1.sh"; do
     [[ -f "$f" ]] || { err "Arquivo ausente: $f"; continue; }
     check_shell "$f"
 done
@@ -286,6 +286,11 @@ grep -Fq 'gui_source="$source_root/control-center"' "$INSTALLER" || err 'Control
 grep -Fq 'options+=(--extras)' "$INSTALLER" || err 'Extra não aciona Octopi no perfil do usuário'
 [[ -f "$PROJECT/assets/zsh/zshrc" ]] && grep -Fq "typeset -g ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=250'" "$PROJECT/assets/zsh/zshrc" || err 'Correção fg=250 de autosuggestions ausente ao final do perfil'
 ok 'Control Center integrado; extras e plugin Zsh verificados'
+
+printf '\n>> Validando Wolf Live GUI experimental...\n'
+if ! WOLF_PROJECT="$PROJECT" "$PROJECT/tests/wolf-test-live-desktop.sh"; then
+    err 'Testes de staging da GUI Live falharam'
+fi
 
 if (( ERRORS )); then
     printf '\n[ERRO] Há itens a corrigir antes do teste em VM.\n'

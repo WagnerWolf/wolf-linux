@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+# Executado somente pela unidade Wolf Live, antes de getty@tty1.
+if ! id -u wolf >/dev/null 2>&1; then
+    useradd --create-home --shell /bin/bash --groups wheel wolf
+fi
+install -d -m 0755 /home/wolf
+cp -a /usr/share/wolf-live/home/. /home/wolf/
+# Usa o rc.xml completo do Openbox, preservando bindings de foco e menus.
+# Injeta apenas atalhos e tema, sem destruir regras padrão de janelas.
+if [[ -r /etc/xdg/openbox/rc.xml ]]; then
+    python3 - <<'PY_OPENBOX'
+from pathlib import Path
+import xml.etree.ElementTree as ET
+source=Path('/etc/xdg/openbox/rc.xml')
+dest=Path('/home/wolf/.config/openbox/rc.xml')
+tree=ET.parse(source)
+root=tree.getroot()
+ns={'o': 'http://openbox.org/3.4/rc'}
+name=root.find('./o:theme/o:name',ns)
+if name is not None:
+    name.text='Onyx'
+keyboard=root.find('./o:keyboard',ns)
+if keyboard is not None:
+    q='{http://openbox.org/3.4/rc}'
+    shortcuts={'W-t':'qterminal','C-A-t':'qterminal','W-e':'pcmanfm-qt'}
+    for k,app in shortcuts.items():
+        if any(e.get('key')==k for e in keyboard.findall('o:keybind',ns)):
+            continue
+        bind=ET.SubElement(keyboard,q+'keybind',{'key':k})
+        action=ET.SubElement(bind,q+'action',{'name':'Execute'})
+        ET.SubElement(action,q+'command').text=app
+ET.register_namespace('', 'http://openbox.org/3.4/rc')
+tree.write(dest,encoding='utf-8',xml_declaration=True)
+PY_OPENBOX
+fi
+chown -R wolf:wolf /home/wolf
+chmod 0755 /home/wolf/.xinitrc /home/wolf/.config/openbox/autostart

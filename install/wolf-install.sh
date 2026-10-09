@@ -7,14 +7,33 @@ fi
 
 set -Eeuo pipefail
 
-WOLF_VERSION="2.0.0-alpha15"
+WOLF_VERSION="2.0.0-alpha29"
 DRY_RUN=0
 PLAN_ONLY=0
 RESET_STATE=0
 VM_INSTALL=0
 REAL_INSTALL=0
+GUI_VM_PLAN=""
+GUI_VM_DISK=""
+GUI_VM_MAJMIN=""
+GUI_VM_MODE=""
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd || true)"
+
+# Entrada exclusivamente de leitura, ANTES do estado, rede, partições e main.
+# Não transforma o documento da GUI em argumentos de instalação.
+if [[ "${1:-}" == "--review-gui-plan" || "${1:-}" == "--simulate-gui-plan" || "${1:-}" == "--preflight-gui-plan-vm" ]]; then
+    if (( $# != 2 )); then
+        echo '[ERRO] Uso: wolf-install --review-gui-plan|--simulate-gui-plan /caminho/preview.json' >&2
+        exit 2
+    fi
+    case "$1" in
+        --simulate-gui-plan) action=simulate ;;
+        --preflight-gui-plan-vm) action=vm-preflight ;;
+        *) action=review ;;
+    esac
+    exec /usr/bin/python3 "$PROJECT_DIR/live-gui/wolf_plan.py" "$action" "$2"
+fi
 [[ -r "$PROJECT_DIR/VERSION" ]] && WOLF_VERSION="$(< "$PROJECT_DIR/VERSION")"
 PACKAGES_FILE="${WOLF_PACKAGES_FILE:-$PROJECT_DIR/package-profiles/packages.conf}"
 ASSET_DIR="${WOLF_ASSET_DIR:-}"
@@ -82,15 +101,18 @@ cleanup_temporary_privileges() {
 trap cleanup_temporary_privileges EXIT
 
 usage() {
+    printf 'Wolf Linux Installer %s - KDE Plasma / Wayland baseline\n\n' "$WOLF_VERSION"
     cat <<'EOF'
-Wolf Linux Installer 2.0.0-alpha15 - KDE Plasma / Wayland baseline
-
 Uso:
   ./wolf-install.sh [opções]
 
 Modos de instalação:
   --dry-run             Detecta hardware, coleta opções e mostra o plano.
   --plan-only           Gera o plano e encerra.
+  --review-gui-plan F   Revisa o JSON experimental da GUI (leitura APENAS).
+  --simulate-gui-plan F Simula etapas compatíveis com o Bash (SEM executar).
+  --preflight-gui-plan-vm F Valida instalação em VM (somente leitura).
+  --execute-gui-plan-vm F  Instala em disco VirtIO de VM; erase ou manual UEFI.
   --vm-install          Instalação real apenas em QEMU/KVM/VirtualBox.
   --install             Instalação real em hardware físico.
   --reset-state         Limpa checkpoints temporários.
@@ -124,6 +146,12 @@ while (($#)); do
         --dry-run) DRY_RUN=1 ;;
         --plan-only) PLAN_ONLY=1 ;;
         --vm-install) VM_INSTALL=1 ;;
+        --execute-gui-plan-vm)
+            shift
+            [[ $# -gt 0 && -z "$GUI_VM_PLAN" ]] || { echo "[ERRO] Plano VM ausente/duplicado." >&2; exit 2; }
+            GUI_VM_PLAN="$1"
+            VM_INSTALL=1
+            ;;
         --install) REAL_INSTALL=1 ;;
         --reset-state) RESET_STATE=1 ;;
         --preset)
@@ -146,6 +174,16 @@ while (($#)); do
     shift
 done
 
+if [[ -n "$GUI_VM_PLAN" ]]; then
+    # Não permitir misturar opções interativas/override com um plano validado.
+    (( VM_INSTALL == 1 && REAL_INSTALL == 0 && DRY_RUN == 0 && PLAN_ONLY == 0 && RESET_STATE == 0 )) || {
+        echo '[ERRO] Execução GUI VM não aceita modos/opções de instalação conflitantes.' >&2; exit 2;
+    }
+    [[ -z "$STACK_PRESET" && -z "$STACKS_ARG" && "$LIST_STACKS" == 0 ]] || {
+        echo '[ERRO] Não misture preset/stacks com o plano JSON.' >&2; exit 2;
+    }
+fi
+
 if (( LIST_STACKS == 1 )); then
     cat <<'EOF'
 Stacks opcionais disponíveis:
@@ -159,6 +197,12 @@ EOF
     exit 0
 fi
 
+if [[ -n "$GUI_VM_PLAN" ]]; then
+    if mountpoint -q /mnt 2>/dev/null || [[ -s "$CHECKPOINT_FILE" ]]; then
+        echo '[ERRO] Há /mnt montado ou checkpoints de outra instalação. Recusado; use VM descartável nova.' >&2
+        exit 2
+    fi
+fi
 mkdir -p "$STATE_DIR" "$PROBE_DIR"
 
 if (( RESET_STATE == 1 )); then
@@ -536,6 +580,9 @@ check_network() {
 
     warn "Não foi detectada conectividade IP."
 
+    if [[ -n "$GUI_VM_PLAN" ]]; then
+        die 'Conecte a rede pelo applet gráfico do NetworkManager antes de executar a GUI VM.'
+    fi
     if (( DRY_RUN == 1 )); then
         warn "No dry-run a configuração Wi-Fi não será iniciada."
         return 0
@@ -1184,6 +1231,7 @@ show_plan() {
             echo
             printf 'Nova raiz ..........: %s\n' "$ROOT_DEVICE"
             [[ -n "$ESP_DEVICE" ]] && printf 'Nova ESP ...........: %s\n' "$ESP_DEVICE"
+            echo "Nova /home ........: diretório DENTRO da raiz / (sem partição dedicada)"
             ;;
         manual)
             echo "Particionamento ....: manual"
@@ -1200,8 +1248,20 @@ confirm_installation() {
 
     echo
     echo "ATENÇÃO: a próxima etapa realizará alterações reais nos dispositivos do plano."
-    read -r -p 'Digite INSTALAR-WOLF para continuar: ' answer
-    [[ "$answer" == "INSTALAR-WOLF" ]] || die "Instalação cancelada."
+    if [[ -n "$GUI_VM_PLAN" ]]; then
+        if [[ "$GUI_VM_MODE" == "manual" ]]; then
+            printf 'EXECUÇÃO MANUAL VM: a partição raiz %s será FORMATADA (PERDA TOTAL DE DADOS).\n' "$ROOT_DEVICE"
+            printf 'ESP preservada: %s | HOME preservada: %s\n' "$ESP_DEVICE" "${HOME_DEVICE:-dentro da raiz}"
+        else
+            printf 'EXECUÇÃO VM: disco %s INTEIRO será APAGADO, inclusive partições existentes.\n' "$INSTALL_DISK"
+        fi
+        echo 'Esta ação é irreversível. Confirme apenas em um DISCO DESCARTÁVEL da VM.'
+        read -r -p "Digite APAGAR para continuar: " answer
+        [[ "$answer" == "APAGAR" ]] || die 'Instalação VM cancelada.'
+    else
+        read -r -p 'Digite INSTALAR-WOLF para continuar: ' answer
+        [[ "$answer" == "INSTALAR-WOLF" ]] || die "Instalação cancelada."
+    fi
 }
 
 prepare_erase_disk() {
@@ -2086,6 +2146,11 @@ install_third_party_apps() {
     local pkg
 
     mapfile -t requested < <(collect_third_party_packages)
+    local -a nonempty=()
+    for pkg in "${requested[@]}"; do
+        [[ -n "${pkg//[[:space:]]/}" ]] && nonempty+=("$pkg")
+    done
+    requested=("${nonempty[@]}")
 
     if ((${#requested[@]} == 0)); then
         return 0
@@ -2197,7 +2262,7 @@ install_selected_stack_packages() {
     : > "$PACKAGE_RESOLUTION_LOG"
 
     while IFS= read -r pkg; do
-        [[ -n "$pkg" ]] || continue
+        [[ -n "${pkg//[[:space:]]/}" ]] || continue
         [[ -z "${seen[$pkg]:-}" ]] || continue
         seen["$pkg"]=1
         requested+=("$pkg")
@@ -11399,6 +11464,107 @@ finalize_vm_install() {
     echo "============================================================"
 }
 
+load_gui_vm_plan() {
+    [[ -n "$GUI_VM_PLAN" ]] || return 0
+    (( EUID == 0 )) || die 'A execução VM exige root.'
+    is_supported_test_vm || die 'Execução GUI permitida SOMENTE em QEMU/KVM ou VirtualBox detectado.'
+    # Um temporário privado permite capturar corretamente o exit code do Python;
+    # process substitution com mapfile ocultaria falhas de validação.
+    local tmp
+    tmp="$(mktemp /tmp/wolf-gui-fields.XXXXXXXX)"
+    chmod 600 "$tmp"
+    if ! /usr/bin/python3 "$PROJECT_DIR/live-gui/wolf_plan.py" vm-export "$GUI_VM_PLAN" > "$tmp"; then
+        rm -f -- "$tmp"
+        die 'Plano da GUI reprovado pela validação independente.'
+    fi
+    local -a fields=()
+    mapfile -d '' -t fields < "$tmp"
+    rm -f -- "$tmp"
+    (( ${#fields[@]} == 14 )) || die 'Contrato JSON devolveu número incorreto de campos.'
+    GUI_VM_DISK="${fields[0]}"
+    GUI_VM_MAJMIN="${fields[2]}"
+    [[ "$BOOT_MODE" == "${fields[3]}" ]] || die 'Firmware atual diferente do plano.'
+    HOSTNAME_VALUE="${fields[4]}"
+    USERNAME_VALUE="${fields[5]}"
+    STACK_PRESET="${fields[6]}"
+    if [[ "$STACK_PRESET" == "custom" ]]; then
+        STACKS_ARG="${fields[7]}"
+        [[ -n "$STACKS_ARG" ]] || die 'Custom vazio não implementado no primeiro executor VM.'
+    else
+        STACKS_ARG=""
+    fi
+    INSTALL_DISK="$GUI_VM_DISK"
+    GUI_VM_MODE="${fields[10]}"
+    if [[ "$GUI_VM_MODE" == "manual" ]]; then
+        [[ "$BOOT_MODE" == "UEFI" ]] || die 'Manual GUI inicialmente permitido apenas em UEFI.'
+        STORAGE_MODE="reuse-manual"
+        ROOT_DEVICE="${fields[11]}"
+        ESP_DEVICE="${fields[12]}"
+        HOME_DEVICE="${fields[13]}"
+        FORMAT_ROOT="yes"
+        FORMAT_ESP="no"
+        FORMAT_HOME="no"
+        CLEAN_HOME_DOTFILES="no"
+    elif [[ "$GUI_VM_MODE" == "erase" ]]; then
+        STORAGE_MODE="erase"
+        if [[ "$BOOT_MODE" == "UEFI" ]]; then
+        ESP_DEVICE="$(partition_path "$INSTALL_DISK" 1)"
+        ROOT_DEVICE="$(partition_path "$INSTALL_DISK" 2)"
+        FORMAT_ESP="yes"
+        else
+            ESP_DEVICE=""
+            ROOT_DEVICE="$(partition_path "$INSTALL_DISK" 1)"
+            FORMAT_ESP="no"
+        fi
+        HOME_DEVICE=""
+        FORMAT_ROOT="yes"
+        FORMAT_HOME="no"
+        CLEAN_HOME_DOTFILES="no"
+    else
+        die "Estratégia GUI desconhecida: $GUI_VM_MODE"
+    fi
+    XKB_LAYOUT="${fields[8]}"
+    XKB_VARIANT="${fields[9]}"
+    if [[ "$XKB_VARIANT" == "thinkpad" ]]; then
+        KEYBOARD_PROFILE=thinkpad
+        CINNAMON_LAYOUT=br+thinkpad
+        MATE_LAYOUT=$'br\tthinkpad'
+    else
+        KEYBOARD_PROFILE=abnt2
+        XKB_VARIANT=abnt2
+        CINNAMON_LAYOUT=br
+        MATE_LAYOUT=$'br\tabnt2'
+    fi
+    ok "Plano VM importado: $INSTALL_DISK; usuário=$USERNAME_VALUE; preset=$STACK_PRESET; $BOOT_MODE"
+}
+
+revalidate_gui_vm_target() {
+    [[ -n "$GUI_VM_PLAN" ]] || return 0
+    local tmp
+    tmp="$(mktemp /tmp/wolf-gui-recheck.XXXXXXXX)"
+    chmod 600 "$tmp"
+    if ! /usr/bin/python3 "$PROJECT_DIR/live-gui/wolf_plan.py" vm-export "$GUI_VM_PLAN" > "$tmp"; then
+        rm -f -- "$tmp"
+        die 'Disco ou plano VM alterado antes da operação destrutiva. ABORTADO.'
+    fi
+    local -a fields=()
+    mapfile -d '' -t fields < "$tmp"
+    rm -f -- "$tmp"
+    (( ${#fields[@]} == 14 )) || die 'Revalidação VM com dados incompletos.'
+    [[ "${fields[0]}" == "$INSTALL_DISK" && "${fields[2]}" == "$GUI_VM_MAJMIN" ]] ||
+        die 'Disco/identidade da VM mudou após confirmação.'
+    [[ "$INSTALL_DISK" == /dev/vd? ]] || die 'Disco deixou de ser VirtIO suportado.'
+    [[ "${fields[10]}" == "$GUI_VM_MODE" ]] || die 'Modo GUI mudou após confirmação.'
+    if [[ "$GUI_VM_MODE" == "manual" ]]; then
+        [[ "${fields[11]}" == "$ROOT_DEVICE" && "${fields[12]}" == "$ESP_DEVICE" && "${fields[13]}" == "$HOME_DEVICE" ]] ||
+            die 'Partições da instalação manual mudaram; ABORTADO.'
+    fi
+    if mountpoint -q /mnt 2>/dev/null; then
+        die 'Montagem inesperada em /mnt. Recusando alterar partições.'
+    fi
+    ok "Alvo VM revalidado imediatamente antes das operações de armazenamento: $INSTALL_DISK ($GUI_VM_MODE)."
+}
+
 main() {
     banner
     check_runtime
@@ -11406,12 +11572,18 @@ main() {
     detect_cpu
     detect_gpu
     detect_keyboard
-    check_network
     choose_desktop
-    choose_stacks
-    collect_identity
-    storage_planner
-    plan_preserved_home_cleanup
+    if [[ -n "$GUI_VM_PLAN" ]]; then
+        load_gui_vm_plan
+        check_network
+        choose_stacks
+    else
+        check_network
+        choose_stacks
+        collect_identity
+        storage_planner
+        plan_preserved_home_cleanup
+    fi
     show_plan
     echo "Stacks ............: $(selected_stacks_text)"
 
@@ -11421,6 +11593,7 @@ main() {
     fi
 
     confirm_installation
+    revalidate_gui_vm_target
     stage "10-preparar-disco" prepare_erase_disk
     stage "20-formatar-montar" format_and_mount
     stage "22-limpar-home" clean_preserved_home_dotfiles

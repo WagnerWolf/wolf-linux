@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Somente pré-plano, sem execução de instalação. Mantém terminal visível.
+set -Eeuo pipefail
+if (( $# != 1 )); then
+    echo '[ERRO] Uso: wolf-live-review-plan /caminho/preview.json' >&2
+    exit 2
+fi
+status=0
+sudo wolf-install --review-gui-plan "$1" || status=$?
+printf '\n'
+read -r -p "Revisão finalizada (código $status). Pressione Enter para fechar... " _ || true
+exit "$status"
