@@ -1,0 +1,22 @@
+Nesta revisão, adicionei um caminho exclusivo para a instalação física, separado do --install genérico.
+Componente	Comportamento
+Raiz /	Formatação ext4, após confirmação
+EFI	Preservada, atualizando apenas EFI/WolfLinux
+/home LVM	Preservada, incluindo os dois PVs
+Windows/NTFS	Sem alteração planejada
+GRUB	--no-nvram, preservando BootOrder
+Backup geral	Recomendado, mas não obrigatório
+Como será a instalação
+Após gerar a ISO alpha47 e inicializar a Live:
+1. Escolha Reutilizar partições existentes.
+2. Execute a detecção multidisco.
+3. Confira os UUIDs de /, EFI e /home.
+4. Execute revisão, simulação e ensaio físico.
+5. Se tudo passar, utilize Instalação física real — somente raiz identificada por UUID.
+6. Confirme explicitamente a perda dos dados da raiz e a partição que será formatada.
+O executor verificará novamente o plano imediatamente antes do mkfs.ext4.
+Minha sugestão: utilize o perfil Minimal na primeira instalação física. Depois de validar o boot, instalamos as stacks restantes no sistema já funcionando.
+Estado dos testes
+O smoke test, as regressões anteriores, os testes do novo contrato físico e o staging simulado da ISO passaram. A instalação física real ainda não foi executada e, portanto, é a próxima validação decisiva.
+Não precisamos repetir a reinstalação multidisco na VM. Podemos agora trabalhar diretamente com a alpha47 no hardware real.
+Antes de autorizar a formatação, apenas confira que os arquivos indispensáveis estão de fato acessíveis na nuvem. O instalador não exige um backup geral, mas essa última conferência é especialmente importante porque a formatação será irreversível.

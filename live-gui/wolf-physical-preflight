@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""Wolf Linux: physical-drive diagnostic. Never formats, mounts or writes."""
+from __future__ import annotations
+import argparse
+import json
+import subprocess
+import sys
+
+
+def _children(node):
+    for child in node.get('children') or []:
+        yield child
+        yield from _children(child)
+
+
+def classify(disk: dict) -> tuple[str, list[str]]:
+    reasons = []
+    nodes = [disk, *_children(disk)]
+    path = str(disk.get('path') or '')
+    transport = str(disk.get('tran') or '').lower()
+    if disk.get('type') != 'disk' or not path.startswith('/dev/'):
+        return 'BLOQUEADO', ['não é disco físico convencional']
+    if transport == 'usb' or str(disk.get('rm', '0')).lower() in ('1', 'true'):
+        reasons.append('USB/removível (pode ser a mídia da Live)')
+    if str(disk.get('ro', '0')).lower() in ('1', 'true'):
+        reasons.append('dispositivo somente leitura')
+    for node in nodes:
+        if node is not disk and node.get('type') in ('part', 'lvm', 'crypt', 'raid', 'md'):
+            reasons.append('possui partições ou volumes associados')
+        if node.get('fstype'):
+            reasons.append('contém assinaturas de filesystem/LVM')
+        if node.get('mountpoints') or node.get('mountpoint'):
+            mp = node.get('mountpoints') or node.get('mountpoint')
+            if mp not in ([], [None], None, ''):
+                reasons.append('possui sistema montado')
+    if reasons:
+        return 'PROTEGER', sorted(set(reasons))
+    return 'INSPECIONAR MANUALMENTE', ['sem partições reconhecidas; NÃO significa autorização para apagar']
+
+
+def render(data: dict) -> str:
+    lines = [
+        'WOLF LINUX — PRÉ-VALIDAÇÃO DE ARMAZENAMENTO FÍSICO (SOMENTE LEITURA)',
+        'NÃO LIBERA INSTALAÇÃO, FORMATAÇÃO OU ALTERAÇÃO DE PARTIÇÕES',
+        'A mídia Live, volumes com LVM e outros sistemas devem ser preservados.',
+        ''
+    ]
+    disks = [x for x in data.get('blockdevices', []) if x.get('type') == 'disk']
+    if not disks:
+        lines.append('Nenhum disco identificado pelo inventário.')
+    for d in disks:
+        label, reasons = classify(d)
+        gib = int(d.get('size') or 0) / 1024**3
+        lines.append(f"{d.get('path','?')} — {gib:.1f} GiB — {d.get('model') or 'modelo não informado'}")
+        lines.append(f"  ESTADO: {label}")
+        for reason in reasons:
+            lines.append(f'  - {reason}')
+        lines.append('')
+    lines += [
+        'REGRAS DO PILOTO FÍSICO:',
+        '  1. Usar somente um SSD de teste dedicado, com backup e sem dados importantes.',
+        '  2. Os dois NVMe com Windows/EFI/LVM não são destinos deste piloto.',
+        '  3. A execução física pela GUI permanece BLOQUEADA nesta versão.',
+    ]
+    return '\n'.join(lines)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--input-json', help='Inventário para teste offline')
+    args = parser.parse_args()
+    if args.input_json:
+        with open(args.input_json, encoding='utf-8') as f:
+            obj = json.load(f)
+    else:
+        argv = ['lsblk','-J','-b','-o','NAME,PATH,TYPE,SIZE,RO,RM,TRAN,FSTYPE,MOUNTPOINTS,MODEL']
+        try:
+            result = subprocess.run(argv, capture_output=True, text=True, timeout=15, check=True)
+            obj = json.loads(result.stdout)
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError) as exc:
+            print(f'[ERRO] Falha de inventário: {exc}', file=sys.stderr)
+            return 2
+    print(render(obj))
+    if not args.input_json and sys.stdout.isatty():
+        try:
+            input('\nPressione Enter para voltar à Live...')
+        except (EOFError, KeyboardInterrupt):
+            pass
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+# Nunca executar Chromium como root; preserva sandbox do navegador.
+if (( EUID == 0 )); then
+    echo '[ERRO] Inicie Chromium pelo usuário wolf, não como root.' >&2
+    exit 1
+fi
+exec /usr/bin/chromium --lang=pt-BR "$@"

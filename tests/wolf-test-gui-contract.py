@@ -58,13 +58,13 @@ with tempfile.TemporaryDirectory() as tmp:
     result = wp.simulate_document(doc, disks=disks)
     assert "SIMULAÇÃO" in result and "EXECUÇÃO: DESABILITADA" in result
     assert "diretório dentro de /" in result
-    assert "COMPATÍVEL COM O PLANEJADOR" in result
+    assert "INCOMPLETO" in result  # reutilização executável exige /home separada
     separated = wp.build_preview(**(kwargs | {"home_layout": "separate", "roles": {"root":"/dev/nvme0n1p2", "esp":"/dev/nvme0n1p1", "home":None}}))
     assert "BLOQUEIO: Selecione a partição dedicada a /home" in wp.simulate_document(separated, disks=disks)
     without_format = wp.build_preview(**(kwargs | {"formats": {"root":False,"esp":False,"home":False}}))
     assert "Bash atual sempre formata a raiz" in wp.simulate_document(without_format, disks=disks)
     manual = wp.build_preview(**(kwargs | {"mode":"manual"}))
-    assert "No piloto VM, o Bash formatará e montará" in wp.simulate_document(manual, disks=disks)
+    assert "Raiz /: formatada ext4" in wp.simulate_document(manual, disks=disks)
     with tempfile.TemporaryDirectory() as d:
         sim_path = Path(d) / "plan.json"
         wp.write_private(doc, sim_path)
@@ -103,4 +103,4 @@ with tempfile.TemporaryDirectory() as tmp:
     invalid = subprocess.run(["bash", str(ROOT / "install/wolf-install.sh"), "--review-gui-plan", str(path), "--install"],
                              capture_output=True, text=True, timeout=10)
     assert invalid.returncode != 0
-print("[OK] Contrato GUI->Bash v2: /home integrado/separado, simulacao, recusas, guardas CLI")
+print("[OK] Contrato GUI->Bash v3: /home integrado/separado, simulacao, recusas, guardas CLI")

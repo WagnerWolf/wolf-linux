@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Wolf topology inspection; all operations are read-only. In particular,
+# do NOT run vgchange, mount, cryptsetup, fsck, or any write-capable commands.
+set -uo pipefail
+printf '\n=============================================================\n'
+printf ' WOLF STORAGE TOPOLOGY — DIAGNÓSTICO SOMENTE LEITURA\n'
+printf '=============================================================\n'
+printf 'Firmware desta LIVE: '
+if [[ -d /sys/firmware/efi ]]; then echo UEFI; else echo BIOS/Legacy; fi
+printf '\nDISCOS, PARTIÇÕES, LVM E PONTOS DE MONTAGEM:\n'
+lsblk -e 7 -o NAME,PATH,TYPE,PKNAME,SIZE,FSTYPE,PTTYPE,PARTTYPE,MOUNTPOINTS,MODEL,TRAN || true
+printf '\nPARTIÇÕES IDENTIFICADAS PELO BLKID:\n'
+# blkid and LVM probes require CAP_SYS_ADMIN/root on some live devices.
+# sudo -n is provided exclusively by the Wolf Live; no write operations run.
+readonly_probe() {
+    if (( EUID == 0 )); then
+        "$@"
+    else
+        sudo -n "$@"
+    fi
+}
+readonly_probe blkid || true
+if command -v pvs >/dev/null 2>&1; then
+    printf '\nLVM: PHYSICAL VOLUMES (PVs):\n'
+    readonly_probe pvs --readonly --reportformat basic -o pv_name,vg_name,pv_size,pv_free || true
+    printf '\nLVM: VOLUME GROUPS (VGs):\n'
+    readonly_probe vgs --readonly --reportformat basic -o vg_name,pv_count,lv_count,vg_size,vg_free || true
+    printf '\nLVM: LOGICAL VOLUMES (LVs):\n'
+    readonly_probe lvs --readonly --reportformat basic -o lv_path,vg_name,lv_name,lv_size,lv_attr || true
+else
+    printf '\nLVM2 ausente na Live; adicione lvm2 à ISO.\n'
+fi
+printf '\nAVISOS DE SEGURANÇA:\n'
+printf ' - Este diagnóstico NÃO monta discos, NÃO ativa LVM e NÃO formata.\n'
+printf ' - PCManFM-Qt mostra dispositivos e usa UDisks2 para montar sob demanda.\n'
+printf ' - Montagens pelo explorador PODEM permitir escrita; confira o volume.\n'
+printf ' - O instalador GUI atual usa SOMENTE um disco VirtIO em VM.\n'
+printf ' - EFI em SSD diferente da raiz e /home em LVM exigem\n'
+printf '   um contrato multidisco/LVM e testes específicos ANTES da execução física.\n'
+printf '\n'
+read -r -p 'Pressione Enter para fechar o diagnóstico...' _ || true

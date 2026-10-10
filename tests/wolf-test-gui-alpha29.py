@@ -23,7 +23,7 @@ F = dict(root=True, esp=False, home=False)
 R = dict(root='/dev/vda2', esp='/dev/vda1', home=None)
 
 def plan(mode, **extra):
-    return wp.build_preview(disks=[D], disk_path='/dev/vda', mode=mode,
+    return wp.build_preview(disks=extra.get("disks", [D]), disk_path='/dev/vda', mode=mode,
                             preset='minimal', stacks=(), hostname='wolf-vm',
                             username='wolf', boot_mode='UEFI', keyboard=KB,
                             roles=extra.get('roles'), formats=extra.get('formats'),
@@ -39,7 +39,7 @@ def fails(description, fn):
 # Apagar DISCO INTEIRO com partições/assinaturas antigas agora é legítimo.
 erase = plan('erase')
 fields = wp.vm_execution_fields(erase, disks=[D], active_boot='UEFI')
-assert len(fields) == 14 and fields[10] == 'erase' and fields[0] == '/dev/vda'
+assert len(fields) == 19 and fields[10] == 'erase' and fields[0] == '/dev/vda'
 assert '/home' in wp.text_summary(erase)
 assert 'TODAS as partições' in wp.simulate_document(erase, disks=[D])
 fails('disco removível', lambda: wp.vm_execution_fields(erase, disks=[{**D, 'removable':True}], active_boot='UEFI'))
@@ -49,21 +49,23 @@ fails('partição montada', lambda: wp.vm_execution_fields(erase, disks=[{**D,'p
 manual = plan('manual', roles=R, formats=F)
 assert wp.validate_document(manual, disks=[D]) == manual
 exported = wp.vm_execution_fields(manual, disks=[D], active_boot='UEFI')
-assert len(exported) == 14 and exported[10:] == ('manual', '/dev/vda2', '/dev/vda1', '')
-assert 'No piloto VM, o Bash formatará' in wp.simulate_document(manual, disks=[D])
+assert len(exported) == 19 and exported[10:] == ('manual', '/dev/vda2', '/dev/vda1', '', 'no', 'no', 'no', '0', '0')
+assert 'Raiz /: formatada ext4' in wp.simulate_document(manual, disks=[D])
 separate = plan('manual', roles=R | {'home':'/dev/vda3'}, formats=F, home_layout='separate')
 assert wp.vm_execution_fields(separate, disks=[D], active_boot='UEFI')[13] == '/dev/vda3'
 
 fails('manual BIOS', lambda: wp.vm_execution_fields(manual, disks=[D], active_boot='BIOS'))
 fails('raiz sem formatação', lambda: wp.vm_execution_fields(plan('manual', roles=R, formats={**F, 'root':False}), disks=[D], active_boot='UEFI'))
-fails('ESP formato indevido', lambda: wp.vm_execution_fields(plan('manual', roles=R, formats={**F, 'esp':True}), disks=[D], active_boot='UEFI'))
-fails('home em formatação', lambda: wp.vm_execution_fields(plan('manual', roles=R|{'home':'/dev/vda3'},
-    formats={**F,'home':True}, home_layout='separate'), disks=[D], active_boot='UEFI'))
+assert wp.vm_execution_fields(plan('manual', roles=R, formats={**F, 'esp':True}), disks=[D], active_boot='UEFI')[14] == 'yes'
+assert wp.vm_execution_fields(plan('manual', roles=R|{'home':'/dev/vda3'},
+    formats={**F,'home':True}, home_layout='separate'), disks=[D], active_boot='UEFI')[15] == 'yes'
 fails('ESP menor que 512MB', lambda: wp.vm_execution_fields(manual, disks=[{**D,'partitions':[P1|{'size':256*1024**2},P2,P3]}], active_boot='UEFI'))
-fails('ESP flag GPT ausente', lambda: wp.vm_execution_fields(manual, disks=[{**D,'partitions':[P1|{'parttype':''},P2,P3]}], active_boot='UEFI'))
-fails('ESP não FAT32', lambda: wp.vm_execution_fields(manual, disks=[{**D,'partitions':[P1|{'fstype':'ntfs'},P2,P3]}], active_boot='UEFI'))
+assert wp.vm_execution_fields(plan('manual',roles=R,formats=F,disks=[{**D,'partitions':[P1|{'parttype':''},P2,P3]}]), disks=[{**D,'partitions':[P1|{'parttype':''},P2,P3]}], active_boot='UEFI')[10] == 'manual'
+fails('ESP não FAT32 sem formatação', lambda: wp.vm_execution_fields(manual, disks=[{**D,'partitions':[P1|{'fstype':'ntfs'},P2,P3]}], active_boot='UEFI'))
+assert wp.vm_execution_fields(plan('manual', roles=R, formats={**F,'esp':True}, disks=[{**D,'partitions':[P1|{'fstype':'ntfs'},P2,P3]}]), disks=[{**D,'partitions':[P1|{'fstype':'ntfs'},P2,P3]}], active_boot='UEFI')[14] == 'yes'
 fails('raiz pequena', lambda: wp.vm_execution_fields(manual, disks=[{**D,'partitions':[P1,P2|{'size':10*GB},P3]}], active_boot='UEFI'))
-fails('home não ext4', lambda: wp.vm_execution_fields(separate, disks=[{**D,'partitions':[P1,P2,P3|{'fstype':'ntfs'}]}], active_boot='UEFI'))
+fails('home não ext4 sem formatação', lambda: wp.vm_execution_fields(separate, disks=[{**D,'partitions':[P1,P2,P3|{'fstype':'ntfs'}]}], active_boot='UEFI'))
+assert wp.vm_execution_fields(plan('manual', roles=R|{'home':'/dev/vda3'}, formats={**F,'home':True}, home_layout='separate', disks=[{**D,'partitions':[P1,P2,P3|{'fstype':'ntfs'}]}]), disks=[{**D,'partitions':[P1,P2,P3|{'fstype':'ntfs'}]}], active_boot='UEFI')[15] == 'yes'
 fails('partição / montada', lambda: wp.vm_execution_fields(manual, disks=[{**D,'partitions':[P1,P2|{'mountpoints':['/mnt']},P3]}], active_boot='UEFI'))
 fails('partição desaparecida', lambda: wp.vm_execution_fields(manual, disks=[{**D,'partitions':[P1,P3]}], active_boot='UEFI'))
 fails('reutilização bloqueada', lambda: wp.vm_execution_fields(plan('reuse',roles=R,formats=F),disks=[D],active_boot='UEFI'))
@@ -76,8 +78,8 @@ assert 'self.partition_roles["home"]' in ui
 assert 'Raiz /' in ui or 'RAIZ /' in ui
 assert 'GUI_VM_MODE="${fields[10]}"' in bash
 assert 'STORAGE_MODE="reuse-manual"' in bash
-assert 'FORMAT_ESP="no"' in bash
+assert 'FORMAT_ESP="${fields[14]}"' in bash
 assert 'HOME_DEVICE="${fields[13]}"' in bash
 assert '"${pkg//[[:space:]]/}"' in bash
 
-print('[OK] alpha29: manual UEFI, /home, partições inválidas, apagar disco preenchido, GUI e filtro AUR; nenhuma escrita')
+print('[OK] alpha30: manual UEFI, ESP sem flag, /home e EFI formatáveis, proteção de dados, contrato 19 campos; nenhuma escrita')

@@ -18,7 +18,7 @@ spec.loader.exec_module(ui)
 # raiz, /home separada e EFI; não podem confundir com execução nesta versão.
 root = ui.format_intent_warning('root', 'in-root', '/dev/vda2')
 assert '/dev/vda2' in root and '/home' in root and 'TODOS os arquivos' in root
-assert 'MANUAL VM' in root and 'formata a raiz como ext4' in root
+assert 'MANUAL' in root and 'FORMATADA em ext4' in root
 separate = ui.format_intent_warning('root', 'separate', '/dev/vda2')
 assert 'partição /home separada' in separate
 assert 'Windows' in ui.format_intent_warning('esp', 'in-root', '/dev/vda1')

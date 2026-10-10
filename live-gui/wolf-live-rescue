@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+[[ -f /etc/wolf-linux-live-build ]] || { echo '[ERRO] Wolf Rescue é exclusivo da Live.' >&2; exit 1; }
+exec /usr/bin/python3 /usr/local/share/wolf-linux-live/gui/wolf_rescue.py "$@"

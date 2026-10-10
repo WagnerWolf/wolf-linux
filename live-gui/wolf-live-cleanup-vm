@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Assistente de recuperação SOMENTE para tentativas GUI em VM VirtIO.
+# Não formata, não força desmontagem e não modifica montagens externas a /mnt.
+set -Eeuo pipefail
+
+disk="${1:-}"
+[[ "$disk" =~ ^/dev/vd[a-z]$ ]] || { echo '[ERRO] Informe um disco VirtIO /dev/vdX da VM.' >&2; exit 2; }
+[[ -b "$disk" ]] || { echo '[ERRO] O disco não é um dispositivo de bloco.' >&2; exit 2; }
+virt="$(systemd-detect-virt --vm 2>/dev/null || true)"
+[[ "$virt" == 'kvm' || "$virt" == 'qemu' ]] || { echo '[ERRO] Recuperação GUI disponível apenas em QEMU/KVM.' >&2; exit 2; }
+
+printf '\nWOLF LINUX — RECUPERAÇÃO DE TENTATIVA ANTERIOR\nDisco escolhido: %s\n' "$disk"
+echo 'Somente pontos de montagem da instalação sob /mnt podem ser desmontados.'
+echo 'Nenhum disco será formatado; nenhum sistema de arquivos será apagado.'
+
+mapfile -t targets < <(findmnt -rn -o TARGET | grep -E '^/mnt(/|$)' || true)
+for mp in "${targets[@]}"; do
+    case "$mp" in
+        /mnt|/mnt/boot/efi|/mnt/home) ;;
+        *) echo "[ERRO] Montagem não reconhecida: $mp. Recusado. Investigue manualmente." >&2; exit 3 ;;
+    esac
+    src="$(findmnt -rn -o SOURCE --mountpoint "$mp" 2>/dev/null || true)"
+    [[ "$src" == "$disk"[0-9]* ]] || { echo "[ERRO] $mp utiliza fonte estranha ao disco: $src" >&2; exit 3; }
+    printf '  %s  <-  %s\n' "$mp" "$src"
+done
+checkpoints=/tmp/wolf-linux-installer/checkpoints
+[[ ${#targets[@]} -gt 0 || -s "$checkpoints" ]] || { echo '[INFO] Nenhuma montagem/checkpoint pendente.'; exit 0; }
+if [[ -s "$checkpoints" ]]; then
+    echo 'Há checkpoints anteriores. Eles serão limpos, preservando os logs.'
+fi
+echo 'ATENÇÃO: uma nova instalação pode formatar as partições selecionadas novamente.'
+read -r -p 'Digite DESMONTAR para desmontar e limpar checkpoints: ' confirm
+[[ "$confirm" == 'DESMONTAR' ]] || { echo 'Operação cancelada.'; exit 1; }
+
+for mp in /mnt/boot/efi /mnt/home /mnt; do
+    if mountpoint -q "$mp"; then
+        sudo umount "$mp" || { echo "[ERRO] $mp está em uso; não será forçada a desmontagem." >&2; exit 4; }
+        echo "[OK] Desmontado: $mp"
+    fi
+done
+if [[ -s "$checkpoints" ]]; then
+    sudo rm -f -- "$checkpoints"
+    echo '[OK] Checkpoints anteriores limpos; logs preservados.'
+fi
+printf '[OK] Recuperação concluída. Atualize os discos e inicie uma nova instalação.\n'

@@ -11,11 +11,11 @@ root = Path(__file__).resolve().parents[1]
 ui = (root / 'live-gui/main.py').read_text(encoding='utf-8')
 wrapper = root / 'live-gui/wolf-live-execute-vm-plan'
 assert 'class InstallFinishedDialog(QDialog)' in ui
-assert 'self.hide()' in ui and 'InstallFinishedDialog().exec()' in ui
-assert 'self.close()' in ui
-assert 'if status == "success":' in ui
+assert 'self.console_finish.show()' in ui and 'if rc == 0:' in ui
+assert 'self.console_info.setText' in ui
+assert 'self._installer_pty = None' in ui
 assert 'self._vm_result_poll.timeout.connect(self.check_vm_install_result)' in ui
-assert 'self._vm_result_path is not None' in ui
+assert 'self._installer_pty is not None' in ui
 assert 'sudo", "-n", "systemctl", "reboot' in ui
 assert '"/etc/wolf-linux-live-build"' in ui
 ast.parse(ui)

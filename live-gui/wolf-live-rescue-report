@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Wolf Rescue 0.1: leitura APENAS. Sem mount, fsck, mkfs, chroot, GRUB ou LVM write.
+set -uo pipefail
+
+if [[ "${1:-}" == --help ]]; then
+    echo 'Wolf Rescue 0.1 — relatório não destrutivo de firmware, discos, LVM e boot.'
+    exit 0
+fi
+if [[ ! -f /etc/wolf-linux-live-build && "${WOLF_RESCUE_TEST_MODE:-}" != 1 ]]; then
+    echo '[ERRO] Wolf Rescue é exclusivo da mídia Live.' >&2
+    exit 1
+fi
+
+readonly_run() {
+    if (( EUID == 0 )); then
+        timeout 15s "$@"
+    else
+        timeout 15s sudo -n "$@"
+    fi
+}
+section() { printf '\n===== %s =====\n' "$*"; }
+
+printf '%s\n' 'WOLF RESCUE 0.1 — RELATÓRIO NÃO DESTRUTIVO'
+printf 'Horário: %s\n' "$(date -Is)"
+printf 'Firmware da Live: '
+[[ -d /sys/firmware/efi ]] && echo UEFI || echo BIOS/Legacy
+printf '%s\n' 'Este relatório não tenta corrigir boot, desmontar, formatar ou ativar grupos LVM.'
+
+section 'Discos, partições, EFI e volumes (inventário)'
+lsblk -e 7 -o NAME,PATH,SIZE,TYPE,PKNAME,FSTYPE,PTTYPE,PARTTYPE,MOUNTPOINTS,MODEL,TRAN || true
+
+section 'Identificação UUID/partições'
+readonly_run blkid || echo '[AVISO] Falha ao consultar blkid (permite continuar).'
+
+section 'Montagens ativas (apenas consulta)'
+findmnt -rn -o SOURCE,TARGET,FSTYPE,OPTIONS | head -100 || true
+
+section 'LVM: volumes físicos (PVs)'
+readonly_run pvs --readonly --reportformat basic -o pv_name,vg_name,pv_size,pv_free || echo '[AVISO] pvs indisponível.'
+section 'LVM: grupos (VGs)'
+readonly_run vgs --readonly --reportformat basic -o vg_name,pv_count,lv_count,vg_size,vg_free || echo '[AVISO] vgs indisponível.'
+section 'LVM: volumes lógicos (LVs) e dispositivos associados'
+readonly_run lvs --readonly --reportformat basic -o lv_path,lv_size,segtype,devices || echo '[AVISO] lvs indisponível.'
+
+section 'Entradas UEFI (leitura apenas)'
+if [[ -d /sys/firmware/efi ]]; then
+    readonly_run efibootmgr -v || echo '[AVISO] efibootmgr indisponível ou sem acesso ao NVRAM.'
+else
+    echo 'BIOS/Legacy: sem NVRAM UEFI; GRUB pode estar instalado no setor de boot.'
+fi
+
+section 'Diagnóstico e próximos passos'
+cat <<'WARNING'
+- Identificar onde /home e / realmente estão exige consultar /etc/fstab do sistema instalado.
+- Um LV que aparece em dois discos é UM volume lógico que depende de ambos os PVs.
+- Não é seguro preparar instalação física com base somente no nome de um LV.
+- Partições EFI e Windows existentes devem ser preservadas a menos que o usuário
+  escolha explicitamente outra ação após revisão e backup.
+- Esta ferramenta é DIAGNÓSTICO, não executa grub-install, fsck, mount ou mkfs.
+- Instalação GUI em hardware físico segue bloqueada até homologação específica.
+WARNING

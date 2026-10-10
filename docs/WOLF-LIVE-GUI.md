@@ -25,3 +25,7 @@ O sistema instalado continua KDE Plasma/Wayland, exatamente como na alpha18.
 - Verificar tela Openbox, wallpaper, janela Wolf, QTerminal, PCManFM-Qt, GParted, internet, tty CLI.
 - `sudo wolf-install --help` no terminal deve continuar funcionando.
 - No hospedeiro `./tests/wolf-test-live-desktop.sh` testa staging sem bootar a ISO.
+
+## Alpha38 — Ajustes de usabilidade
+
+O Wolf Installer GUI 1.8 passou a dimensionar a janela à área de trabalho, usar botões menores e limitar rolagem à vertical. O Wolf Rescue 0.2 possui tema escuro e mapa `/`, EFI e `/home` a partir do `fstab` escolhido, sem modificações em disco. A execução física continua bloqueada.

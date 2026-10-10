@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Relatório apenas de leitura para diagnosticar falhas TOTP/2FA na Live.
+set -uo pipefail
+printf '\n===== WOLF LIVE - RELÓGIO E SINCRONIZAÇÃO =====\n'
+printf '\nHora local e UTC:\n'
+date -R
+date -u -R
+printf '\nEstado NTP:\n'
+timedatectl status || true
+printf '\nServiço de sincronização:\n'
+systemctl --no-pager --plain is-active systemd-timesyncd.service || true
+printf '\nATENÇÃO: mudar apenas o fuso NÃO corrige desvio no relógio.\n'
+printf 'Aguarde System clock synchronized: yes antes de usar códigos TOTP.\n'
+printf 'Passkeys do celular dependem de suporte específico do navegador; Bluetooth sozinho não basta.\n'
+printf '\nPressione Enter para fechar... ' 
+read -r _ || true

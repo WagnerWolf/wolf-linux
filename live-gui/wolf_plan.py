@@ -2,8 +2,8 @@
 """Contrato de PREVIEW (read-only) Wolf GUI <-> instalador Bash.
 
 Nenhuma operação de montagem, formatação, particionamento ou instalação aqui.
-O documento é intencionalmente não executável; outro modo futuro deve exigir
-novo schema, nova revisão de segurança e consentimento explícito.
+O documento JSON não autoriza operações; somente o executor VM separado pode
+consumi-lo após preflight independente e dupla confirmação explícita.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ import subprocess
 import sys
 import tempfile
 
-SCHEMA = "wolf.install.preview.v2"
+SCHEMA = "wolf.install.preview.v4"
 VM_MIN_BYTES = 32 * 1024**3
 STACKS = ("daily", "gaming", "development", "android", "containers", "extras")
 PRESETS = {
@@ -97,10 +97,44 @@ def _valid_ident(hostname: str, username: str) -> None:
         raise PlanError("Hostname inválido")
 
 
+
+
+def erase_usable_gib(disk_bytes: int, boot_mode: str) -> int:
+    """Limite conservador do particionador: EFI 1 GiB e 1 GiB para alinhamento/folga.
+
+    A GUI e o validador usam esta MESMA regra. Apenas leitura/cálculo;
+    não substitui o preflight do Bash antes de escrever no disco.
+    """
+    if type(disk_bytes) is not int or disk_bytes <= 0:
+        return 0
+    if boot_mode not in ("UEFI", "BIOS"):
+        return 0
+    reserved = 1 + (1 if boot_mode == "UEFI" else 0)
+    return max(0, min(16384, disk_bytes // 1024**3 - reserved))
+
+
+def erase_size_bounds(disk_bytes: int, boot_mode: str, home_layout: str,
+                      root_gib: int, home_gib: int) -> dict[str, int]:
+    """Limites para barra+campo. Zero significa *restante* (não zero GiB)."""
+    usable = erase_usable_gib(disk_bytes, boot_mode)
+    if home_layout == "in-root":
+        return {"usable": usable, "root_min": 0, "root_max": usable,
+                "home_min": 0, "home_max": 0}
+    if home_layout != "separate":
+        raise PlanError("Layout de home inválido")
+    # /home fixa precisa ter ao menos 10 GiB; /home=0 reserva esse mínimo
+    # por significar 'restante do disco'. A raiz exige pelo menos 20 GiB.
+    home_reserved = home_gib if home_gib >= 10 else 10
+    return {"usable": usable, "root_min": 20,
+            "root_max": max(0, usable - home_reserved),
+            "home_min": 0, "home_max": max(0, usable - max(20, root_gib))}
+
+
 def build_preview(*, disks: list[dict], disk_path: str, mode: str,
                   preset: str, stacks: tuple[str, ...], hostname: str, username: str,
                   keyboard: dict, boot_mode: str, roles: dict | None = None,
-                  formats: dict | None = None, home_layout: str = "in-root") -> dict:
+                  formats: dict | None = None, home_layout: str = "in-root",
+                  cleanup_home: bool = False, erase_sizes: dict | None = None) -> dict:
     _valid_ident(hostname, username)
     if mode not in STORAGE_MODES:
         raise PlanError("Estratégia de armazenamento inválida")
@@ -123,8 +157,41 @@ def build_preview(*, disks: list[dict], disk_path: str, mode: str,
     formats = {"root": False, "esp": False, "home": False} if formats is None else formats
     if home_layout not in ("in-root", "separate"):
         raise PlanError("Modo de /home inválido")
-    if mode == "erase" and home_layout != "in-root":
-        raise PlanError("Apagar disco inteiro usa /home dentro da raiz na implementação atual")
+    if type(cleanup_home) is not bool:
+        raise PlanError("Limpeza de /home deve ser booleano explícito")
+    if cleanup_home and (mode != "reuse" or home_layout != "separate"):
+        raise PlanError("Limpeza de dotfiles permitida somente em /home separada, preservada, em Reutilizar")
+    erase_sizes = {"root_gib": 0, "home_gib": 0} if erase_sizes is None else erase_sizes
+    if not isinstance(erase_sizes, dict) or set(erase_sizes) != {"root_gib", "home_gib"}:
+        raise PlanError("Tamanhos de partições inválidos")
+    if any(type(v) is not int or v < 0 or v > 16384 for v in erase_sizes.values()):
+        raise PlanError("Tamanhos devem ser números inteiros em GiB")
+    if mode != "erase" and any(erase_sizes.values()):
+        raise PlanError("Tamanhos automáticos só são válidos em Apagar disco")
+    if mode == "erase":
+        root_gib, home_gib = erase_sizes["root_gib"], erase_sizes["home_gib"]
+        if home_layout == "in-root" and home_gib:
+            raise PlanError("Não há partição /home dedicada no modo /home integrado")
+        if home_layout == "in-root" and root_gib and root_gib < 20:
+            raise PlanError("Raiz de tamanho fixo exige pelo menos 20 GiB; selecione 0 para usar o restante")
+        if home_layout == "separate" and root_gib < 20:
+            raise PlanError("/home separada exige tamanho da raiz / de pelo menos 20 GiB")
+        if home_layout == "separate" and home_gib and home_gib < 10:
+            raise PlanError("/home separada exige ao menos 10 GiB quando tamanho for definido")
+        if disk:
+            # Reserva 1 GiB de ESP no UEFI, folga para alinhamento/GPT,
+            # e mínimo de 10 GiB para a partição /home quando usa o restante.
+            usable = erase_usable_gib(disk["size"], boot_mode)
+            if home_layout == "separate" and usable < 30:
+                raise PlanError("Disco insuficiente: raiz mínima 20 GiB e /home mínima 10 GiB, além da reserva")
+            if home_layout == "in-root" and usable < 20:
+                raise PlanError("Disco insuficiente para instalação automática (mínimo 20 GiB disponíveis)")
+            if home_layout == "separate" and root_gib + (home_gib or 10) > usable:
+                raise PlanError("Disco insuficiente para raiz, /home e espaço de alinhamento")
+            if home_layout == "in-root" and root_gib and root_gib > usable:
+                raise PlanError("Raiz maior que a capacidade disponível do disco")
+            if home_layout == "separate" and home_gib and root_gib + home_gib > usable:
+                raise PlanError("Tamanhos de / e /home excedem o disco")
     if home_layout == "in-root" and (roles.get("home") is not None or formats.get("home")):
         raise PlanError("/home dentro da raiz não admite partição ou formatação própria")
     if not isinstance(roles, dict) or set(roles) != {"root", "esp", "home"}:
@@ -133,6 +200,8 @@ def build_preview(*, disks: list[dict], disk_path: str, mode: str,
         raise PlanError("Preferências de formatação inválidas")
     if mode == "erase" and (any(roles.values()) or any(formats.values())):
         raise PlanError("Apagar disco inteiro não admite partições ou flags individuais")
+    if cleanup_home and (not roles.get("home") or formats.get("home")):
+        raise PlanError("Limpeza exige partição /home selecionada e SEM formatação")
     if mode in ("reuse", "manual"):
         allowed = {p["path"] for p in (disk or {}).get("partitions", [])}
         if any(value is not None and (not isinstance(value, str) or value not in allowed) for value in roles.values()):
@@ -143,6 +212,8 @@ def build_preview(*, disks: list[dict], disk_path: str, mode: str,
         if any(formats[k] and not roles[k] for k in formats):
             raise PlanError("Formatação solicitada sem partição selecionada")
     warnings = []
+    if cleanup_home:
+        warnings.append("LIMPEZA DE CONFIGURAÇÕES: arquivos e pastas ocultos diretamente dentro de CADA usuário da /home preservada serão REMOVIDOS, incluindo possíveis chaves .ssh/.gnupg. Arquivos visíveis permanecem. Exige confirmação LIMPAR antes de formatar /.")
     if mode == "reuse" and not formats["root"]:
         warnings.append("BLOQUEIO: o Bash atual SEMPRE formata a raiz / em ext4 na reutilização; não existe opção de preservá-la")
     if mode in ("reuse", "manual") and formats["root"]:
@@ -153,16 +224,32 @@ def build_preview(*, disks: list[dict], disk_path: str, mode: str,
         warnings.append("RISCO DE BOOT: formatar EFI apagará carregadores de inicialização existentes")
     if home_layout == "separate" and not roles["home"] and mode in ("reuse", "manual"):
         warnings.append("/home separado selecionado, mas nenhuma partição /home foi escolhida")
+    if mode == "erase" and home_layout == "separate":
+        warnings.append("APAGAR DISCO: criar partição /home ext4 SEPARADA; ambos / e /home perdem todos os dados anteriores")
     if home_layout == "in-root":
         warnings.append("/home será um DIRETÓRIO dentro de /; não haverá montagem específica de /home")
         if mode == "erase" or (mode == "reuse" and formats["root"]):
             warnings.append("ATENÇÃO: formatar/apagar a raiz também elimina qualquer /home antigo armazenado nela")
     if mode == "manual":
-        warnings.append("Manual VM (piloto): use GParted para CRIAR a ESP FAT32 e a raiz; a GUI montará partições selecionadas SOMENTE após confirmação no Bash. BIOS e formatação da ESP não estão habilitados.")
+        warnings.append("Manual VM: em UEFI/GPT, selecione EFI FAT32 ou marque para formatar; em BIOS/MBR NÃO há EFI (GRUB é instalado no disco). BIOS/GPT com bios_grub fica bloqueado neste piloto.")
+        for role, label in (("esp", "EFI"), ("home", "/home")):
+            chosen = roles.get(role)
+            if chosen and formats[role]:
+                part = next((q for d in disks for q in d["partitions"] if q["path"] == chosen), None)
+                if part and part.get("fstype"):
+                    warnings.append(f"ALERTA: {label} ({chosen}) tem filesystem {part['fstype']} detectado e será FORMATADA. Se quiser preservar os dados, escolha Reutilizar partições.")
     if disk is None:
         warnings.append("Selecione um disco antes de revisar o plano")
     if mode == "erase":
-        warnings.append("APAGAR DISCO INTEIRO: todas as partições serão excluídas; /home será criado dentro da raiz /")
+        warnings.append("APAGAR DISCO INTEIRO: todas as partições serão excluídas; EFI automática de 1 GiB em UEFI e NENHUMA EFI em BIOS")
+        if erase_sizes["root_gib"]:
+            warnings.append(f"Partição raiz /: {erase_sizes['root_gib']} GiB")
+        else:
+            warnings.append("Partição raiz /: restante do disco")
+        if home_layout == "separate":
+            warnings.append(f"Partição /home: {erase_sizes['home_gib']} GiB" if erase_sizes["home_gib"] else "Partição /home: restante do disco")
+        if disk and erase_sizes["root_gib"] and (home_layout == "in-root" or erase_sizes["home_gib"]):
+            warnings.append("ESPAÇO NÃO PARTICIONADO: o restante do disco ficará livre, pois foram definidos tamanhos fixos para as partições")
         if disk and disk["removable"]:
             warnings.append("ATENÇÃO: disco marcado como removível (pode ser a mídia Live)")
     if mode in ("reuse", "manual"):
@@ -186,6 +273,8 @@ def build_preview(*, disks: list[dict], disk_path: str, mode: str,
             "disk": ({k: disk[k] for k in ("path", "size", "maj_min", "model", "transport", "removable")} if disk else None),
             "partitions": roles,
             "format": formats,
+            "cleanup_home": cleanup_home,
+            "erase_sizes": erase_sizes,
         },
         "warnings": warnings,
     }
@@ -201,7 +290,7 @@ def validate_document(doc: dict, *, disks: list[dict]) -> dict:
     ident, software, storage = doc["identity"], doc["software"], doc["storage"]
     if not all(isinstance(x, dict) for x in (ident, software, storage)):
         raise PlanError("Seções malformadas")
-    if set(ident) != {"hostname", "username"} or set(software) != {"preset", "stacks"} or set(storage) != {"mode", "home_layout", "disk", "partitions", "format"}:
+    if set(ident) != {"hostname", "username"} or set(software) != {"preset", "stacks"} or set(storage) != {"mode", "home_layout", "disk", "partitions", "format", "cleanup_home", "erase_sizes"}:
         raise PlanError("Campos de identidade/software/armazenamento inconsistentes")
     if not isinstance(doc["warnings"], list) or any(not isinstance(x, str) for x in doc["warnings"]):
         raise PlanError("Lista de avisos inválida")
@@ -213,7 +302,8 @@ def validate_document(doc: dict, *, disks: list[dict]) -> dict:
                               stacks=tuple(software["stacks"]), hostname=ident["hostname"],
                               username=ident["username"], keyboard=doc["keyboard"],
                               boot_mode=doc["boot_mode"], roles=storage["partitions"], formats=storage["format"],
-                              home_layout=storage["home_layout"])
+                              home_layout=storage["home_layout"], cleanup_home=storage["cleanup_home"],
+                              erase_sizes=storage["erase_sizes"])
     if canonical != doc:
         raise PlanError("Documento diferente do plano canônico/inventário atual; atualize a lista de discos")
     return canonical
@@ -235,12 +325,20 @@ def text_summary(doc: dict) -> str:
     lines.extend("  - " + stack for stack in sw["stacks"])
     if not sw["stacks"]:
         lines.append("  - nenhuma (minimal)")
+    if st["mode"] == "erase":
+        sizes = st["erase_sizes"]
+        lines.append("/ (ext4): " + (f"{sizes['root_gib']} GiB" if sizes['root_gib'] else "restante do disco"))
+        if st["home_layout"] == "separate":
+            lines.append("/home (ext4 separada): " + (f"{sizes['home_gib']} GiB" if sizes['home_gib'] else "restante do disco"))
+        lines.append("EFI: 1 GiB FAT32 (UEFI)" if doc["boot_mode"] == "UEFI" else "BIOS: NÃO necessita EFI")
     if st["mode"] in ("reuse", "manual"):
         for role in ("root", "esp", "home"):
             if role == "home" and st["home_layout"] == "in-root":
                 continue
             lines.append(f"{role}: {st['partitions'][role] or '(não selecionado)'} " +
                          ("[FORMATAR na execução confirmada]" if st["format"][role] else "[preservar/não formatar]"))
+    if st["mode"] == "reuse":
+        lines.append("Limpeza dos ocultos de usuários: " + ("SIM, COM CONFIRMAÇÃO PRÓPRIA" if st["cleanup_home"] else "NÃO"))
     lines.append("\nAVISOS:")
     lines.extend("- " + item for item in doc["warnings"])
     return "\n".join(lines)
@@ -253,14 +351,14 @@ def vm_erase_fields(doc: dict, *, disks: list[dict], active_boot: str | None = N
                     check_device: bool = False) -> tuple[str, ...]:
     """Confere ALVO de teste VM; não atribui autorização de escrita ao JSON.
 
-    Aceita SOMENTE disco VirtIO vazio /dev/vd[a-z] para reduzir o risco de
+    Aceita SOMENTE disco VirtIO /dev/vd[a-z] para reduzir o risco de
     escolher discos reais pass-through, USB, imagens em outros sistemas etc.
     O bash verifica também que estamos realmente em QEMU/KVM.
     """
     canonical = validate_document(doc, disks=disks)
     st = canonical["storage"]
-    if st["mode"] != "erase" or st["home_layout"] != "in-root":
-        raise PlanError("Execução experimental aceita somente APAGAR DISCO com /home dentro de /")
+    if st["mode"] != "erase":
+        raise PlanError("Execução de apagar disco exige estratégia erase")
     if any(st["partitions"].values()) or any(st["format"].values()):
         raise PlanError("Papéis/formatações individuais não são permitidos no modo apagar disco")
     disk_info = st["disk"]
@@ -326,17 +424,17 @@ def vm_erase_fields(doc: dict, *, disks: list[dict], active_boot: str | None = N
 
 def vm_manual_fields(doc: dict, *, disks: list[dict], active_boot: str | None = None,
                      check_device: bool = False) -> tuple[str, ...]:
-    """Piloto manual VM: usar partições existentes, sem formatar ESP ou /home.
+    """Manual VM UEFI/GPT ou BIOS/MBR: formatar raiz; ESP apenas no UEFI.
 
-    A raiz escolhida SERÁ FORMATADA em ext4; a ESP deve existir em FAT32.
-    Não suporta instalações físicas, BIOS, LVM, Windows ou volumes em outro disco.
+    Atribuir o papel EFI ajusta o tipo GPT para ESP na execução, quando necessário.
+    Não suporta discos físicos, BIOS/GPT, LVM ou partições de discos diferentes.
     """
     canonical = validate_document(doc, disks=disks)
     storage = canonical["storage"]
     if storage["mode"] != "manual":
         raise PlanError("Esta operação exige o modo Avançado/manual")
-    if canonical["boot_mode"] != "UEFI" or (active_boot and active_boot != "UEFI"):
-        raise PlanError("Manual experimental habilitado apenas no boot UEFI da VM")
+    if canonical["boot_mode"] not in ("UEFI", "BIOS") or (active_boot and active_boot != canonical["boot_mode"]):
+        raise PlanError("Firmware atual diferente do plano UEFI/BIOS")
     disk = storage["disk"]
     if not disk or not re.fullmatch(r"/dev/vd[a-z]", disk["path"]):
         raise PlanError("Manual VM exige disco VirtIO selecionado (/dev/vda...)")
@@ -347,24 +445,40 @@ def vm_manual_fields(doc: dict, *, disks: list[dict], active_boot: str | None = 
         raise PlanError("Disco pequeno demais ou identidade do kernel desconhecida")
     root, esp, home = (storage["partitions"][k] for k in ("root", "esp", "home"))
     fmt = storage["format"]
-    if not root or not esp or not fmt["root"] or fmt["esp"] or fmt["home"]:
-        raise PlanError("Manual VM exige / selecionada PARA FORMATAR; ESP obrigatória PRESERVADA; /home não pode ser formatada")
+    if not root or not fmt["root"]:
+        raise PlanError("Manual VM exige partição raiz / com formatação ext4")
+    if canonical["boot_mode"] == "UEFI" and not esp:
+        raise PlanError("UEFI exige uma partição EFI selecionada")
+    if canonical["boot_mode"] == "BIOS" and (esp or fmt["esp"]):
+        raise PlanError("BIOS/Legacy NÃO usa partição EFI; deixe o campo EFI vazio")
+    if fmt["home"] and storage["home_layout"] != "separate":
+        raise PlanError("Não é possível formatar /home separadamente quando ela fica dentro de /")
     if storage["home_layout"] == "separate" and not home:
         raise PlanError("Escolha uma partição /home ou use /home dentro de /")
     part_by_path = {p["path"]: p for p in actual["partitions"]}
-    if root not in part_by_path or esp not in part_by_path or (home and home not in part_by_path):
+    if root not in part_by_path or (esp and esp not in part_by_path) or (home and home not in part_by_path):
         raise PlanError("Partição selecionada não existe mais no disco")
-    root_part, esp_part = part_by_path[root], part_by_path[esp]
+    root_part = part_by_path[root]
+    esp_part = part_by_path[esp] if esp else None
     if root_part["size"] < 20 * 1024**3:
         raise PlanError("A raiz / precisa de pelo menos 20 GiB no piloto manual")
-    if root_part["fstype"].lower() not in ("", "ext4"):
-        raise PlanError("Raiz manual VM deve estar vazia ou ser ext4 (será formatada)")
-    if esp_part["size"] < 512 * 1024**2 or esp_part["fstype"].lower() not in ("vfat", "fat32", "fat"):
-        raise PlanError("ESP existente precisa ser FAT32 e ter pelo menos 512 MiB; formate no GParted ANTES")
-    if esp_part.get("parttype", "").lower() != "c12a7328-f81f-11d2-ba4b-00a0c93ec93b":
-        raise PlanError("ESP deve ter o tipo GPT EFI System (flag esp no GParted). Configure a flag esp antes de instalar")
-    if home and part_by_path[home]["fstype"].lower() != "ext4":
-        raise PlanError("/home separada deve ser ext4, criada previamente no GParted (será PRESERVADA)")
+    # A raiz será formatada em ext4: seu formato anterior não é restrição.
+    if esp_part and esp_part["size"] < 512 * 1024**2:
+        raise PlanError("Partição EFI deve ter ao menos 512 MiB")
+    if esp_part and not fmt["esp"] and esp_part["fstype"].lower() not in ("vfat", "fat32", "fat"):
+        raise PlanError("Para preservar a EFI, ela precisa conter FAT32; marque FORMATAR EFI para inicializá-la")
+    if home and not fmt["home"] and part_by_path[home]["fstype"].lower() != "ext4":
+        raise PlanError("Para preservar /home, ela precisa ser ext4; marque FORMATAR /home para inicializá-la")
+    # A seleção do papel EFI é suficiente: o backend ajustará o tipo GPT
+    # para ESP, independentemente da flag configurada pelo GParted.
+    if check_device:
+        pt = subprocess.run(["lsblk", "-dnro", "PTTYPE", disk["path"]],
+                            capture_output=True, text=True, timeout=8, check=False)
+        expected_table = "gpt" if canonical["boot_mode"] == "UEFI" else "dos"
+        if pt.returncode or pt.stdout.strip().lower() != expected_table:
+            if canonical["boot_mode"] == "BIOS":
+                raise PlanError("BIOS manual neste piloto exige tabela MBR/DOS. GPT exige bios_grub e ainda NÃO é suportado")
+            raise PlanError("Modo manual UEFI requer tabela GPT no disco. Crie GPT no GParted")
     for part_path in (root, esp, home):
         if part_path and part_by_path[part_path].get("mountpoints"):
             raise PlanError(f"Partição está montada: {part_path}")
@@ -387,18 +501,55 @@ def vm_manual_fields(doc: dict, *, disks: list[dict], active_boot: str | None = 
     kb = canonical["keyboard"]
     if kb["layout"] != "br" or kb["variant"] not in ("", "abnt2", "thinkpad"):
         raise PlanError("Layout do teclado ainda não suportado no executor experimental")
-    return (disk["path"], str(actual["size"]), actual["maj_min"], "UEFI",
+    return (disk["path"], str(actual["size"]), actual["maj_min"], canonical["boot_mode"],
             canonical["identity"]["hostname"], canonical["identity"]["username"],
             canonical["software"]["preset"], ",".join(canonical["software"]["stacks"]),
-            kb["layout"], kb["variant"], "manual", root, esp, home or "")
+            kb["layout"], kb["variant"], "manual", root, esp or "", home or "",
+            "yes" if fmt["esp"] else "no", "yes" if fmt["home"] else "no")
+
+
+def vm_reuse_fields(doc: dict, *, disks: list[dict], active_boot: str | None = None,
+                    check_device: bool = False) -> tuple[str, ...]:
+    """Reutilização VM UEFI/GPT ou BIOS/MBR: raiz nova, home preservada."""
+    canonical = validate_document(doc, disks=disks)
+    st = canonical["storage"]
+    fmt = st["format"]
+    if st["mode"] != "reuse" or st["home_layout"] != "separate":
+        raise PlanError("Reutilizar VM exige /home em partição dedicada")
+    if not fmt["root"] or fmt["esp"] or fmt["home"]:
+        raise PlanError("Reutilização FORMATA apenas raiz /; EFI e /home devem ser preservadas")
+    needed = ("root", "esp", "home") if canonical["boot_mode"] == "UEFI" else ("root", "home")
+    if not all(st["partitions"].get(key) for key in needed):
+        raise PlanError("Reutilizar VM exige raiz /, /home separada e EFI apenas em UEFI")
+    if canonical["boot_mode"] == "BIOS" and st["partitions"].get("esp"):
+        raise PlanError("Reutilizar em BIOS não aceita EFI")
+    # Os mesmos guardrails de identidade, GPT, filesystem, firmware e mounts
+    # do piloto manual são aplicados a um espelho canônico do plano.
+    manual = build_preview(
+        disks=disks, disk_path=st["disk"]["path"] if st["disk"] else "",
+        mode="manual", preset=canonical["software"]["preset"],
+        stacks=tuple(canonical["software"]["stacks"]),
+        hostname=canonical["identity"]["hostname"],
+        username=canonical["identity"]["username"],
+        keyboard=canonical["keyboard"], boot_mode=canonical["boot_mode"],
+        roles=st["partitions"], formats=fmt, home_layout="separate")
+    fields = vm_manual_fields(manual, disks=disks, active_boot=active_boot,
+                              check_device=check_device)
+    return (*fields[:10], "reuse", *fields[11:16],
+            "yes" if st["cleanup_home"] else "no", "0", "0")
 
 
 def vm_execution_fields(doc: dict, *, disks: list[dict], active_boot: str | None = None,
                         check_device: bool = False) -> tuple[str, ...]:
+    if doc.get("storage", {}).get("mode") == "reuse":
+        return vm_reuse_fields(doc, disks=disks, active_boot=active_boot, check_device=check_device)
     if doc.get("storage", {}).get("mode") == "manual":
-        return vm_manual_fields(doc, disks=disks, active_boot=active_boot, check_device=check_device)
+        return (*vm_manual_fields(doc, disks=disks, active_boot=active_boot, check_device=check_device), "no", "0", "0")
     base = vm_erase_fields(doc, disks=disks, active_boot=active_boot, check_device=check_device)
-    return (*base, "erase", "", "", "")
+    size = doc["storage"]["erase_sizes"]
+    layout = doc["storage"]["home_layout"]
+    return (*base, "erase", "", "", "separate" if layout == "separate" else "", "yes", "no", "no",
+            str(size["root_gib"]), str(size["home_gib"]))
 
 def vm_preflight_file(path: Path, *, disks: list[dict] | None = None,
                       active_boot: str | None = None, check_device: bool = True) -> tuple[str, ...]:
@@ -424,6 +575,8 @@ def simulate_document(doc: dict, *, disks: list[dict]) -> str:
     if not st["disk"]:
         issues.append("Disco de referência não selecionado")
     if mode == "reuse":
+        if st["home_layout"] != "separate":
+            issues.append("Reutilização VM nesta fase exige /home separada")
         if not roles["root"]:
             issues.append("Selecione a partição raiz /")
         if not fmts["root"]:
@@ -435,13 +588,13 @@ def simulate_document(doc: dict, *, disks: list[dict]) -> str:
         if canonical["boot_mode"] == "UEFI" and not roles["esp"]:
             issues.append("Selecione EFI /boot/efi para instalação UEFI")
         if canonical["boot_mode"] == "BIOS":
-            issues.append("Instalação BIOS necessita confirmação separada do disco de destino do GRUB")
+            issues.append("BIOS exige tabela MBR/DOS neste piloto; GRUB será instalado no DISCO, não em partição EFI")
         parts = {p["path"]: p for d in disks for p in d["partitions"]}
         if roles["esp"] and not fmts["esp"] and parts[roles["esp"]]["fstype"].lower() not in ("vfat", "fat32", "fat"):
             issues.append("EFI preservada precisa ter sistema de arquivos FAT/vfat")
     if mode == "manual":
-        if not roles["root"] or not roles["esp"] or not fmts["root"] or fmts["esp"] or fmts["home"]:
-            issues.append("Piloto manual UEFI: raiz formatada, ESP FAT32 preservada, /home separada ext4 preservada (opcional)")
+        if not roles["root"] or not fmts["root"] or (canonical["boot_mode"] == "UEFI" and not roles["esp"]):
+            issues.append("Manual exige raiz formatada; EFI apenas quando o boot é UEFI")
     if st["home_layout"] == "separate" and not roles["home"]:
         issues.append("Selecione a partição dedicada a /home")
     if canonical["boot_mode"] == "unknown":
@@ -452,25 +605,28 @@ def simulate_document(doc: dict, *, disks: list[dict]) -> str:
     if mode == "erase":
         lines += ["1. O modo Bash correspondente seria: erase",
                   "2. Preparar partições no disco selecionado (intenção; não executar)",
-                  "3. Apagar TODAS as partições existentes e criar raiz ext4; em UEFI criar ESP FAT32",
-                  "4. /home será um diretório DENTRO da raiz / (não será criada partição /home)"]
+                  "3. Apagar TODAS as partições existentes; em UEFI criar ESP FAT32 de 1 GiB; em BIOS SEM EFI",
+                  "4. Criar / ext4: " + (f"{st['erase_sizes']['root_gib']} GiB" if st['erase_sizes']['root_gib'] else "restante"),
+                  "5. /home ext4 separada: " + (f"{st['erase_sizes']['home_gib']} GiB" if st['erase_sizes']['home_gib'] else "restante") if st['home_layout'] == 'separate' else "5. /home será diretório dentro de /"]
     elif mode == "reuse":
         lines += ["1. O modo Bash correspondente seria: reuse-manual",
                   "2. Raiz /: " + (roles["root"] or "NÃO SELECIONADA") + " (Bash formata como ext4)",
-                  "3. EFI: " + (roles["esp"] or "nenhuma") + " (preservar; montar em /boot/efi)",
+                  "3. " + (("EFI: " + (roles["esp"] or "NÃO SELECIONADA") + " (preservar; montar em /boot/efi)") if canonical["boot_mode"] == "UEFI" else "BIOS: nenhuma partição EFI; GRUB no MBR do disco"),
                   "4. /home: " + (roles["home"] if st["home_layout"] == "separate" and roles["home"] else "diretório dentro de /"),
-                  "5. Aplicar stacks e identidade somente após confirmação de instalação futura"]
+                  "5. Limpar configs ocultas de TODOS os usuários da /home: " + ("SIM, exigir LIMPAR" if st["cleanup_home"] else "NÃO"),
+                  "6. Preservar os demais arquivos visíveis e instalar o sistema"]
     else:
         lines += ["1. O modo Bash correspondente seria: manual",
-                  "2. Prepare partições no GParted ANTES, selecione raiz e EFI FAT32",
-                  "3. No piloto VM, o Bash formatará e montará apenas a raiz /; ESP e /home serão PRESERVADAS",
-                  "4. Partições serão montadas em /mnt, /mnt/boot/efi e /mnt/home conforme a escolha"]
+                  "2. Crie as partições no GParted: UEFI exige GPT+EFI, BIOS manual exige MBR sem EFI",
+                  "3. Raiz /: formatada ext4. " + (("EFI: formatada FAT32" if fmts["esp"] else "EFI: preservada FAT32") if canonical["boot_mode"] == "UEFI" else "BIOS: SEM EFI"),
+                  "4. /home separada: " + ("formatada ext4" if fmts["home"] else "preservada ext4") if roles["home"] else "4. /home ficará dentro da raiz /",
+                  "5. O backend ajusta automaticamente o tipo GPT da partição EFI escolhida"]
     lines += ["", "INTEGRIDADE DO PLANO: OK (comparado a lsblk atual)"]
     if issues:
         lines += ["ESTADO: INCOMPLETO / AINDA NÃO SUPORTADO", *["BLOQUEIO: " + m for m in issues]]
     else:
-        lines += ["ESTADO: COMPATÍVEL COM O PLANEJADOR BASH CONHECIDO (execução não habilitada)"]
-    lines += ["", "Esta simulação não inicia a rotina main do instalador."]
+        lines += ["ESTADO: PLANO COERENTE; executor VM separado exige revalidação e confirmação"]
+    lines += ["", "Esta simulação não inicia a rotina main do instalador. O executor VM separado exige confirmação."]
     return "\n".join(lines)
 
 

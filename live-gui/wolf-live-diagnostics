@@ -4,6 +4,8 @@ printf '%s\n' '====== Wolf Linux Live - diagnóstico ======'
 cat /etc/wolf-linux-live-build || true
 printf '\nFirmware: '
 [[ -d /sys/firmware/efi ]] && echo UEFI || echo BIOS
+printf '\nHora do sistema e sincronização NTP:\n'
+timedatectl status || true
 printf '\nRede:\n'
 ip -br a || true
 printf '\nDiscos (somente leitura):\n'

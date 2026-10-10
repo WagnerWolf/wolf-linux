@@ -1,3 +1,21 @@
+## Atualização alpha33
+
+Contrato operacional atual: `wolf.install.preview.v4` (somente planejamento). `storage.erase_sizes={"root_gib":N,"home_gib":N}` valida tamanhos em GiB e é aceito apenas para `mode=erase`. Exportação experimental para Bash: 19 campos, incluindo modo de `/home` no campo 13 (`separate` ou vazio), tamanhos de raiz e /home nos campos 18 e 19 (índices 17 e 18). `execution=disabled` permanece obrigatório; execução por comando separado e confirmação. Valores são revalidados pelo Bash antes de formatar. Em UEFI cria ESP 1 GiB; em BIOS/MBR nenhuma EFI. Discos físicos e LVM continuam bloqueados.
+
+# Alpha31 — contrato de planejamento v3 e reutilização UEFI VM
+
+- `wolf.install.preview.v3`, `execution=disabled`. O JSON não concede permissão para executar instalação.
+- `storage.cleanup_home` booleano, por padrão `false`; permitido somente no modo `reuse`, com partição `/home` dedicada **preservada**.
+- Execução `--execute-gui-plan-vm` revalida inventário de partições e aplica somente em VM QEMU/KVM com disco VirtIO, UEFI, GPT, raiz >=20 GiB, EFI FAT32 >=512MiB e home ext4.
+- Em `reuse`, o backend **formata apenas a raiz ext4**. EFI e `/home` são montadas, sem `mkfs`; GRUB atualiza o caminho `EFI/WolfLinux`, sem instalar fallback removível neste modo.
+- Limpeza opt-in: antes de qualquer `mkfs`, monta /home em leitura somente, lista as entradas ocultas imediatamente dentro de cada usuário existente, exige `LIMPAR`, guarda a lista, depois compara a lista após a montagem real e só remove os caminhos aprovados. Arquivos visíveis são preservados. **Entradas ocultas podem incluir chaves SSH e cofres de senhas**.
+- No modo `manual`, formatações de EFI e /home continuam independentes, mas a limpeza opt-in da home preservada é exclusivamente do modo reuse.
+- No modo `erase`, disco inteiro será apagado mediante confirmação.
+- Reutilização com `/home` dentro de `/` NÃO preserva arquivos pessoais, pois a raiz é formatada; o piloto reuse **exige `/home` dedicada**.
+- A execução em hardware real continua BLOQUEADA. Faça backup da imagem qcow2 original antes do teste.
+
+---
+
 # Alpha24 — Contrato de preview v2 e simulação segura
 
 **NÃO executável.** Os comandos `wolf-install --review-gui-plan` e `wolf-install --simulate-gui-plan` encerram antes da rotina principal. Nunca são equivalentes a `--install` ou `--vm-install`.

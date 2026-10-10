@@ -62,7 +62,7 @@ assert 'self.accept_button.setEnabled(False)' in source
 assert 'self.confirm_text.textChanged.connect(' in source
 assert 'value == expected' in source
 assert 'VmEraseConsentDialog(self, disk).exec() != QDialog.DialogCode.Accepted' in source
-assert 'wolf-live-execute-vm-plan' in source
+assert 'InstallerPty' in source and 'self.console_tab_index' in source
 
 # Verificação real não destrutiva de wipefs sobre arquivo temporário vazio.
 with tempfile.TemporaryDirectory() as folder:

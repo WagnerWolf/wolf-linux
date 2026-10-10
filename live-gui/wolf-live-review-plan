@@ -6,7 +6,17 @@ if (( $# != 1 )); then
     exit 2
 fi
 status=0
-sudo wolf-install --review-gui-plan "$1" || status=$?
+schema="$(/usr/bin/python3 - "$1" <<'PY_SCHEMA'
+import json,sys
+with open(sys.argv[1], encoding='utf-8') as f:
+    print(json.load(f).get('schema',''))
+PY_SCHEMA
+)" || schema="invalid"
+if [[ "$schema" == "wolf.install.multidisk.preview.v1" ]]; then
+    sudo wolf-install --review-multidisk-plan "$1" || status=$?
+else
+    sudo wolf-install --review-gui-plan "$1" || status=$?
+fi
 printf '\n'
 read -r -p "Revisão finalizada (código $status). Pressione Enter para fechar... " _ || true
 exit "$status"

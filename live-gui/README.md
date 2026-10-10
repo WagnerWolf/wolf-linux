@@ -1,3 +1,16 @@
+# Wolf Live GUI 1.0 (alpha30) — Manual UEFI e Minimal sem AUR
+
+- Na VM QEMU/KVM UEFI, selecione as partições no GParted e atribua os papéis na GUI.
+- **Raiz `/`:** obrigatória, formatada em ext4. Tamanho mínimo do piloto: 20 GiB.
+- **EFI `/boot/efi`:** obrigatória, mínimo 512 MiB. Marque `Formatar EFI` para criar FAT32 novo ou desmarque para preservar FAT32 existente. O backend aplica o **tipo GPT ESP** à partição indicada, sem precisar marcar flags no GParted.
+- **`/home` dedicada:** opcional. Marque `Formatar /home` para ext4 novo; desmarque para preservar ext4 existente. Sem partição dedicada, `/home` fica dentro da raiz formatada.
+- Marcar formatação de EFI ou `/home` com filesystem existente provoca aviso de perda de dados e recomendação de reutilização; a escolha explícita manual permanece possível.
+- **Minimal:** sem stacks opcionais, pula completamente as etapas de instalação Chaotic-AUR e resolução AUR. Outros presets mantêm Arch > Chaotic > AUR.
+- **Recuperação de tentativa falha:** botão na guia inicial e diálogo ao detectar volumes montados. O assistente mostra os volumes sob `/mnt`, exige `DESMONTAR` e usa apenas `umount` normal (sem `-f` ou `-l`). Recusa montagens fora da lista e de outro disco; limpa checkpoints somente após confirmação, preserva logs.
+- **Limites:** exclusivamente VM VirtIO UEFI; partições de um único disco GPT; reutilização de partições para instalação ainda bloqueada. Use uma VM descartável. Não validado nesta revisão com instalação real no QEMU.
+
+---
+
 # Wolf Live GUI 0.9 (alpha29) — instalação manual VM UEFI
 
 Nova opção **Avançado/manual** em VM: crie GPT + ESP FAT32 (flag `esp`), raiz ext4 e `/home` ext4 opcional com o GParted. Depois atribua essas funções na GUI. A raiz `/` será formatada; ESP e `/home` separada serão PRESERVADAS. O instalador usa o backend Bash existente para montagem/instalação, com confirmação `APAGAR`. O modo **Apagar disco inteiro** aceita partições já existentes; ele cria `/home` dentro de `/`. O modo **Reutilizar** NÃO executa instalações nesta revisão.
@@ -93,3 +106,34 @@ permissão de escrita. A execução é uma ação adicional, intencional e inter
 - Validar inicialmente com VM recém-criada e disco virtual de uso descartável.
 - Os comandos tradicionais `wolf-install --vm-install` e `--install` continuam
   disponíveis de modo independente. Não os utilizar no piloto GUI.
+
+## Alpha32: integração BIOS e console de instalação
+
+- **Instalação em VM**: apagar disco inteiro em UEFI/GPT ou BIOS/MBR; manual e reutilização em UEFI/GPT ou BIOS/MBR.
+- BIOS/MBR dispensa completamente a ESP e instala GRUB i386-pc no disco VirtIO. BIOS/GPT com `bios_grub` ainda NÃO é suportado no manual/reutilizar.
+- **Aba Instalação**: pseudoterminal (PTY), com interações no próprio Wolf Installer; saída contínua, entradas e senhas (entrada oculta por padrão), arquivo de log 0600. Sucesso mostrado exclusivamente quando Bash retorna código 0. Falhas deixam saída e logs disponíveis. Não é emulador xterm completo: sequências ANSI são filtradas.
+- **Diagnóstico da topologia**: `wolf-live-storage-topology` lista SSDs, partições e LVM em modo leitura. Não ativa VGs, não monta nem altera dados.
+- Hardware físico e casos multidisco (EFI num SSD, `/` em outro, `/home` em LV) **não são suportados para execução GUI**. Estão registrados como requisito futuro de segurança.
+
+
+## Alpha36: arquivos via PCManFM-Qt, diagnóstico de horário
+
+- Removido Wolf Mount Manager do menu e da ISO. Partições são exibidas em **Dispositivos** no PCManFM-Qt. O usuário `wolf` usa GVfs/UDisks2 e Polkit para montar **por clique**, sem executar a GUI como root.
+- Montagens podem permitir leitura e escrita se o filesystem estiver íntegro e permitir acesso. Não há automontagem. Para arquivos críticos (EFI, Windows, LVM multidisco) prefira copiar antes de editar; partições do Ventoy e volumes em uso não devem ser remontados/alterados.
+- A autorização da Live cobre apenas montagem de arquivos (UDisk2 `filesystem-mount` e `filesystem-mount-system`) por usuário `wolf` com sessão local ativa; não autoriza partição/formatação.
+- Firefox mantido. `systemd-timesyncd` ativo na Live e atalho **Conferir hora / NTP**. Código de verificação TOTP requer hora sincronizada; mudar timezone não corrige desvio do relógio. Suporte a passkeys de celular no Firefox Linux não é garantido por Bluetooth.
+- A instalação em hardware físico, LVM multidisco e o Wolf Rescue continuam **não implementados/não liberados**.
+
+## Alpha37 — Chromium, Bluetooth e Wolf Rescue (somente leitura)
+- Chromium no lugar do Firefox **somente na ISO Live**; iniciar como usuário normal, sandbox mantido. O suporte efetivo a passkeys híbridas deve ser testado no hardware e não é garantido por Bluetooth.
+- BlueZ, blueman-applet/manager, rfkill e bluetooth.service na Live; sem inclusão em stacks KDE.
+- Wolf Rescue 0.1: relatório apenas diagnóstico de EFI/BIOS, discos, LVM, entradas UEFI, mountpoints e serviços. **Não executa chroot, fsck, mkfs, grub-install, mount nem reparação**.
+- A execução de instalação gráfica continua **exclusiva de VM**, especialmente porque o LV vg_monstro/lv_projetos depende de PVs em dois NVMe. Atribuir /home exige verificar fstab, não inferir pelo nome do LV.
+
+## Alpha38 — refinamento visual e mapa de armazenamento
+
+- Wolf Rescue 0.2 usa tema Qt Fusion escuro com contraste e duas abas: relatório e mapa de volumes.
+- Escolha um arquivo `etc/fstab` já acessível no PCManFM-Qt; os UUIDs são verificados contra o inventário atual via `lsblk -J`.
+- Os PVs de um mesmo LV em discos diferentes são agregados e os riscos do multidisco são sinalizados.
+- O Wolf Installer GUI 1.8 ajusta-se à resolução disponível, sem barra horizontal nas páginas.
+- O mapa, o diagnóstico e o instalador não liberam a instalação física nem escrevem em partições.

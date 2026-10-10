@@ -1,3 +1,72 @@
+## Wolf Linux DevKit 2.0.0-alpha47 — instalação física multidisco protegida
+
+Nesta revisão o executor **real em hardware** foi liberado **somente para o contrato
+UEFI com raiz ext4 num NVMe, EFI FAT32 noutro NVMe, e /home ext4 em um LV LVM
+com dois PVs**. A descoberta semiautomática usa UUID, PARTUUID, tipo GPT,
+identidades e conteúdo atual do `fstab`. Os nomes `/dev/nvmeXnY` podem mudar.
+
+A execução em **hardware real apaga a raiz**. EFI, /home LVM, PVs e demais
+partições são preservados pelo plano; o GRUB escreve em `EFI/WolfLinux`, com
+`--no-nvram` e sem instalar o fallback EFI. Não há garantia de boot antes de
+um teste físico real. O modo não exige backup geral, mas recomenda um e exige
+reconhecimento explícito da perda de todos os arquivos locais na raiz.
+
+**Não utilizar o `--install` genérico nesse cenário**. Na Live alpha47, abra
+Wolf Installer > Reutilizar > Detectar todos os discos > confirmar cada papel >
+Revisão, execute validar/simular/ensaio e em seguida o botão de instalação
+física protegida. O GUI pede a raiz exata; o Bash solicita duas confirmações.
+
+Pré-teste CLI de leitura (sem escrever):
+
+```bash
+sudo wolf-install --preflight-multidisk-physical \
+  /home/wolf/.local/state/wolf-linux/live-installer/preview.json
+```
+
+Executar instalação somente por decisão explícita do operador, após validar
+volume de destino e conexão à internet. O `--execute-multidisk-physical` é
+restrito ao perfil da Live e não aceita opções que alterem o plano.
+O perfil Minimal é recomendado para a primeira instalação física, seguido das
+stacks opcionais após o boot. Nunca executar `fsck` automaticamente nos PVs ou
+volumes preservados.
+
+---
+
+> **alpha46:** ensaio físico integral somente leitura (`--rehearse-multidisk-physical`); executor físico continua bloqueado. Veja `docs/WOLF-ALPHA46-ENSAIO-FISICO.md`.
+
+## Alpha34 — Dimensionamento seguro do particionamento automático (experimental VM)
+
+- Em **Apagar TODO o disco**, selecione tamanhos de `/` e `/home` com barra e campo numérico sincronizados. O limite de cada campo vem da **capacidade real detectada do disco** pelo `lsblk`; ao trocar disco, firmware BIOS/UEFI ou modo de `/home`, os limites são recalculados.
+- Em UEFI, reserva-se automaticamente 1 GiB para ESP FAT32; em BIOS/MBR não há ESP. A interface também reserva 1 GiB de folga técnica/alinhamento. `/home` separada exige raiz de pelo menos 20 GiB e `/home` de pelo menos 10 GiB.
+- **0 = restante do disco**; no modo `/home` separada a raiz tem mínimo 20 GiB (portanto não aparece a descrição ambígua "restante"). Se os dois tamanhos forem fixos, pode sobrar espaço não particionado.
+- A verificação do contrato JSON e o preflight independente Bash continuam obrigatórios: os controles gráficos não substituem a validação ao executar.
+- **Primeira rodada em hardware físico: apenas boot da Live, diagnóstico e planejamento/simulação de leitura.** A execução pela GUI permanece **bloqueada** para `/dev/sdX`, `/dev/nvmeXnY`, LVM e topologia multidisco. Não usar o instalador Bash legado no armazenamento com dados apenas para contornar a restrição.
+- EFI em um SSD, `/` em outro e `/home` em LVM ainda exigem implementação/homologação específica; os dispositivos podem ser identificados sem escrita pela ferramenta `wolf-live-storage-topology`.
+
+## Alpha33 — Auto-particionamento configurável e BIOS reuse (experimental VM)
+
+- Modo **Apagar disco**: `/home` integrada ou partição ext4 dedicada; raiz `/` em GiB (0 = restante); partição `/home` em GiB (0 = restante). **Escolher os dois tamanhos fixos pode deixar espaço não alocado**.
+- UEFI: ESP FAT32 de **1 GiB fixo**. BIOS/MBR: **sem EFI**, aviso explícito em vermelho no instalador.
+- Reutilização BIOS/MBR: elimina validação Bash residual que exigia UEFI; continua exigindo `/home` dedicada preservada, raiz formatada e ausência de EFI.
+- Contrato JSON `wolf.install.preview.v4`, 19 campos exportados, com revalidação de layout e tamanhos antes de escrever no disco.
+- **Somente execução em VM VirtIO**. Teste real de instalação alpha33 ainda pendente. Não habilita SSDs físicos, LVM ou UEFI/raiz em discos diferentes.
+
+## alpha32 — BIOS/Legacy em VM, console integrado e diagnóstico multidisco/LVM
+
+A Live GUI 1.2 implementa uma aba **Instalação** que utiliza um PTY para exibir a saída do Bash sem abrir outro terminal, solicitar entradas e senhas e informar sucesso somente com código de saída zero. O log fica em `~/.local/state/wolf-linux/live-installer/` com permissões privadas.
+
+Em VM QEMU/KVM VirtIO, a GUI aceita **BIOS/MBR sem EFI** para apagar disco, particionamento manual e reutilização com `/home` dedicada. BIOS/GPT com `bios_grub` continua bloqueado no manual/reutilizar; UEFI/GPT e os caminhos aprovados da alpha31 permanecem. O diagnóstico `wolf-live-storage-topology` identifica múltiplos discos e LVM sem qualquer alteração.
+
+**NÃO é versão liberada para hardware físico.** O caso EFI em um SSD + raiz em outro + `/home` dentro de LVM exige contrato próprio com escolha independente de discos, PV/VG/LV, detecção e validação antes de qualquer operação destrutiva. Ver [CHANGELOG-alpha32.md](CHANGELOG-alpha32.md).
+
+## alpha31 — piloto de reutilização de EFI e /home em VM UEFI
+
+A GUI 1.1 permite reinstalar o sistema **formatando exclusivamente a raiz /**, preservando as partições EFI (FAT32) e `/home` (ext4, dedicada). Opcionalmente permite remover arquivos e pastas ocultos diretamente em cada diretório de usuário da home, mostrando uma prévia e exigindo `LIMPAR` antes da formatação. Arquivos ocultos podem conter credenciais e dados importantes. Faça backup.
+
+**Use uma CÓPIA da VM alpha30 desligada.** O sistema deve ter `/home` em partição separada para preservá-la. Reutilização de `/home` integrada à raiz é proibida neste piloto. Somente QEMU/KVM + VirtIO + UEFI; instalação em hardware físico continua bloqueada.
+
+Detalhes: [CHANGELOG-alpha31.md](CHANGELOG-alpha31.md) e [docs/WOLF-GUI-PLAN-CONTRACT.md](docs/WOLF-GUI-PLAN-CONTRACT.md).
+
 ## alpha29 — piloto de particionamento manual em VM UEFI
 
 - **Instalação manual gráfica experimental:** após preparar as partições no GParted, escolha raiz `/` (formatada em ext4), EFI FAT32 com flag GPT `esp` (preservada), e `/home` opcional (preservada). Somente em VM QEMU/KVM com disco VirtIO e boot UEFI. Não usar em hardware real.
@@ -329,3 +398,91 @@ A aba de revisão pode iniciar o backend Bash com `--execute-gui-plan-vm`
 somente após validação. Apenas disco VirtIO vazio, modo apagar disco, /home
 na raiz, VM QEMU/KVM. Confirmação digitada no terminal antes de apagar.
 Não usar com instalações/discos existentes; outros modos da GUI ainda simulam.
+
+
+## Alpha35 — Live com Firefox e Wolf Mount Manager
+
+A ISO Openbox passa a incluir Firefox (pt-BR) e uma ferramenta própria para **montar partições em leitura apenas** e abri-las no PCManFM-Qt. Ambas estão no menu e nos atalhos da primeira aba do instalador; não entram no sistema KDE instalado.
+
+Os volumes ext2/3/4, NTFS, exFAT, FAT32, XFS e Btrfs podem ser selecionados. Volumes lógicos LVM **já ativos** e com sistema de arquivos são listados; os volumes físicos `LVM2_member` não são montados diretamente. O botão Mount utiliza um backend privilegiado somente na Live, sem usar `fsck` ou `vgchange`. `ext4` usa `ro,noload` e XFS usa `ro,norecovery` para evitar replay de journal. Não há auto-mount e a desmontagem nunca é forçada.
+
+A ferramenta Wolf Storage Topology passa a consultar PVs, VGs e LVs com permissões apropriadas, apenas para diagnóstico. **Não tente instalar a GUI no hardware com EFI/raiz em SSDs separados ou /home em LVM**: a execução segue bloqueada nesses cenários.
+
+
+## Alpha36 — Dispositivos no PCManFM-Qt e sincronização de hora
+
+A Live utiliza GVfs/UDisks2 para montar dispositivos por clique no PCManFM-Qt **sem executar o explorador como root**. Descontinuado o Wolf Mount Manager de somente leitura. Montagens poderão oferecer escrita conforme filesystem/política, sob responsabilidade do operador, sem automontagem. O Firefox permanece na Live, que habilita systemd-timesyncd e oferece diagnóstico de data/hora/NTP para problemas de verificação em duas etapas. O instalador físico e cenários LVM multidisco continuam bloqueados.
+
+**Nota de segurança:** o PCManFM-Qt deve executar como usuário normal da Live; montagens UDisks2 podem permitir escrita. Não editar volumes de Windows hibernado, sistema instalado ativo ou partições de boot sem backup.
+
+
+## Alpha37 — Navegador Chromium, Bluetooth e Wolf Rescue 0.1
+
+Substitui Firefox por Chromium **somente na Live**, com BlueZ + Blueman
+para gerenciar Bluetooth em Openbox. O PCManFM-Qt mantém montagem de volumes
+via UDisks2. O novo Wolf Rescue é diagnóstico read-only (EFI/BIOS, discos,
+LVM e entradas UEFI), sem comandos de reparação automática. A instalação GUI
+permanece exclusiva de VM nesta versão. Instalar em dois NVMe com EFI em um,
+raiz em outro e LV multi-PV exige planejamento e homologação específica.
+
+## Alpha38 — Wolf Rescue 0.2 e interface responsiva
+
+- Wolf Rescue com visual escuro consistente e mapa de volumes por UUID (`fstab` + `lsblk`), inclusive EFI em disco diferente da raiz e LVM com PVs em múltiplos SSDs.
+- Wolf Installer GUI 1.8 ajusta largura da janela, botões e abas para evitar rolagem horizontal.
+- **Importante:** `Wolf Rescue` continua somente leitura. O instalador gráfico em hardware físico continua BLOQUEADO. O mapa é diagnóstico, não um plano de instalação autorizado.
+
+Leia `CHANGELOG-alpha38.md` e `docs/WOLF-HARDWARE-PREFLIGHT.md` antes de testar a Live em hardware real.
+
+## Alpha39 — Detecção multidisco e LVM para planejamento
+
+Na Live, **Partições → Reutilizar → Detectar instalações em TODOS os discos** procura instalações existentes, cruza os UUIDs do `fstab` com o inventário atual e sugere raiz `/`, EFI e `/home` mesmo em SSDs distintos e LVM com múltiplos PVs. As sugestões podem ser corrigidas com confirmação. **Revisão e simulação são somente de leitura; hardware físico continua bloqueado para instalação.** Ver `docs/WOLF-MULTIDISK-REUSE-PREVIEW.md` e `CHANGELOG-alpha39.md`.
+
+
+### alpha40 — Correção do encaminhamento multidisco na Live
+
+Na alpha39 o wrapper `wolf-install` não reconhecia duas opções de revisão multidisco. Na alpha40, os comandos `--review-multidisk-plan` e `--simulate-multidisk-plan` são encaminhados ao Bash **sem** adicionar `--install`, e os modos permanecem estritamente não destrutivos. Consulte `CHANGELOG-alpha40.md`.
+
+### alpha41 — Laboratório UEFI com dois discos e LVM
+
+Foi adicionado um laboratório exclusivo de VM QEMU/KVM com discos qcow2
+independentes (64 GiB e 96 GiB), para testar **EFI em um disco, raiz no outro,
+e `/home` no LV distribuído por dois PVs**. Instruções completas em
+`docs/WOLF-ALPHA41-MULTIDISK-LAB.md`.
+
+```bash
+./tests/wolf-vm-multidisk.sh create
+./tests/wolf-vm-multidisk.sh live
+# Já dentro da ISO Live no QEMU:
+sudo wolf-lab41-particionar --check
+sudo wolf-lab41-particionar --apply
+```
+
+O executor multidisco destrutivo **ainda não está habilitado**. O propósito da
+alpha41 é estabelecer e validar a base de testes controlados antes desse passo.
+
+
+## Alpha43 — transição controlada para hardware físico
+
+O fluxo multidisco/LVM foi validado na VM alpha42. Na alpha43, a reinstalação com `/home` preservada verifica o UID histórico e realiza prova de escrita; conflitos são bloqueados. A Live inclui `wolf-physical-preflight` para inventário somente leitura. A execução física destrutiva permanece bloqueada. Veja `CHANGELOG-alpha43.md`.
+
+
+### Correção alpha44 (testes como usuário comum)
+
+A alpha44 corrige o teste `tests/wolf-test-alpha43.py` para não presumir que um diretório temporário pertence a root. O motor de instalação da alpha43 permanece inalterado, exceto pelo número de versão. Veja `CHANGELOG-alpha44.md`.
+
+
+### Alpha45 — detecção segura de recuperação pendente no ext4
+
+O scanner multidisco consulta `tune2fs -l` **sem escrita** em raízes ext4
+ainda não montadas. Ao encontrar `needs_recovery` ou `orphan_present`,
+identifica a partição e explica o bloqueio na aba Partições, em vez de
+mostrar apenas “0 instalações”. Não recupera journal, não executa fsck
+automaticamente e não habilita a instalação física. Falhas de montagem
+`ro,noload` também são mostradas, preservando as verificações de UUID
+e `fstab`.
+
+Para o piloto físico, primeiro rode `wolf-physical-preflight` e
+`sudo python3 /usr/local/share/wolf-linux-live/gui/wolf_discovery.py scan`
+na Live; a verificação de disco descartável ainda é necessária antes de
+qualquer execução real em NVMe com Windows/LVM.
+Veja `CHANGELOG-alpha45.md`.

@@ -7,18 +7,61 @@ fi
 
 set -Eeuo pipefail
 
-WOLF_VERSION="2.0.0-alpha29"
+WOLF_VERSION="2.0.0-alpha47"
 DRY_RUN=0
 PLAN_ONLY=0
 RESET_STATE=0
 VM_INSTALL=0
 REAL_INSTALL=0
 GUI_VM_PLAN=""
+GUI_LAB42_PLAN=""
+GUI_PHYSICAL_PLAN=""
+PHYSICAL_ROOT_UUID=""
+PHYSICAL_ESP_UUID=""
+PHYSICAL_HOME_UUID=""
+LAB42_ROOT_UUID=""
+LAB42_ESP_UUID=""
+LAB42_HOME_UUID=""
 GUI_VM_DISK=""
 GUI_VM_MAJMIN=""
 GUI_VM_MODE=""
+GUI_ERASE_ROOT_GIB=0
+GUI_ERASE_HOME_GIB=0
+GUI_ERASE_SEPARATE=no
+HOME_CLEAN_CONFIRMED="no"
+HOME_CLEAN_LIST_FILE=""
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd || true)"
+
+# Revisão multidisco continua EXCLUSIVAMENTE leitura. O executor físico
+# usa entrada própria, verifica novamente o JSON read-only e exige consentimento.
+if [[ "${1:-}" == "--review-multidisk-plan" || "${1:-}" == "--simulate-multidisk-plan" ]]; then
+    if (( $# != 2 )); then
+        echo '[ERRO] Informe o JSON de planejamento multidisco.' >&2
+        exit 2
+    fi
+    action=review
+    [[ "$1" == "--simulate-multidisk-plan" ]] && action=simulate
+    exec /usr/bin/python3 "$PROJECT_DIR/live-gui/wolf_discovery.py" "$action" "$2"
+fi
+
+# Ensaio físico independente: APENAS inventário e relatório de etapas.
+# Não chega a main(), checkpoints, pacstrap ou qualquer operação destrutiva.
+if [[ "${1:-}" == "--rehearse-multidisk-physical" ]]; then
+    (( $# == 2 )) || { echo '[ERRO] Informe o JSON multidisco para o ensaio físico.' >&2; exit 2; }
+    exec /usr/bin/python3 "$PROJECT_DIR/live-gui/wolf_physical_rehearsal.py" "$2"
+fi
+
+# Preflight do laboratório QEMU multidisco: somente inspeção, sem escrita.
+if [[ "${1:-}" == "--preflight-multidisk-physical" ]]; then
+    (( $# == 2 )) || { echo "[ERRO] Informe o JSON para preflight físico." >&2; exit 2; }
+    exec /usr/bin/python3 "$PROJECT_DIR/live-gui/wolf_physical_executor.py" check "$2"
+fi
+
+if [[ "${1:-}" == "--preflight-multidisk-lab-vm" ]]; then
+    (( $# == 2 )) || { echo '[ERRO] Informe o JSON Lab42.' >&2; exit 2; }
+    exec /usr/bin/python3 "$PROJECT_DIR/live-gui/wolf_lab42.py" check "$2"
+fi
 
 # Entrada exclusivamente de leitura, ANTES do estado, rede, partições e main.
 # Não transforma o documento da GUI em argumentos de instalação.
@@ -111,8 +154,15 @@ Modos de instalação:
   --plan-only           Gera o plano e encerra.
   --review-gui-plan F   Revisa o JSON experimental da GUI (leitura APENAS).
   --simulate-gui-plan F Simula etapas compatíveis com o Bash (SEM executar).
+  --review-multidisk-plan F  Revalida plano multidisco/LVM (SOMENTE leitura).
+  --simulate-multidisk-plan F Revalida e simula plano multidisco (SEM executar).
+  --rehearse-multidisk-physical F  Ensaio físico integral: roteiro, NENHUMA escrita.
   --preflight-gui-plan-vm F Valida instalação em VM (somente leitura).
-  --execute-gui-plan-vm F  Instala em disco VirtIO de VM; erase ou manual UEFI.
+  --execute-gui-plan-vm F  Instala em disco VirtIO de VM; erase/manual/reuse UEFI.
+  --preflight-multidisk-lab-vm F  Confere laboratório 2 VirtIO sem escrita.
+  --execute-multidisk-lab-vm F   Reinstala laboratório alpha41 (APENAS VM QEMU).
+  --preflight-multidisk-physical F  Pré-teste de segurança da instalação física.
+  --execute-multidisk-physical F   Instala SOMENTE na topologia física validada.
   --vm-install          Instalação real apenas em QEMU/KVM/VirtualBox.
   --install             Instalação real em hardware físico.
   --reset-state         Limpa checkpoints temporários.
@@ -152,6 +202,18 @@ while (($#)); do
             GUI_VM_PLAN="$1"
             VM_INSTALL=1
             ;;
+        --execute-multidisk-lab-vm)
+            shift
+            [[ $# -gt 0 && -z "$GUI_LAB42_PLAN" ]] || { echo '[ERRO] Plano do laboratório ausente ou duplicado.' >&2; exit 2; }
+            GUI_LAB42_PLAN="$1"
+            VM_INSTALL=1
+            ;;
+        --execute-multidisk-physical)
+            shift
+            [[ $# -gt 0 && -z "$GUI_PHYSICAL_PLAN" ]] || { echo "[ERRO] Plano físico ausente/duplicado." >&2; exit 2; }
+            GUI_PHYSICAL_PLAN="$1"
+            REAL_INSTALL=1
+            ;;
         --install) REAL_INSTALL=1 ;;
         --reset-state) RESET_STATE=1 ;;
         --preset)
@@ -173,6 +235,22 @@ while (($#)); do
     esac
     shift
 done
+
+if [[ -n "$GUI_PHYSICAL_PLAN" ]]; then
+    [[ -z "$GUI_VM_PLAN" && -z "$GUI_LAB42_PLAN" && "$VM_INSTALL" == 0 && "$REAL_INSTALL" == 1 &&
+       "$DRY_RUN" == 0 && "$PLAN_ONLY" == 0 && "$RESET_STATE" == 0 &&
+       -z "$STACK_PRESET" && -z "$STACKS_ARG" && "$LIST_STACKS" == 0 ]] || {
+        echo "[ERRO] Executor físico não aceita opções conflitantes/override." >&2; exit 2;
+    }
+fi
+
+if [[ -n "$GUI_LAB42_PLAN" ]]; then
+    [[ -z "$GUI_VM_PLAN" && "$VM_INSTALL" == 1 && "$REAL_INSTALL" == 0 &&
+       "$DRY_RUN" == 0 && "$PLAN_ONLY" == 0 && "$RESET_STATE" == 0 &&
+       -z "$STACK_PRESET" && -z "$STACKS_ARG" && "$LIST_STACKS" == 0 ]] || {
+        echo '[ERRO] Laboratório não aceita opções conflitantes ou override.' >&2; exit 2;
+    }
+fi
 
 if [[ -n "$GUI_VM_PLAN" ]]; then
     # Não permitir misturar opções interativas/override com um plano validado.
@@ -197,7 +275,7 @@ EOF
     exit 0
 fi
 
-if [[ -n "$GUI_VM_PLAN" ]]; then
+if [[ -n "$GUI_VM_PLAN" || -n "$GUI_LAB42_PLAN" || -n "$GUI_PHYSICAL_PLAN" ]]; then
     if mountpoint -q /mnt 2>/dev/null || [[ -s "$CHECKPOINT_FILE" ]]; then
         echo '[ERRO] Há /mnt montado ou checkpoints de outra instalação. Recusado; use VM descartável nova.' >&2
         exit 2
@@ -580,8 +658,8 @@ check_network() {
 
     warn "Não foi detectada conectividade IP."
 
-    if [[ -n "$GUI_VM_PLAN" ]]; then
-        die 'Conecte a rede pelo applet gráfico do NetworkManager antes de executar a GUI VM.'
+    if [[ -n "$GUI_VM_PLAN" || -n "$GUI_PHYSICAL_PLAN" ]]; then
+        die 'Conecte a rede pelo NetworkManager antes de iniciar uma instalação controlada.'
     fi
     if (( DRY_RUN == 1 )); then
         warn "No dry-run a configuração Wi-Fi não será iniciada."
@@ -1207,21 +1285,27 @@ show_plan() {
         reuse-auto|reuse-manual)
             echo
             echo "SERÁ FORMATADO:"
-            printf '  /           %s\n' "$ROOT_DEVICE"
-
+            printf '  /          %s  [EXT4 — APAGA DADOS]\n' "$ROOT_DEVICE"
+            if [[ -n "$ESP_DEVICE" && "$FORMAT_ESP" == "yes" ]]; then
+                printf '  /boot/efi  %s  [FAT32 — APAGA DADOS]\n' "$ESP_DEVICE"
+            fi
+            if [[ -n "$HOME_DEVICE" && "$FORMAT_HOME" == "yes" ]]; then
+                printf '  /home      %s  [EXT4 — APAGA DADOS]\n' "$HOME_DEVICE"
+            fi
             echo
             echo "SERÁ PRESERVADO:"
-            [[ -n "$ESP_DEVICE" ]] && printf '  /boot/efi   %s\n' "$ESP_DEVICE"
-
-            if [[ -n "$HOME_DEVICE" ]]; then
-                printf '  /home       %s\n' "$HOME_DEVICE"
+            if [[ -n "$ESP_DEVICE" && "$FORMAT_ESP" != "yes" ]]; then
+                printf '  /boot/efi  %s  [PRESERVAR]\n' "$ESP_DEVICE"
+            fi
+            if [[ -n "$HOME_DEVICE" && "$FORMAT_HOME" != "yes" ]]; then
+                printf '  /home      %s  [PRESERVAR]\n' "$HOME_DEVICE"
+            elif [[ -z "$HOME_DEVICE" ]]; then
+                echo '  /home      ficará dentro da raiz FORMATADA (sem partição dedicada)'
+            fi
+            if [[ -n "$HOME_DEVICE" && "$FORMAT_HOME" != "yes" ]]; then
                 if [[ "$CLEAN_HOME_DOTFILES" == "yes" ]]; then
-                    printf '  dotfiles    /home/%s/.*  [REMOVER]\n' "$USERNAME_VALUE"
-                else
-                    printf '  dotfiles    /home/%s/.*  [PRESERVAR]\n' "$USERNAME_VALUE"
+                    printf '  dotfiles   /home/%s/.* [REMOVER]\n' "$USERNAME_VALUE"
                 fi
-            else
-                echo "  /home       dentro da nova raiz"
             fi
             ;;
         erase)
@@ -1231,7 +1315,23 @@ show_plan() {
             echo
             printf 'Nova raiz ..........: %s\n' "$ROOT_DEVICE"
             [[ -n "$ESP_DEVICE" ]] && printf 'Nova ESP ...........: %s\n' "$ESP_DEVICE"
-            echo "Nova /home ........: diretório DENTRO da raiz / (sem partição dedicada)"
+            if [[ -n "$HOME_DEVICE" ]]; then
+                printf 'Nova /home ........: %s [partição ext4 FORMATADA]
+' "$HOME_DEVICE"
+                printf 'Tamanho /home ......: %s
+' "$( (( GUI_ERASE_HOME_GIB > 0 )) && echo "${GUI_ERASE_HOME_GIB} GiB" || echo restante )"
+            else
+                echo "Nova /home ........: diretório DENTRO da raiz / (sem partição dedicada)"
+            fi
+            if [[ -n "$GUI_VM_PLAN" && "$GUI_VM_MODE" == "erase" ]]; then
+                printf 'Tamanho / .........: %s
+' "$( (( GUI_ERASE_ROOT_GIB > 0 )) && echo "${GUI_ERASE_ROOT_GIB} GiB" || echo restante )"
+                if [[ "$BOOT_MODE" == UEFI ]]; then
+                    echo 'ESP ................: 1 GiB (FAT32)'
+                else
+                    echo 'BIOS ...............: sem ESP / EFI; GRUB no MBR'
+                fi
+            fi
             ;;
         manual)
             echo "Particionamento ....: manual"
@@ -1248,10 +1348,38 @@ confirm_installation() {
 
     echo
     echo "ATENÇÃO: a próxima etapa realizará alterações reais nos dispositivos do plano."
-    if [[ -n "$GUI_VM_PLAN" ]]; then
+    if [[ -n "$GUI_PHYSICAL_PLAN" ]]; then
+        echo "FÍSICO MULTIDISCO: EFI e LVM serão preservados. Somente / será formatada."
+    fi
+    if [[ -n "$GUI_PHYSICAL_PLAN" ]]; then
+        echo "INSTALAÇÃO REAL DE HARDWARE, SEM BACKUP GERAL: todos os dados da raiz serão perdidos."
+        echo "FORMATAR: $ROOT_DEVICE (UUID atual $PHYSICAL_ROOT_UUID)"
+        echo "PRESERVAR: EFI $ESP_DEVICE e /home $HOME_DEVICE (incluindo PVs LVM)."
+        read -r -p "Digite ACEITO-PERDA-RAIZ para reconhecer o risco: " answer
+        [[ "$answer" == "ACEITO-PERDA-RAIZ" ]] || die "Risco não confirmado; abortado."
+        read -r -p "Digite FORMATAR $ROOT_DEVICE para confirmar o dispositivo: " answer
+        [[ "$answer" == "FORMATAR $ROOT_DEVICE" ]] || die "Partição raiz não confirmada; abortado."
+    elif [[ -n "$GUI_LAB42_PLAN" ]]; then
+        echo 'LABORATÓRIO ALPHA42 — QEMU, DOIS DISCOS VIRTUAIS WOLF41.'
+        echo 'APAGAR EXCLUSIVAMENTE /dev/vdb1 (raiz ext4).'
+        echo 'PRESERVAR /dev/vda1 (EFI), /dev/vdb2 (NTFS) e /home em LVM de dois PVs.'
+        read -r -p 'Digite FORMATAR /dev/vdb1 para continuar: ' answer
+        [[ "$answer" == 'FORMATAR /dev/vdb1' ]] || die 'Cancelado sem formatação.'
+    elif [[ -n "$GUI_VM_PLAN" ]]; then
         if [[ "$GUI_VM_MODE" == "manual" ]]; then
-            printf 'EXECUÇÃO MANUAL VM: a partição raiz %s será FORMATADA (PERDA TOTAL DE DADOS).\n' "$ROOT_DEVICE"
-            printf 'ESP preservada: %s | HOME preservada: %s\n' "$ESP_DEVICE" "${HOME_DEVICE:-dentro da raiz}"
+            printf 'EXECUÇÃO MANUAL VM: partição raiz %s será FORMATADA (PERDA TOTAL DE DADOS).\n' "$ROOT_DEVICE"
+            printf 'EFI %s: %s\n' "$( [[ "$FORMAT_ESP" == yes ]] && echo FORMATAR || echo PRESERVAR )" "$ESP_DEVICE"
+            if [[ -n "$HOME_DEVICE" ]]; then
+                printf '/home %s: %s\n' "$( [[ "$FORMAT_HOME" == yes ]] && echo FORMATAR || echo PRESERVAR )" "$HOME_DEVICE"
+            else
+                echo '/home: dentro da raiz / (apagada com a formatação da raiz)'
+            fi
+        elif [[ "$GUI_VM_MODE" == "reuse" ]]; then
+            printf 'REUTILIZAR: FORMATAR apenas raiz / = %s (APAGA a instalação anterior).\n' "$ROOT_DEVICE"
+            printf 'PRESERVAR EFI FAT32: %s (sem formatação).\n' "$ESP_DEVICE"
+            printf 'PRESERVAR /home ext4: %s (sem formatação).\n' "$HOME_DEVICE"
+            printf 'Limpeza opcional de configurações ocultas: %s\n' "$CLEAN_HOME_DOTFILES"
+            echo 'Arquivos de boot WolfLinux poderão ser atualizados na EFI, sem formatá-la.'
         else
             printf 'EXECUÇÃO VM: disco %s INTEIRO será APAGADO, inclusive partições existentes.\n' "$INSTALL_DISK"
         fi
@@ -1267,16 +1395,48 @@ confirm_installation() {
 prepare_erase_disk() {
     [[ "$STORAGE_MODE" == "erase" ]] || return 0
 
+    # Valores são revalidados pelo contrato canônico ANTES desta etapa.
+    # Na instalação CLI antiga, mantém o particionamento original (root restante).
+    local root_gib=0 home_gib=0 separated=no root_end_mib home_end_mib
+    if [[ -n "$GUI_VM_PLAN" && "$GUI_VM_MODE" == erase ]]; then
+        root_gib="$GUI_ERASE_ROOT_GIB"
+        home_gib="$GUI_ERASE_HOME_GIB"
+        separated="$GUI_ERASE_SEPARATE"
+    fi
     if [[ "$BOOT_MODE" == "UEFI" ]]; then
         wipefs -a "$INSTALL_DISK"
         sgdisk -Z "$INSTALL_DISK"
         sgdisk -n 1:0:+1G -t 1:ef00 "$INSTALL_DISK"
-        sgdisk -n 2:0:0 -t 2:8300 "$INSTALL_DISK"
+        if (( root_gib > 0 )); then
+            sgdisk -n "2:0:+${root_gib}G" -t 2:8300 "$INSTALL_DISK"
+        else
+            sgdisk -n 2:0:0 -t 2:8300 "$INSTALL_DISK"
+        fi
+        if [[ "$separated" == yes ]]; then
+            if (( home_gib > 0 )); then
+                sgdisk -n "3:0:+${home_gib}G" -t 3:8300 "$INSTALL_DISK"
+            else
+                sgdisk -n 3:0:0 -t 3:8300 "$INSTALL_DISK"
+            fi
+        fi
     else
         wipefs -a "$INSTALL_DISK"
         parted -s "$INSTALL_DISK" mklabel msdos
-        parted -s "$INSTALL_DISK" mkpart primary ext4 1MiB 100%
+        if (( root_gib > 0 )); then
+            root_end_mib=$((1 + root_gib * 1024))
+            parted -s "$INSTALL_DISK" unit MiB mkpart primary ext4 1 "${root_end_mib}"
+        else
+            parted -s "$INSTALL_DISK" mkpart primary ext4 1MiB 100%
+        fi
         parted -s "$INSTALL_DISK" set 1 boot on
+        if [[ "$separated" == yes ]]; then
+            if (( home_gib > 0 )); then
+                home_end_mib=$((root_end_mib + home_gib * 1024))
+                parted -s "$INSTALL_DISK" unit MiB mkpart primary ext4 "${root_end_mib}" "${home_end_mib}"
+            else
+                parted -s "$INSTALL_DISK" unit MiB mkpart primary ext4 "${root_end_mib}" 100%
+            fi
+        fi
     fi
 
     partprobe "$INSTALL_DISK"
@@ -1296,7 +1456,25 @@ format_and_mount() {
         return 0
     fi
 
+        # Na instalação manual, selecionar a EFI dispensa ajustar a flag esp
+        # pelo GParted. O tipo GPT da partição escolhida é marcado como ESP.
+        if [[ "$BOOT_MODE" == "UEFI" && -n "$GUI_VM_PLAN" && "$GUI_VM_MODE" == "manual" ]]; then
+            local partition_number esp_typecode disk_table
+            partition_number="$(lsblk -dnro PARTN "$ESP_DEVICE" | tr -d '[:space:]')"
+            disk_table="$(lsblk -dnro PTTYPE "$INSTALL_DISK" | tr -d '[:space:]')"
+            [[ "$partition_number" =~ ^[0-9]+$ && "$disk_table" == "gpt" ]] || die 'Não foi possível conferir partição EFI/GPT.'
+            esp_typecode="$(lsblk -dnro PARTTYPE "$ESP_DEVICE" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+            if [[ "$esp_typecode" != "c12a7328-f81f-11d2-ba4b-00a0c93ec93b" ]]; then
+                warn "Ajustando tipo GPT da partição $ESP_DEVICE para EFI System (ESP), sem modificar outras partições."
+                sgdisk --typecode="${partition_number}:ef00" "$INSTALL_DISK"
+                partprobe "$INSTALL_DISK"
+                udevadm settle
+            fi
+        fi
+
     if [[ "$FORMAT_ROOT" == "yes" ]]; then
+        # Revalidar no último instante antes de APAGAR a raiz física.
+        revalidate_gui_physical_target
         mkfs.ext4 -F "$ROOT_DEVICE"
     fi
 
@@ -1366,67 +1544,123 @@ format_and_mount() {
 }
 
 
+# Enumera apenas DIRETÓRIOS imediatos de usuários na raiz do filesystem /home.
+# Não segue links e exclui lost+found, .snapshot e nomes não compatíveis com login.
+list_preserved_home_users() {
+    local base="$1" path name
+    while IFS= read -r -d '' path; do
+        name="${path##*/}"
+        [[ "$name" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || continue
+        [[ "$name" != 'lost+found' ]] || continue
+        printf '%s\0' "$path"
+    done < <(find "$base" -mindepth 1 -maxdepth 1 -type d -print0)
+}
+
+# ANTES de formatar /, apresenta os arquivos que serão apagados e exige
+# uma segunda confirmação. Montagem temporária somente leitura, sem journal replay.
+confirm_preserved_home_cleanup() {
+    HOME_CLEAN_CONFIRMED="no"
+    [[ "$CLEAN_HOME_DOTFILES" == "yes" ]] || return 0
+    [[ -n "$HOME_DEVICE" && "$FORMAT_HOME" == "no" && "$STORAGE_MODE" == "reuse-manual" ]] ||
+        die 'Limpeza de home fora do modo reutilizar/preservar foi bloqueada.'
+    [[ -b "$HOME_DEVICE" ]] || die 'Dispositivo /home inexistente.'
+    HOME_CLEAN_LIST_FILE="$STATE_DIR/home-clean-targets.nul"
+    # Diretório root-owned criado na inicialização; arquivo NÃO controlado pela GUI.
+    : > "$HOME_CLEAN_LIST_FILE"
+    chmod 600 "$HOME_CLEAN_LIST_FILE"
+    if ! (set -Eeuo pipefail
+        probe="$(mktemp -d /tmp/wolf-home-preview.XXXXXXXX)"
+        trap 'if mountpoint -q "$probe" 2>/dev/null; then umount "$probe" || true; fi; rmdir "$probe" 2>/dev/null || true' EXIT
+        mount -t ext4 -o ro,noload "$HOME_DEVICE" "$probe"
+        echo
+        echo '============================================================'
+        echo '       PRÉVIA DE LIMPEZA DA /home PRESERVADA'
+        echo '============================================================'
+        echo "Partição: $HOME_DEVICE (NÃO será formatada)"
+        echo 'Serão removidas APENAS entradas ocultas imediatas de cada usuário:'
+        total=0
+        while IFS= read -r -d '' userdir; do
+            echo "Usuário: /home/${userdir##*/}"
+            while IFS= read -r -d '' item; do
+                printf '  REMOVER: %q\n' "${item##*/}"
+                printf '%s\0' "${userdir##*/}/${item##*/}" >> "$HOME_CLEAN_LIST_FILE"
+                total=$((total+1))
+            done < <(find "$userdir" -mindepth 1 -maxdepth 1 -name '.*' -print0)
+        done < <(list_preserved_home_users "$probe")
+        echo "Total de entradas ocultas: $total"
+        echo 'Diretórios/arquivos VISÍVEIS são preservados.'
+        echo 'ATENÇÃO: .ssh, .gnupg, .mozilla, .local e outros dados privados'
+        echo 'também SERÃO APAGADOS se aparecerem acima. Faça backup antes!'
+        echo '============================================================'
+        sort -z "$HOME_CLEAN_LIST_FILE" -o "$HOME_CLEAN_LIST_FILE"
+        printf 'Digite LIMPAR para remover os itens listados (ou Enter para cancelar): '
+        read -r answer
+        [[ "$answer" == 'LIMPAR' ]] || { echo '[AVISO] Limpeza NÃO autorizada; instalação cancelada ANTES de formatar /.'; exit 3; }
+        umount "$probe" || { echo '[ERRO] Não foi possível desmontar o volume de prévia; instalação cancelada.'; exit 4; }
+    ); then
+        die 'Limpeza de /home não autorizada ou falha na prévia: NENHUMA formatação foi iniciada.'
+    fi
+    HOME_CLEAN_CONFIRMED="yes"
+    ok 'Limpeza de arquivos ocultos explicitamente confirmada antes da formatação da raiz.'
+}
+
 clean_preserved_home_dotfiles() {
     [[ "$CLEAN_HOME_DOTFILES" == "yes" ]] || {
-        info "Limpeza de dotfiles não solicitada."
+        info 'Limpeza de dotfiles não solicitada; /home preservada integralmente.'
         return 0
     }
-
-    [[ -n "$HOME_DEVICE" ]] ||
-        die "Limpeza de /home solicitada, mas HOME_DEVICE está vazio."
-
-    findmnt /mnt/home >/dev/null 2>&1 ||
-        die "/mnt/home não está montado; limpeza recusada por segurança."
-
-    local target="/mnt/home/$USERNAME_VALUE"
-    local count=0
-
-    if [[ ! -d "$target" ]]; then
-        info "Home antiga não encontrada em $target; nada para limpar."
+    [[ "$HOME_CLEAN_CONFIRMED" == "yes" ]] || die 'Limpeza de /home sem confirmação LIMPAR foi bloqueada.'
+    [[ "$STORAGE_MODE" == "reuse-manual" && "$FORMAT_HOME" == "no" && -b "$HOME_DEVICE" ]] ||
+        die 'Condições de preservação de /home inválidas; limpeza recusada.'
+    mountpoint -q /mnt/home || die '/mnt/home não está montado; limpeza recusada.'
+    local source expected actual userdir item mp
+    source="$(findmnt -rn -o SOURCE --mountpoint /mnt/home 2>/dev/null || true)"
+    expected="$(readlink -f -- "$HOME_DEVICE")"
+    actual="$(readlink -f -- "$source" 2>/dev/null || true)"
+    [[ -n "$actual" && "$actual" == "$expected" ]] || die 'A fonte montada em /mnt/home não corresponde à partição preservada.'
+    # Não excluir árvores com submontagens; nunca forçar desmontagem/exclusão.
+    [[ -n "$HOME_CLEAN_LIST_FILE" && -f "$HOME_CLEAN_LIST_FILE" && ! -L "$HOME_CLEAN_LIST_FILE" ]] ||
+        die 'Lista da prévia de limpeza não encontrada; abortado.'
+    local current
+    current="$(mktemp "$STATE_DIR/home-clean-current.XXXXXXXX")"
+    chmod 600 "$current"
+    local -a targets=()
+    while IFS= read -r -d '' userdir; do
+        while IFS= read -r -d '' item; do
+            printf '%s\0' "${userdir##*/}/${item##*/}" >> "$current"
+        done < <(find "$userdir" -mindepth 1 -maxdepth 1 -name '.*' -print0)
+    done < <(list_preserved_home_users /mnt/home)
+    sort -z "$current" -o "$current"
+    if ! cmp -s "$current" "$HOME_CLEAN_LIST_FILE"; then
+        rm -f -- "$current"
+        die 'Conteúdo oculto de /home mudou após a confirmação; limpeza cancelada, sem apagar novas entradas.'
+    fi
+    rm -f -- "$current"
+    local relative user file item
+    while IFS= read -r -d '' relative; do
+        user="${relative%%/*}"
+        file="${relative#*/}"
+        [[ "$user" =~ ^[a-z_][a-z0-9_-]{0,31}$ && "$file" == .* && "$file" != '.' && "$file" != '..' && "$file" != */* ]] ||
+            die 'Caminho inválido na lista de dotfiles; abortado.'
+        [[ -d "/mnt/home/$user" && ! -L "/mnt/home/$user" ]] ||
+            die 'Diretório de usuário inesperado/symlink na limpeza.'
+        item="/mnt/home/$user/$file"
+        [[ -e "$item" || -L "$item" ]] || die 'Arquivo oculto desapareceu após a prévia.'
+        while IFS= read -r mp; do
+            if [[ "$mp" == "$item" || "$mp" == "$item/"* ]]; then
+                die "Existe montagem sob entrada oculta $item; limpeza recusada."
+            fi
+        done < <(findmnt -rn -o TARGET)
+        targets+=("$item")
+    done < "$HOME_CLEAN_LIST_FILE"
+    if ((${#targets[@]} == 0)); then
+        ok 'Nenhum dotfile existente para limpar.'
         return 0
     fi
-
-    echo
-    echo "Dotfiles que serão removidos de /home/$USERNAME_VALUE:"
-    echo "------------------------------------------------------------"
-
-    while IFS= read -r -d '' item; do
-        printf '  %s\n' "${item##*/}"
-        ((count += 1))
-    done < <(
-        find "$target" \
-            -mindepth 1 \
-            -maxdepth 1 \
-            -name '.*' \
-            -print0
-    )
-
-    echo "------------------------------------------------------------"
-
-    if (( count == 0 )); then
-        ok "Nenhum dotfile antigo encontrado."
-        return 0
-    fi
-
-    info "Removendo $count item(ns) oculto(s) da home preservada..."
-
-    find "$target" \
-        -mindepth 1 \
-        -maxdepth 1 \
-        -name '.*' \
-        -exec rm -rf -- {} +
-
-    if find "$target" \
-        -mindepth 1 \
-        -maxdepth 1 \
-        -name '.*' \
-        -print -quit |
-        grep -q .; then
-
-        die "Ainda existem dotfiles antigos em $target após a limpeza."
-    fi
-
-    ok "Configurações ocultas antigas removidas; arquivos visíveis preservados."
+    info "Removendo ${#targets[@]} entradas ocultas previamente autorizadas de /home preservada."
+    # Operação única com caminhos extraídos diretamente de /mnt/home, sem glob '*'.
+    rm -rf -- "${targets[@]}"
+    ok 'Entradas ocultas removidas; partição /home e arquivos visíveis preservados.'
 }
 
 packages_for_desktop() {
@@ -1670,6 +1904,69 @@ EOF
     ok "Sistema identificado como Wolf Linux (compatibilidade ID=arch)."
 }
 
+# Na reutilização de /home, preferir UID histórico (se disponível), sem
+# alterar a propriedade de arquivos preservados. A verificação é somente
+# leitura e rejeita conflito com outra conta da nova instalação.
+preflight_preserved_home_identity() {
+    PRESERVED_HOME_MODE="new"
+    PRESERVED_HOME_UID=""
+    PRESERVED_HOME_GID=""
+    PRESERVED_HOME_DESIRED_UID=""
+    [[ "$STORAGE_MODE" == "reuse-manual" && -n "$HOME_DEVICE" && "$FORMAT_HOME" == "no" ]] || return 0
+    mountpoint -q /mnt/home || die 'Home preservada não está montada em /mnt/home.'
+    local helper="$PROJECT_DIR/live-gui/wolf_home_identity.py" temp
+    [[ -f "$helper" ]] || die 'Preflight de UID/GID da home ausente.'
+    temp="$(mktemp /tmp/wolf-home-identity.XXXXXXXX)"
+    chmod 600 "$temp"
+    if ! /usr/bin/python3 "$helper" inspect --root /mnt --user "$USERNAME_VALUE" > "$temp"; then
+        rm -f -- "$temp"
+        die 'Identidade numérica da home preservada é incompatível; recusado sem chown recursivo.'
+    fi
+    local -a f=()
+    mapfile -d '' -t f < "$temp"
+    rm -f -- "$temp"
+    (( ${#f[@]} == 4 )) || die 'Dados incompletos no preflight da home.'
+    PRESERVED_HOME_MODE="${f[0]}"
+    PRESERVED_HOME_UID="${f[1]}"
+    PRESERVED_HOME_GID="${f[2]}"
+    PRESERVED_HOME_DESIRED_UID="${f[3]}"
+    info "Home preservada: ${PRESERVED_HOME_MODE}; UID anterior=${PRESERVED_HOME_UID:-inexistente}; GID anterior=${PRESERVED_HOME_GID:-inexistente}."
+}
+
+# Corrige SOMENTE o diretório pessoal, com confirmação explícita quando
+# necessário. Nunca executar chown -R, chmod -R ou alterar outros usuários.
+reconcile_preserved_home_access() {
+    [[ "$STORAGE_MODE" == "reuse-manual" && -n "$HOME_DEVICE" && "$FORMAT_HOME" == "no" ]] || return 0
+    local dir="/mnt/home/$USERNAME_VALUE" uid old_uid response
+    mountpoint -q /mnt/home || die 'Home deixou de estar montada.'
+    [[ -d "$dir" && ! -L "$dir" ]] || die 'Home não é diretório regular: ajuste manual necessário.'
+    uid="$(arch-chroot /mnt id -u "$USERNAME_VALUE")"
+    old_uid="$(stat -c %u -- "$dir")"
+    if [[ "$old_uid" != "$uid" ]]; then
+        warn "Dono anterior /home/$USERNAME_VALUE: UID $old_uid; usuário recém-criado: UID $uid."
+        warn 'Somente o diretório pessoal terá o dono ajustado. Arquivos internos não serão alterados.'
+        printf 'Digite AJUSTAR /home/%s para corrigir somente esse diretório: ' "$USERNAME_VALUE"
+        read -r response
+        [[ "$response" == "AJUSTAR /home/$USERNAME_VALUE" ]] ||
+            die 'Correção de propriedade recusada; não alterar a home preservada.'
+        [[ -d "$dir" && ! -L "$dir" && "$(stat -c %u -- "$dir")" == "$old_uid" ]] ||
+            die 'Home mudou antes da correção; abortado.'
+        chown --no-dereference "$uid" "$dir"
+    fi
+    # Comprova escrita como usuário final, sem depender de permissões do root.
+    # shellcheck disable=SC2016 # Expansão intencional dentro do /bin/sh chamado no chroot.
+    if ! arch-chroot /mnt runuser -u "$USERNAME_VALUE" -- /bin/sh -c '
+        set -eu
+        dir="$1"
+        test -w "$dir" && test -x "$dir" || exit 1
+        probe="$(mktemp "$dir/.wolf-access-test.XXXXXXXX")" || exit 1
+        rm -f -- "$probe"
+    ' _ "/home/$USERNAME_VALUE"; then
+        die "Home /home/$USERNAME_VALUE sem permissão de escrita. Verifique ACL/permissões; nenhuma alteração recursiva foi efetuada."
+    fi
+    ok "Acesso de escrita confirmado para /home/$USERNAME_VALUE, preservando arquivos dos usuários."
+}
+
 configure_user_sudo() {
     local user_shell="/bin/bash"
     local -a desired_groups
@@ -1689,6 +1986,7 @@ configure_user_sudo() {
     done
 
     group_csv="$(IFS=,; echo "${existing_groups[*]}")"
+    preflight_preserved_home_identity
 
     if arch-chroot /mnt id -u "$USERNAME_VALUE" >/dev/null 2>&1; then
         info "Usuário '$USERNAME_VALUE' já existe; ajustando shell e grupos."
@@ -1700,19 +1998,17 @@ configure_user_sudo() {
     else
         info "Criando usuário '$USERNAME_VALUE'."
 
-        if [[ -n "$group_csv" ]]; then
-            arch-chroot /mnt useradd \
-                -m \
-                -G "$group_csv" \
-                -s "$user_shell" \
-                "$USERNAME_VALUE"
-        else
-            arch-chroot /mnt useradd \
-                -m \
-                -s "$user_shell" \
-                "$USERNAME_VALUE"
+        local -a create_args=(-m -s "$user_shell")
+        [[ -z "$group_csv" ]] || create_args+=(-G "$group_csv")
+        if [[ "$PRESERVED_HOME_MODE" == "reuse-uid" ]]; then
+            # Evita perder acesso aos arquivos que já pertencem ao UID antigo.
+            create_args+=(-u "$PRESERVED_HOME_DESIRED_UID")
+            info "Reutilizando UID numérico $PRESERVED_HOME_DESIRED_UID para arquivos da /home preservada."
         fi
+        arch-chroot /mnt useradd "${create_args[@]}" "$USERNAME_VALUE"
     fi
+
+    reconcile_preserved_home_access
 
     # Sempre pedimos a senha quando esta subetapa ainda não tem checkpoint.
     # Assim uma retomada após criação parcial do usuário continua segura.
@@ -10344,15 +10640,21 @@ configure_bootloader() {
     if [[ "$BOOT_MODE" == "UEFI" ]]; then
         info "Instalando GRUB UEFI..."
 
+        local -a physical_grub_options=()
+        if [[ -n "$GUI_PHYSICAL_PLAN" ]]; then
+            # Atualiza somente EFI/WolfLinux, SEM criar/alterar entradas NVRAM.
+            physical_grub_options+=(--no-nvram)
+        fi
         arch-chroot /mnt grub-install \
             --target=x86_64-efi \
             --efi-directory=/boot/efi \
             --bootloader-id=WolfLinux \
+            "${physical_grub_options[@]}" \
             --recheck
 
         # Na VM instalamos também o caminho UEFI fallback.
         # Assim ela consegue iniciar mesmo sem uma entrada NVRAM válida.
-        if is_supported_test_vm; then
+        if is_supported_test_vm && [[ "$GUI_VM_MODE" != "reuse" ]]; then
             info "VM UEFI: instalando fallback EFI/BOOT/BOOTX64.EFI..."
 
             arch-chroot /mnt grub-install \
@@ -10459,7 +10761,7 @@ validate_boot_installation() {
             -iname '*.efi' \
             -print 2>/dev/null || true
 
-        if is_supported_test_vm; then
+        if is_supported_test_vm && [[ "$GUI_VM_MODE" != "reuse" ]]; then
             [[ -s "$fallback_efi" ]] ||
                 die "Fallback UEFI da VM ausente: EFI/BOOT/BOOTX64.EFI"
 
@@ -11464,6 +11766,141 @@ finalize_vm_install() {
     echo "============================================================"
 }
 
+load_gui_physical_plan() {
+    [[ -n "$GUI_PHYSICAL_PLAN" ]] || return 0
+    (( EUID == 0 )) || die 'Plano físico exige root.'
+    [[ "$BOOT_MODE" == UEFI ]] || die 'Plano físico exige UEFI.'
+    is_supported_test_vm && die 'Execução física recusada dentro de VM.'
+    [[ -d /run/archiso/airootfs ]] || die 'Execução física exige a Live Wolf.'
+    local temp
+    temp="$(mktemp /tmp/wolf47-physical.XXXXXXXX)"
+    chmod 600 "$temp"
+    if ! /usr/bin/python3 "$PROJECT_DIR/live-gui/wolf_physical_executor.py" export "$GUI_PHYSICAL_PLAN" > "$temp"; then
+        rm -f -- "$temp"
+        die 'Pré-validação física recusada; nenhuma operação destrutiva realizada.'
+    fi
+    local -a f=()
+    mapfile -d '' -t f < "$temp"
+    rm -f -- "$temp"
+    (( ${#f[@]} == 12 )) || die 'Contrato físico incompleto.'
+    ROOT_DEVICE="${f[0]}"; ESP_DEVICE="${f[1]}"; HOME_DEVICE="${f[2]}"
+    PHYSICAL_ROOT_UUID="${f[3]}"; PHYSICAL_ESP_UUID="${f[4]}"; PHYSICAL_HOME_UUID="${f[5]}"
+    HOSTNAME_VALUE="${f[6]}"; USERNAME_VALUE="${f[7]}"; STACK_PRESET="${f[8]}"
+    if [[ "$STACK_PRESET" == custom ]]; then
+        STACKS_ARG="${f[9]}"
+        [[ -n "$STACKS_ARG" ]] || die 'Custom sem stacks não suportado.'
+    else
+        STACKS_ARG=""
+    fi
+    XKB_LAYOUT="${f[10]}"; XKB_VARIANT="${f[11]}"
+    if [[ "$XKB_VARIANT" == thinkpad ]]; then
+        KEYBOARD_PROFILE=thinkpad
+        CINNAMON_LAYOUT=br+thinkpad
+        MATE_LAYOUT=$'br\tthinkpad'
+    else
+        KEYBOARD_PROFILE=abnt2
+        XKB_LAYOUT=br
+        XKB_VARIANT=abnt2
+        CINNAMON_LAYOUT=br
+        MATE_LAYOUT=$'br\tabnt2'
+    fi
+    STORAGE_MODE="reuse-manual"
+    GUI_VM_MODE="reuse" # preservar ESP sem instalação fallback
+    INSTALL_DISK="${ROOT_DEVICE%p[0-9]*}" # usado apenas para planejamento; NUNCA apagado
+    FORMAT_ROOT=yes; FORMAT_ESP=no; FORMAT_HOME=no; CLEAN_HOME_DOTFILES=no
+    ok "FÍSICO: formatar somente $ROOT_DEVICE; preservar $ESP_DEVICE e $HOME_DEVICE."
+}
+
+revalidate_gui_physical_target() {
+    [[ -n "$GUI_PHYSICAL_PLAN" ]] || return 0
+    local temp
+    temp="$(mktemp /tmp/wolf47-recheck.XXXXXXXX)"
+    chmod 600 "$temp"
+    if ! /usr/bin/python3 "$PROJECT_DIR/live-gui/wolf_physical_executor.py" export "$GUI_PHYSICAL_PLAN" > "$temp"; then
+        rm -f -- "$temp"
+        die 'UUID, fstab, topologia LVM ou dispositivo mudou: ABORTAR SEM FORMATAR.'
+    fi
+    local -a f=()
+    mapfile -d '' -t f < "$temp"
+    rm -f -- "$temp"
+    (( ${#f[@]} == 12 )) || die 'Revalidação física incompleta.'
+    [[ "${f[0]}" == "$ROOT_DEVICE" && "${f[1]}" == "$ESP_DEVICE" &&
+       "${f[2]}" == "$HOME_DEVICE" && "${f[3]}" == "$PHYSICAL_ROOT_UUID" &&
+       "${f[4]}" == "$PHYSICAL_ESP_UUID" && "${f[5]}" == "$PHYSICAL_HOME_UUID" &&
+       "${f[6]}" == "$HOSTNAME_VALUE" && "${f[7]}" == "$USERNAME_VALUE" &&
+       "${f[8]}" == "$STACK_PRESET" ]] || die 'Identidade do plano físico mudou.'
+    ok 'Dispositivos físicos revalidados por UUID, partuuid, fstab e PVs.'
+}
+
+load_gui_lab42_plan() {
+    [[ -n "$GUI_LAB42_PLAN" ]] || return 0
+    (( EUID == 0 )) || die 'Laboratório alpha42 exige root.'
+    [[ "$BOOT_MODE" == UEFI ]] || die 'Laboratório alpha42 exige UEFI.'
+    [[ "$VM_TYPE" == qemu || "$VM_TYPE" == kvm ]] || die 'Laboratório somente QEMU/KVM.'
+    local temp
+    temp="$(mktemp /tmp/wolf42-fields.XXXXXXXX)"
+    chmod 600 "$temp"
+    if ! /usr/bin/python3 "$PROJECT_DIR/live-gui/wolf_lab42.py" export "$GUI_LAB42_PLAN" > "$temp"; then
+        rm -f -- "$temp"
+        die 'Preflight multidisco alpha42 recusado. NADA formatado.'
+    fi
+    local -a f=()
+    mapfile -d '' -t f < "$temp"
+    rm -f -- "$temp"
+    (( ${#f[@]} == 12 )) || die 'Contrato Lab42 incompleto.'
+    ROOT_DEVICE="${f[0]}"; ESP_DEVICE="${f[1]}"; HOME_DEVICE="${f[2]}"
+    LAB42_ROOT_UUID="${f[3]}"; LAB42_ESP_UUID="${f[4]}"; LAB42_HOME_UUID="${f[5]}"
+    HOSTNAME_VALUE="${f[6]}"; USERNAME_VALUE="${f[7]}"; STACK_PRESET="${f[8]}"
+    if [[ "$STACK_PRESET" == custom ]]; then
+        STACKS_ARG="${f[9]}"
+        [[ -n "$STACKS_ARG" ]] || die 'Custom sem stacks não suportado.'
+    else
+        STACKS_ARG=""
+    fi
+    XKB_LAYOUT="${f[10]}"; XKB_VARIANT="${f[11]}"
+    if [[ "$XKB_VARIANT" == thinkpad ]]; then
+        KEYBOARD_PROFILE=thinkpad
+        CINNAMON_LAYOUT=br+thinkpad
+        MATE_LAYOUT=$'br\tthinkpad'
+    else
+        KEYBOARD_PROFILE=abnt2
+        XKB_LAYOUT=br
+        XKB_VARIANT=abnt2
+        CINNAMON_LAYOUT=br
+        MATE_LAYOUT=$'br\tabnt2'
+    fi
+    STORAGE_MODE="reuse-manual"
+    GUI_VM_MODE="reuse" # GRUB: NÃO sobrescrever EFI/BOOT fallback
+    INSTALL_DISK=/dev/vdb
+    FORMAT_ROOT=yes; FORMAT_ESP=no; FORMAT_HOME=no; CLEAN_HOME_DOTFILES=no
+    [[ "$ROOT_DEVICE" == /dev/vdb1 && "$ESP_DEVICE" == /dev/vda1 &&
+       "$HOME_DEVICE" == /dev/mapper/vg_monstro-lv_projetos ]] ||
+        die 'Exportador retornou destinos fora do laboratório.'
+    ok 'Lab42 validado: FORMATAR /dev/vdb1; PRESERVAR EFI /dev/vda1, NTFS /dev/vdb2 e /home LVM.'
+}
+
+revalidate_gui_lab42_target() {
+    [[ -n "$GUI_LAB42_PLAN" ]] || return 0
+    local temp
+    temp="$(mktemp /tmp/wolf42-recheck.XXXXXXXX)"
+    chmod 600 "$temp"
+    if ! /usr/bin/python3 "$PROJECT_DIR/live-gui/wolf_lab42.py" export "$GUI_LAB42_PLAN" > "$temp"; then
+        rm -f -- "$temp"
+        die 'Revalidação alpha42 mudou antes de FORMATAR; abortado.'
+    fi
+    local -a f=()
+    mapfile -d '' -t f < "$temp"
+    rm -f -- "$temp"
+    (( ${#f[@]} == 12 )) || die 'Revalidação do laboratório incompleta.'
+    [[ "${f[0]}" == "$ROOT_DEVICE" && "${f[1]}" == "$ESP_DEVICE" &&
+       "${f[2]}" == "$HOME_DEVICE" && "${f[3]}" == "$LAB42_ROOT_UUID" &&
+       "${f[4]}" == "$LAB42_ESP_UUID" && "${f[5]}" == "$LAB42_HOME_UUID" &&
+       "${f[6]}" == "$HOSTNAME_VALUE" && "${f[7]}" == "$USERNAME_VALUE" &&
+       "${f[8]}" == "$STACK_PRESET" ]] || die 'Plano ou UUID alterado; não formatar.'
+    [[ ! -s "$CHECKPOINT_FILE" ]] || die 'Checkpoints existentes; laboratório não retomará uma instalação incerta.'
+    ok 'REVALIDAÇÃO LAB42: os dois seriais, três UUIDs e PVs foram conferidos novamente.'
+}
+
 load_gui_vm_plan() {
     [[ -n "$GUI_VM_PLAN" ]] || return 0
     (( EUID == 0 )) || die 'A execução VM exige root.'
@@ -11480,7 +11917,7 @@ load_gui_vm_plan() {
     local -a fields=()
     mapfile -d '' -t fields < "$tmp"
     rm -f -- "$tmp"
-    (( ${#fields[@]} == 14 )) || die 'Contrato JSON devolveu número incorreto de campos.'
+    (( ${#fields[@]} == 19 )) || die 'Contrato JSON devolveu número incorreto de campos.' 
     GUI_VM_DISK="${fields[0]}"
     GUI_VM_MAJMIN="${fields[2]}"
     [[ "$BOOT_MODE" == "${fields[3]}" ]] || die 'Firmware atual diferente do plano.'
@@ -11495,18 +11932,46 @@ load_gui_vm_plan() {
     fi
     INSTALL_DISK="$GUI_VM_DISK"
     GUI_VM_MODE="${fields[10]}"
-    if [[ "$GUI_VM_MODE" == "manual" ]]; then
-        [[ "$BOOT_MODE" == "UEFI" ]] || die 'Manual GUI inicialmente permitido apenas em UEFI.'
+    if [[ "$GUI_VM_MODE" == "manual" || "$GUI_VM_MODE" == "reuse" ]]; then
+        # BIOS manual/reuse aceitos apenas em VM com MBR; verificação de
+        # tabela, identidade e papéis ocorre no validador Python independente.
+        [[ "$BOOT_MODE" == "UEFI" || "$BOOT_MODE" == "BIOS" ]] || die 'Firmware desconhecido.' 
         STORAGE_MODE="reuse-manual"
         ROOT_DEVICE="${fields[11]}"
         ESP_DEVICE="${fields[12]}"
         HOME_DEVICE="${fields[13]}"
         FORMAT_ROOT="yes"
-        FORMAT_ESP="no"
-        FORMAT_HOME="no"
-        CLEAN_HOME_DOTFILES="no"
+        FORMAT_ESP="${fields[14]}"
+        FORMAT_HOME="${fields[15]}"
+        [[ "$FORMAT_ESP" =~ ^(yes|no)$ && "$FORMAT_HOME" =~ ^(yes|no)$ ]] || die 'Flags de formatação malformadas.'
+        if [[ "$GUI_VM_MODE" == "reuse" ]]; then
+            [[ -n "$HOME_DEVICE" && "$FORMAT_ESP" == "no" && "$FORMAT_HOME" == "no" ]] ||
+                die 'Reutilização exige /home separada e preservada, além de EFI preservada somente em UEFI.'
+            if [[ "$BOOT_MODE" == "UEFI" ]]; then
+                [[ -n "$ESP_DEVICE" ]] || die 'Reutilização UEFI exige EFI preservada.'
+            else
+                [[ -z "$ESP_DEVICE" ]] || die 'Reutilização BIOS não deve utilizar EFI.'
+            fi
+            CLEAN_HOME_DOTFILES="${fields[16]}"
+            [[ "$CLEAN_HOME_DOTFILES" =~ ^(yes|no)$ ]] || die 'Limpeza de home malformada.'
+        else
+            CLEAN_HOME_DOTFILES="no"
+        fi
     elif [[ "$GUI_VM_MODE" == "erase" ]]; then
         STORAGE_MODE="erase"
+        GUI_ERASE_ROOT_GIB="${fields[17]}"
+        GUI_ERASE_HOME_GIB="${fields[18]}"
+        [[ "$GUI_ERASE_ROOT_GIB" =~ ^[0-9]{1,5}$ && "$GUI_ERASE_HOME_GIB" =~ ^[0-9]{1,5}$ ]] || die 'Tamanhos automáticos inválidos.'
+        case "${fields[13]}" in
+            separate) GUI_ERASE_SEPARATE=yes ;;
+            '') GUI_ERASE_SEPARATE=no ;;
+            *) die 'Formato de /home automático desconhecido.' ;;
+        esac
+        if [[ "$GUI_ERASE_SEPARATE" == yes ]]; then
+            (( GUI_ERASE_ROOT_GIB >= 20 )) || die 'Raiz automática com home separada exige pelo menos 20 GiB.'
+        else
+            (( GUI_ERASE_HOME_GIB == 0 )) || die 'Home integrada não recebe tamanho separado.'
+        fi
         if [[ "$BOOT_MODE" == "UEFI" ]]; then
         ESP_DEVICE="$(partition_path "$INSTALL_DISK" 1)"
         ROOT_DEVICE="$(partition_path "$INSTALL_DISK" 2)"
@@ -11516,9 +11981,17 @@ load_gui_vm_plan() {
             ROOT_DEVICE="$(partition_path "$INSTALL_DISK" 1)"
             FORMAT_ESP="no"
         fi
-        HOME_DEVICE=""
+        if [[ "$GUI_ERASE_SEPARATE" == "yes" ]]; then
+            if [[ "$BOOT_MODE" == "UEFI" ]]; then
+                HOME_DEVICE="$(partition_path "$INSTALL_DISK" 3)"
+            else
+                HOME_DEVICE="$(partition_path "$INSTALL_DISK" 2)"
+            fi
+        else
+            HOME_DEVICE=""
+        fi
         FORMAT_ROOT="yes"
-        FORMAT_HOME="no"
+        FORMAT_HOME="yes"
         CLEAN_HOME_DOTFILES="no"
     else
         die "Estratégia GUI desconhecida: $GUI_VM_MODE"
@@ -11550,14 +12023,21 @@ revalidate_gui_vm_target() {
     local -a fields=()
     mapfile -d '' -t fields < "$tmp"
     rm -f -- "$tmp"
-    (( ${#fields[@]} == 14 )) || die 'Revalidação VM com dados incompletos.'
+    (( ${#fields[@]} == 19 )) || die 'Revalidação VM com dados incompletos.' 
     [[ "${fields[0]}" == "$INSTALL_DISK" && "${fields[2]}" == "$GUI_VM_MAJMIN" ]] ||
         die 'Disco/identidade da VM mudou após confirmação.'
     [[ "$INSTALL_DISK" == /dev/vd? ]] || die 'Disco deixou de ser VirtIO suportado.'
     [[ "${fields[10]}" == "$GUI_VM_MODE" ]] || die 'Modo GUI mudou após confirmação.'
-    if [[ "$GUI_VM_MODE" == "manual" ]]; then
-        [[ "${fields[11]}" == "$ROOT_DEVICE" && "${fields[12]}" == "$ESP_DEVICE" && "${fields[13]}" == "$HOME_DEVICE" ]] ||
-            die 'Partições da instalação manual mudaram; ABORTADO.'
+    if [[ "$GUI_VM_MODE" == "erase" ]]; then
+        local expected_home_role=""
+        [[ "$GUI_ERASE_SEPARATE" == yes ]] && expected_home_role=separate
+        [[ "${fields[13]}" == "$expected_home_role" &&
+           "${fields[17]}" == "$GUI_ERASE_ROOT_GIB" &&
+           "${fields[18]}" == "$GUI_ERASE_HOME_GIB" ]] || die 'Layout/tamanhos alterados após confirmação.'
+    fi
+    if [[ "$GUI_VM_MODE" == "manual" || "$GUI_VM_MODE" == "reuse" ]]; then
+        [[ "${fields[11]}" == "$ROOT_DEVICE" && "${fields[12]}" == "$ESP_DEVICE" && "${fields[13]}" == "$HOME_DEVICE" && "${fields[14]}" == "$FORMAT_ESP" && "${fields[15]}" == "$FORMAT_HOME" && "${fields[16]}" == "$CLEAN_HOME_DOTFILES" ]] ||
+            die 'Partições ou flags de formatação mudaram; ABORTADO.' 
     fi
     if mountpoint -q /mnt 2>/dev/null; then
         die 'Montagem inesperada em /mnt. Recusando alterar partições.'
@@ -11573,7 +12053,15 @@ main() {
     detect_gpu
     detect_keyboard
     choose_desktop
-    if [[ -n "$GUI_VM_PLAN" ]]; then
+    if [[ -n "$GUI_PHYSICAL_PLAN" ]]; then
+        load_gui_physical_plan
+        check_network
+        choose_stacks
+    elif [[ -n "$GUI_LAB42_PLAN" ]]; then
+        load_gui_lab42_plan
+        check_network
+        choose_stacks
+    elif [[ -n "$GUI_VM_PLAN" ]]; then
         load_gui_vm_plan
         check_network
         choose_stacks
@@ -11586,6 +12074,9 @@ main() {
     fi
     show_plan
     echo "Stacks ............: $(selected_stacks_text)"
+    if [[ -n "$GUI_LAB42_PLAN" ]]; then
+        echo 'LAB42: EFI em /dev/vda1; RAIZ /dev/vdb1; /home LVM multi-PV; preservação obrigatória.'
+    fi
 
     if (( DRY_RUN == 1 || PLAN_ONLY == 1 )); then
         ok "Dry-run/plano concluído: nenhuma operação destrutiva executada."
@@ -11594,6 +12085,9 @@ main() {
 
     confirm_installation
     revalidate_gui_vm_target
+    revalidate_gui_lab42_target
+    revalidate_gui_physical_target
+    confirm_preserved_home_cleanup
     stage "10-preparar-disco" prepare_erase_disk
     stage "20-formatar-montar" format_and_mount
     stage "22-limpar-home" clean_preserved_home_dotfiles
@@ -11606,8 +12100,15 @@ main() {
     stage "60-sistema-base" configure_system_base
     stage "61-identidade-wolf" configure_wolf_identity
     stage "62-usuario-sudo" configure_user_sudo
-    stage "63-chaotic-aur" configure_chaotic_aur
-    stage "64-resolver-stacks" install_selected_stack_packages
+    # Minimal não seleciona nenhuma stack opcional: não inicializa Chaotic-AUR,
+    # yay ou resolução de pacotes AUR. As demais instalações preservam a
+    # prioridade Arch oficial -> Chaotic-AUR -> AUR fallback.
+    if (( ${#SELECTED_STACKS[@]} == 0 )); then
+        ok "Perfil sem stacks opcionais: etapas 63 Chaotic-AUR e 64 AUR ignoradas."
+    else
+        stage "63-chaotic-aur" configure_chaotic_aur
+        stage "64-resolver-stacks" install_selected_stack_packages
+    fi
     stage "67-servicos" configure_services
     stage "68-android-flutter" install_flutter_sdk
     stage "69-video" install_gpu_profile

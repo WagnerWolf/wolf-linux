@@ -96,7 +96,9 @@ export WOLF_ASSET_DIR="/root/wolf-linux/assets"
 needs_mode=1
 for arg in "$@"; do
     case "$arg" in
-        --install|--vm-install|--dry-run|--plan-only|--review-gui-plan|--simulate-gui-plan|--preflight-gui-plan-vm|--execute-gui-plan-vm|--list-stacks|-h|--help) needs_mode=0 ;;
+        --install|--vm-install|--dry-run|--plan-only|--review-gui-plan|--simulate-gui-plan|--review-multidisk-plan|--simulate-multidisk-plan|--rehearse-multidisk-physical|--preflight-multidisk-physical|--execute-multidisk-physical|--preflight-multidisk-lab-vm|--execute-multidisk-lab-vm|--preflight-gui-plan-vm|--execute-gui-plan-vm|--list-stacks|--reset-state|-h|--help) needs_mode=0 ;;
+        --full|--test|--minimal|--preset|--stacks) ;; # Seleções do instalador interativo legado.
+        --*|-*) echo "[ERRO] Opção desconhecida do lançador Wolf: $arg" >&2; exit 2 ;;
     esac
 done
 if (( needs_mode == 1 )); then
@@ -198,4 +200,4 @@ WOLF_PROJECT="$PROJECT" WOLF_ISO_PROFILE="$PROFILE" "$PROJECT/tests/wolf-stage-l
 [[ -L "$AIROOT/usr/local/bin/wolf-ssh" ]] || { echo "[ERRO] Alias wolf-ssh ausente no airootfs." >&2; exit 1; }
 grep -Fxq openssh "$PACKAGES_FILE" || { echo "[ERRO] openssh ausente de packages.x86_64." >&2; exit 1; }
 
-echo "[OK] Perfil ISO Wolf Live GUI 0.9 e identidade do boot; backend KDE/Wayland preservado."
+echo "[OK] Perfil ISO Wolf Live GUI 2.0 e identidade do boot; backend KDE/Wayland preservado."

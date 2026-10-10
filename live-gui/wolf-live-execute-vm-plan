@@ -16,8 +16,8 @@ if [[ -n "$result_file" ]]; then
         exit 2
     fi
 fi
-printf '%s\n' 'WOLF INSTALLER GUI 0.9 — EXECUÇÃO EXPERIMENTAL VM' \
-                'ATENÇÃO: esta operação poderá apagar o disco INTEIRO ou FORMATAR a raiz selecionada.'
+printf '%s\n' 'WOLF INSTALLER GUI 1.1 — EXECUÇÃO EXPERIMENTAL VM' \
+                'ATENÇÃO: esta operação poderá apagar o disco INTEIRO ou FORMATAR a raiz selecionada, preservando EFI/home quando escolhido.'
 status=0
 sudo wolf-install --execute-gui-plan-vm "$plan" || status=$?
 printf '\nInstalador finalizado (código %s).\n' "$status"
