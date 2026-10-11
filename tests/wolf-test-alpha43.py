@@ -96,8 +96,9 @@ assert '\n    chown -R ' not in src[src.index('preflight_preserved_home_identity
 staging=(ROOT/'tests/wolf-stage-live-desktop.sh').read_text()
 assert 'wolf_home_identity.py' in staging and 'wolf-physical-preflight' in staging
 main=(ROOT/'live-gui/main.py').read_text()
-assert 'wolf-physical-preflight' in main
-assert (ROOT/'VERSION').read_text().strip() in ('2.0.0-alpha44', '2.0.0-alpha45', '2.0.0-alpha46', '2.0.0-alpha47')
+assert "'--preflight-multidisk-physical'" in main
+assert 'wolf-physical-preflight' not in main  # botão piloto antigo saiu da GUI
+assert (ROOT/'VERSION').read_text().strip() in ('2.0.0-alpha44', '2.0.0-alpha45', '2.0.0-alpha46', '2.0.0-alpha47', '2.0.0-alpha48', '2.0.0-alpha49', '2.0.0-alpha50', '2.0.0-alpha51')
 print('[OK] alpha43: UID preservado quando livre, colisões e links bloqueados')
 print('[OK] alpha43: escrita verificada e correção limitada ao diretório pessoal')
 print('[OK] alpha43: diagnóstico físico somente leitura, sem liberação de instalação')

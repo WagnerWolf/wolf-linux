@@ -44,6 +44,9 @@ python3 "$PROJECT/tests/wolf-test-alpha43.py"
 python3 "$PROJECT/tests/wolf-test-alpha45.py"
 python3 "$PROJECT/tests/wolf-test-alpha46.py"
 python3 "$PROJECT/tests/wolf-test-alpha47.py"
+python3 "$PROJECT/tests/wolf-test-alpha48.py"
+python3 "$PROJECT/tests/wolf-test-alpha49.py"
+python3 "$PROJECT/tests/wolf-test-alpha50.py"
 python3 "$PROJECT/tests/wolf-test-aur-empty-alpha29.py"
 grep -Fq 'wolf-live-simulate-plan' "$SOURCE/main.py" || { echo '[ERRO] Botão de simulação ausente na GUI.' >&2; exit 1; }
 grep -Fq 'self.home_layout' "$SOURCE/main.py" || { echo '[ERRO] /home integrado ausente na GUI.' >&2; exit 1; }
@@ -85,6 +88,9 @@ if [[ -d "$PROJECT/iso-profile" ]]; then
         "$PROFILE/airootfs/root/wolf-linux/live-gui/wolf_lab42.py" \
         "$PROFILE/airootfs/root/wolf-linux/live-gui/wolf_physical_rehearsal.py" \
         "$PROFILE/airootfs/root/wolf-linux/live-gui/wolf_physical_executor.py" \
+        "$PROFILE/airootfs/root/wolf-linux/live-gui/wolf_home_cleanup.py" \
+        "$PROFILE/airootfs/usr/local/share/wolf-linux-live/gui/wolf_home_cleanup.py" \
+\
         "$PROFILE/airootfs/root/wolf-linux/live-gui/wolf_home_identity.py" \
         "$PROFILE/airootfs/usr/local/bin/wolf-physical-preflight" \
         "$PROFILE/airootfs/usr/local/bin/wolf-lab41-particionar" \

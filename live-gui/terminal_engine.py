@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Interactive pseudo-terminal for the Wolf Live installer.
 
-Only the independently validated VM backend can be launched. A PTY provides
+Only the explicitly enumerated, independently validated install backends can run.
+A PTY provides
 stdin/stdout/stderr and TTY semantics for Bash confirmations/password prompts.
 A plain-text UI is not an xterm emulator: colors/control sequences are filtered.
 """
@@ -16,6 +17,15 @@ import struct
 import termios
 import subprocess
 from pathlib import Path
+
+# Lista FECHADA: a UI nunca pode usar o PTY para executar flags arbitrárias.
+# O modo físico mantém o preflight da GUI e todas as validações independentes
+# do Bash/wolf_physical_executor (identidade, UUID, fstab, LVM, Live e UEFI).
+ALLOWED_EXECUTION_MODES = frozenset({
+    "--execute-gui-plan-vm",
+    "--execute-multidisk-lab-vm",
+    "--execute-multidisk-physical",
+})
 
 ANSI = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)|[()][AB012]|[78])")
 
@@ -35,7 +45,7 @@ class InstallerPty:
     def start(self, plan: Path, *, mode: str = "--execute-gui-plan-vm") -> int:
         if self.proc is not None:
             raise RuntimeError("Já existe instalação nesta sessão")
-        if mode not in ("--execute-gui-plan-vm", "--execute-multidisk-lab-vm"):
+        if mode not in ALLOWED_EXECUTION_MODES:
             raise ValueError("Modo de execução PTY não autorizado")
         master, slave = pty.openpty()
         # Tamanho conservador para comandos CLI que consultam TIOCGWINSZ.

@@ -11,6 +11,7 @@ from pathlib import Path
 import sys
 
 import wolf_discovery as wd
+from wolf_home_cleanup import validate_spec
 import wolf_physical_rehearsal as rehearsal
 
 
@@ -23,6 +24,8 @@ def validated(doc, snap, *, physical=True, live=True):
         raise PhysicalDenied('Executor físico exige boot UEFI.')
     if live and not Path('/run/archiso/airootfs').is_dir():
         raise PhysicalDenied('Executor físico exige a Live Wolf (Archiso).')
+    # Validação estrita das escolhas opcionais de /home (somente caminhos relativos).
+    validate_spec(doc.get("home_cleanup"))
     # Reconstrução por UUID, fstab, PARTUUID, tamanho e topologia LVM.
     wd.validate_plan(doc, snap)
     if not doc['confirmed'] or doc['acknowledge_override']:
@@ -85,6 +88,9 @@ def main(argv: list[str]) -> int:
             print(f'PRESERVARIA /home: {fields[2]} (UUID {fields[5]})')
             print('PVs preservados: ' + ', '.join(doc['roles']['home']['lvm_pvs']))
             print('BACKUP GERAL NÃO EXIGIDO: perda dos dados da raiz será confirmada.')
+            cleaning = validate_spec(doc.get('home_cleanup'))
+            print('Limpeza dos dotfiles /home: ' + ('TODAS as entradas imediatas do usuário' if cleaning.get('enabled') else (', '.join(cleaning.get('items', [])) or 'nenhuma')))
+            print('Backup da limpeza: ' + ('SIM' if cleaning['backup'] else 'NÃO'))
         return 0
     except (ValueError, KeyError, TypeError, OSError, wd.DiscoveryError) as exc:
         print('[BLOQUEADO] ' + str(exc), file=sys.stderr)

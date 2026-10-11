@@ -71,7 +71,8 @@ assert a.returncode != 0
 b=subprocess.run(['bash',str(ROOT/'install/wolf-install.sh'),'--execute-multidisk-lab-vm','/notfound','--install'],capture_output=True,text=True)
 assert b.returncode != 0 and 'conflitantes' in b.stderr.lower()
 # GUI has a hardcoded finite set of commands; no arbitrary subprocess arg from JSON.
-assert 'mode not in ("--execute-gui-plan-vm", "--execute-multidisk-lab-vm")' in pty
+assert 'mode not in ALLOWED_EXECUTION_MODES' in pty
+assert '--execute-gui-plan-vm' in pty and '--execute-multidisk-lab-vm' in pty
 print('[OK] alpha42: bloqueios fora QEMU/Live, seriais e tamanhos, mounts e dispositivos')
 print('[OK] alpha42: somente raiz formatada; EFI/NTFS/PVs/LVM preservados')
-print('[OK] alpha42: integração CLI/GUI/PTY e sem liberação de hardware físico')
+print('[OK] alpha42: integração CLI/GUI/PTY; executores físicos novos usam barreira independente')

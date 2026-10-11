@@ -19,7 +19,7 @@ import wolf_discovery as wd
 STAGE_LABELS = {
     '10-preparar-disco': 'Verificaria reutilização de partições; NÃO recriaria tabela GPT nem alteraria PVs.',
     '20-formatar-montar': 'Formataria SOMENTE {root} em ext4; montaria em /mnt; montaria ESP {esp} em /mnt/boot/efi SEM FORMATAR e {home} em /mnt/home SEM FORMATAR.',
-    '22-limpar-home': 'Nenhuma limpeza de arquivos ocultos de /home está autorizada neste contrato.',
+    '22-limpar-home': 'Se o usuário selecionar entradas ocultas, validaria lista e backup opcional antes da exclusão; /home LVM preservada.',
     '25-repositorios-live': 'Prepararia os repositórios da Live para o pacstrap (sem alterar discos neste ensaio).',
     '27-validar-pacotes': 'Validaria disponibilidade das listas de pacotes e grupos (não consultada/executada aqui).',
     '30-pacstrap': 'Instalaria os pacotes base, KDE Plasma/Wayland, kernel linux-zen e dependências em /mnt via pacstrap -K (NÃO TESTADO aqui).',
@@ -128,7 +128,7 @@ def report(doc: dict, stages: list[str], *, mounts: bool = False) -> str:
         '', 'NÃO EXECUTADO: formatação da raiz, pacotes, /etc/fstab novo, montagem rw, configuração no chroot e GRUB.',
         'NÃO VALIDADO POR ESTE ENSAIO: integridade do backup, rede/mirrors em instalação, sucesso de pacstrap,',
         '  comportamento NVRAM/UEFI do GRUB e boot físico pós-reinstalação.',
-        'PROTEÇÃO: preservar EFI Microsoft/GRUB, todos os PVs e o conteúdo de /home.',
+        'PROTEÇÃO: preservar EFI Microsoft/GRUB, todos os PVs e /home, salvo itens ocultos explicitamente selecionados.',
         'ANTES DE QUALQUER INSTALAÇÃO REAL: recomendamos backup externo. Sem backup geral: aceite explícito de perda da raiz e risco residual.',
         'RESULTADO: ENSAIO DE PLANO APROVADO; NÃO EQUIVALE A INSTALAÇÃO FÍSICA HOMOLOGADA.',
     ])

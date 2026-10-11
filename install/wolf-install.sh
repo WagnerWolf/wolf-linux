@@ -7,7 +7,7 @@ fi
 
 set -Eeuo pipefail
 
-WOLF_VERSION="2.0.0-alpha47"
+WOLF_VERSION="2.0.0-alpha49"
 DRY_RUN=0
 PLAN_ONLY=0
 RESET_STATE=0
@@ -1560,6 +1560,42 @@ list_preserved_home_users() {
 # uma segunda confirmação. Montagem temporária somente leitura, sem journal replay.
 confirm_preserved_home_cleanup() {
     HOME_CLEAN_CONFIRMED="no"
+    if [[ -n "${GUI_PHYSICAL_PLAN:-}" ]]; then
+        [[ "$(sha256sum "$GUI_PHYSICAL_PLAN" | cut -d' ' -f1)" == "$PHYSICAL_PLAN_SHA256" ]] ||
+            die 'Plano de limpeza /home mudou durante o instalador.'
+        local selected mode
+        read -r mode selected < <(/usr/bin/python3 - "$GUI_PHYSICAL_PLAN" <<'PYCLEAN'
+import json,sys
+with open(sys.argv[1],encoding='utf-8') as f: p=json.load(f)
+spec=p.get('home_cleanup',{})
+print('root', 1 if spec.get('enabled',False) else 0) if 'enabled' in spec else print('legacy', len(spec.get('items',[])))
+PYCLEAN
+) || die 'Plano de limpeza inválido.'
+        [[ "$mode" == root || "$mode" == legacy ]] || die 'Modo de limpeza desconhecido.'
+        [[ "$selected" =~ ^[0-9]+$ ]] || die 'Seleção inválida.'
+        if (( selected > 0 )); then
+            if [[ "$mode" == root ]]; then
+                HOME_CLEAN_LIST_FILE="$(mktemp "$STATE_DIR/home-clean-root.XXXXXXXX")"
+                chmod 600 "$HOME_CLEAN_LIST_FILE"
+                /usr/bin/python3 "$PROJECT_DIR/live-gui/wolf_home_cleanup.py" check "$GUI_PHYSICAL_PLAN" "$HOME_DEVICE" "$HOME_CLEAN_LIST_FILE" ||
+                    die 'Falha na prévia de /home; nenhuma formatação iniciou.'
+                echo 'Atenção: TODOS os arquivos e diretórios ocultos imediatos da pasta pessoal serão excluídos.'
+                echo 'Isso pode incluir Steam, .local, .ssh e perfis. Com backup=Não, a perda é definitiva.'
+                local answer
+                read -r -p 'Digite LIMPAR para autorizar (Enter cancela a instalação): ' answer
+                [[ "$answer" == 'LIMPAR' ]] || die 'Limpeza não autorizada; nenhuma formatação iniciou.'
+            else
+                /usr/bin/python3 "$PROJECT_DIR/live-gui/wolf_home_cleanup.py" check "$GUI_PHYSICAL_PLAN" "$HOME_DEVICE" ||
+                    die 'Falha na prévia seletiva; nenhuma formatação iniciou.'
+                echo 'Atenção: exclusões seletivas de /home são irreversíveis quando backup=Não.'
+                local answer
+                read -r -p 'Digite LIMPAR SELECIONADOS para autorizar (Enter cancela a instalação): ' answer
+                [[ "$answer" == 'LIMPAR SELECIONADOS' ]] || die 'Limpeza não autorizada; nenhuma formatação iniciou.'
+            fi
+            HOME_CLEAN_CONFIRMED=yes
+        fi
+        return 0
+    fi
     [[ "$CLEAN_HOME_DOTFILES" == "yes" ]] || return 0
     [[ -n "$HOME_DEVICE" && "$FORMAT_HOME" == "no" && "$STORAGE_MODE" == "reuse-manual" ]] ||
         die 'Limpeza de home fora do modo reutilizar/preservar foi bloqueada.'
@@ -1605,6 +1641,35 @@ confirm_preserved_home_cleanup() {
 }
 
 clean_preserved_home_dotfiles() {
+    if [[ -n "${GUI_PHYSICAL_PLAN:-}" ]]; then
+        [[ "$(sha256sum "$GUI_PHYSICAL_PLAN" | cut -d' ' -f1)" == "$PHYSICAL_PLAN_SHA256" ]] ||
+            die 'Plano físico mudou antes da limpeza de /home.'
+        local selected mode
+        read -r mode selected < <(/usr/bin/python3 - "$GUI_PHYSICAL_PLAN" <<'PYCLEAN'
+import json,sys
+with open(sys.argv[1],encoding='utf-8') as f: p=json.load(f)
+spec=p.get('home_cleanup',{})
+print('root', 1 if spec.get('enabled',False) else 0) if 'enabled' in spec else print('legacy', len(spec.get('items',[])))
+PYCLEAN
+) || die 'Seleção de limpeza ilegível.'
+        [[ "$mode" == root || "$mode" == legacy ]] || die 'Modo de limpeza desconhecido.'
+        [[ "$selected" =~ ^[0-9]+$ ]] || die 'Seleção inválida.'
+        if (( selected > 0 )); then
+            [[ "$HOME_CLEAN_CONFIRMED" == yes ]] || die 'Faltou consentimento para limpeza física.'
+            if [[ "$mode" == root ]]; then
+                [[ -n "${HOME_CLEAN_LIST_FILE:-}" && -f "$HOME_CLEAN_LIST_FILE" && ! -L "$HOME_CLEAN_LIST_FILE" ]] ||
+                    die 'Manifesto da prévia não encontrado; limpeza recusada.'
+                /usr/bin/python3 "$PROJECT_DIR/live-gui/wolf_home_cleanup.py" apply "$GUI_PHYSICAL_PLAN" /mnt/home "$HOME_DEVICE" "$HOME_CLEAN_LIST_FILE" ||
+                    die 'Limpeza integral de dotfiles recusada/abortada.'
+            else
+                /usr/bin/python3 "$PROJECT_DIR/live-gui/wolf_home_cleanup.py" apply "$GUI_PHYSICAL_PLAN" /mnt/home "$HOME_DEVICE" ||
+                    die 'Limpeza física recusada/abortada.'
+            fi
+        else
+            info 'Limpeza desmarcada: /home será preservada integralmente.'
+        fi
+        return 0
+    fi
     [[ "$CLEAN_HOME_DOTFILES" == "yes" ]] || {
         info 'Limpeza de dotfiles não solicitada; /home preservada integralmente.'
         return 0
@@ -11808,11 +11873,14 @@ load_gui_physical_plan() {
     GUI_VM_MODE="reuse" # preservar ESP sem instalação fallback
     INSTALL_DISK="${ROOT_DEVICE%p[0-9]*}" # usado apenas para planejamento; NUNCA apagado
     FORMAT_ROOT=yes; FORMAT_ESP=no; FORMAT_HOME=no; CLEAN_HOME_DOTFILES=no
+    PHYSICAL_PLAN_SHA256="$(sha256sum "$GUI_PHYSICAL_PLAN" | cut -d' ' -f1)"
     ok "FÍSICO: formatar somente $ROOT_DEVICE; preservar $ESP_DEVICE e $HOME_DEVICE."
 }
 
 revalidate_gui_physical_target() {
     [[ -n "$GUI_PHYSICAL_PLAN" ]] || return 0
+    [[ "$(sha256sum "$GUI_PHYSICAL_PLAN" | cut -d' ' -f1)" == "$PHYSICAL_PLAN_SHA256" ]] ||
+        die 'Plano físico foi modificado depois do consentimento: ABORTADO.'
     local temp
     temp="$(mktemp /tmp/wolf47-recheck.XXXXXXXX)"
     chmod 600 "$temp"

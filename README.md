@@ -1,4 +1,23 @@
-## Wolf Linux DevKit 2.0.0-alpha47 — instalação física multidisco protegida
+## Wolf Linux DevKit 2.0.0-alpha51 — correção do smoke test para usuário comum
+
+A **instalação física Full da alpha48 está homologada**; a rotina nova de limpeza da alpha50 ainda requer teste físico controlado. O executor continua exigindo Live UEFI, topologia multidisco detectada e revalidação da raiz/EFI/LVM.
+
+Na aba **Partições**, após detectar `/home`, marque **Remover arquivos e pastas ocultos da raiz do usuário**. Abre-se uma **prévia somente leitura** com todas as entradas imediatamente dentro de `/home/USUARIO` cujos nomes começam por ponto (`.bashrc`, `.config`, `.local`, `.steam`, `.ssh` etc.). **Não há seleção uma a uma**. Um checkbox separado permite ativar backup, **desmarcado por padrão**. Depois, o terminal apresenta novamente a lista e exige digitar `LIMPAR` antes da formatação da raiz.
+
+**Atenção:** essa opção apaga `.local` por completo e pode eliminar jogos da Steam, chaves SSH, perfis de navegadores e outras informações escondidas. Os arquivos e diretórios **visíveis** da pasta pessoal e a partição `/home` (incluindo o LVM) são preservados. Se **não marcar** a limpeza, a pasta pessoal fica integralmente intacta. Se pedir backup, ele será criado no próprio volume `/home/.wolf-linux-backups/` e consumirá espaço proporcional aos dados copiados.
+
+**Não use a nova rotina com dados insubstituíveis sem backup independente.** Os testes automatizados verificam prévia, backups, proteção contra alterações e bloqueio de montagens, mas não substituem uma homologação real da limpeza. A restauração dos modos Apagar disco e Particionamento manual está reservada para o futuro refinamento da interface. Consulte `CHANGELOG-alpha50.md` e `CHANGELOG-alpha51.md`.
+
+---
+
+
+## Wolf Linux DevKit 2.0.0-alpha48 — instalação física multidisco protegida (PTY corrigido)
+
+**Correção alpha48:** a Live agora autoriza `--execute-multidisk-physical`
+no PTY integrado, após preflight e confirmações, sem liberar outros modos
+arbitrários. A alpha47 tinha um bloqueio residual no PTY que impedia a GUI
+de iniciar esse executor mesmo com plano válido. A correção não substitui a
+validação em hardware real nem altera os procedimentos de partição do Bash.
 
 Nesta revisão o executor **real em hardware** foi liberado **somente para o contrato
 UEFI com raiz ext4 num NVMe, EFI FAT32 noutro NVMe, e /home ext4 em um LV LVM
@@ -11,7 +30,7 @@ partições são preservados pelo plano; o GRUB escreve em `EFI/WolfLinux`, com
 um teste físico real. O modo não exige backup geral, mas recomenda um e exige
 reconhecimento explícito da perda de todos os arquivos locais na raiz.
 
-**Não utilizar o `--install` genérico nesse cenário**. Na Live alpha47, abra
+**Não utilizar o `--install` genérico nesse cenário**. Na Live alpha48, abra
 Wolf Installer > Reutilizar > Detectar todos os discos > confirmar cada papel >
 Revisão, execute validar/simular/ensaio e em seguida o botão de instalação
 física protegida. O GUI pede a raiz exata; o Bash solicita duas confirmações.

@@ -38,7 +38,7 @@ assert 'Dispositivo encontrado: /dev/nvme1n1p1' in report
 assert 'Dispositivo encontrado: /dev/nvme0n1p1' in report
 assert 'TOPOLOGIA MULTIDISCO' in report
 assert 'PVs LVM envolvidos: /dev/nvme0n1p2, /dev/nvme1n1p2' in report
-assert 'Instalação em hardware físico continua BLOQUEADA' in report
+assert 'Instalação física somente pelo executor específico' in report
 assert len(warnings) == 2, warnings
 unknown, warnings = build_map('UUID=DESCONHECIDO / ext4 defaults 0 1', source_json)
 assert 'NÃO CONFIRMADA' in unknown and warnings
@@ -57,4 +57,4 @@ assert 'self.setMinimumSize(680, 490)' in main
 assert 'VERSION = "1.8"' in main or 'VERSION = "1.9"' in main or 'VERSION = "2.0"' in main or 'VERSION = "2.1"' in main
 stage = (PROJECT/'tests/wolf-stage-live-desktop.sh').read_text()
 assert '"$SOURCE/wolf_storage_map.py"' in stage
-print('[OK] Alpha38: dark, largura responsiva, fstab por UUID, LVM multidisco, execução física bloqueada')
+print('[OK] Alpha38: dark, largura responsiva, fstab por UUID, LVM multidisco, aviso físico atualizado')

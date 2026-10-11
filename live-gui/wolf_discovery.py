@@ -222,7 +222,7 @@ def _device_identity(device: dict) -> dict:
 def build_plan(snapshot: dict, *, root: str, esp: str | None, home: str | None,
                confirmed: bool, acknowledge_override: bool, username: str,
                hostname: str, preset: str, stacks: tuple[str, ...] = (),
-               keyboard: dict | None = None) -> dict:
+               keyboard: dict | None = None, home_cleanup: dict | None = None) -> dict:
     if snapshot.get('schema') != SNAPSHOT_SCHEMA or snapshot.get('execution') != 'disabled':
         raise DiscoveryError('Inventário inválido')
     if not confirmed:
@@ -241,6 +241,8 @@ def build_plan(snapshot: dict, *, root: str, esp: str | None, home: str | None,
         raise DiscoveryError('Lista de stacks inválida')
     if preset in PRESETS and tuple(stacks) != PRESETS[preset]:
         raise DiscoveryError('Stacks incompatíveis com preset')
+    from wolf_home_cleanup import validate_spec
+    home_cleanup = validate_spec(home_cleanup)
     keyboard = keyboard or {'layout': 'br', 'model': 'abnt2', 'variant': ''}
     if not isinstance(keyboard, dict) or set(keyboard) != {'layout', 'model', 'variant'} or not all(
             isinstance(v, str) and re.fullmatch(r'[a-z0-9]{0,16}', v) for v in keyboard.values()):
@@ -275,7 +277,7 @@ def build_plan(snapshot: dict, *, root: str, esp: str | None, home: str | None,
     roles = {r: _device_identity(devices[p]) if p else None for r, p in all_roles.items()}
     warnings = [f'FORMATAR RAIZ {root} EM EXT4 APAGARIA TODOS OS SEUS DADOS.',
                 'EFI e /home existentes serão preservadas e NUNCA formatadas por este plano.',
-                'INSTALAÇÃO FÍSICA BLOQUEADA: apenas revisão/simulação.']
+                'A execução depende de verificação física independente e confirmação dupla.']
     if not home:
         warnings.append('/home não possui volume separado: quaisquer dados anteriores dentro de / seriam perdidos.')
     if mismatch:
@@ -291,14 +293,14 @@ def build_plan(snapshot: dict, *, root: str, esp: str | None, home: str | None,
             }, 'identity': {'username': username, 'hostname': hostname},
             'software': {'preset': preset, 'stacks': list(stacks)}, 'keyboard': keyboard,
             'confirmed': True, 'acknowledge_override': acknowledge_override,
-            'warnings': warnings}
+            'home_cleanup': home_cleanup, 'warnings': warnings}
 
 
 def validate_plan(doc: dict, snapshot: dict) -> dict:
     if not isinstance(doc, dict) or doc.get('schema') != SCHEMA or doc.get('execution') != 'disabled':
         raise DiscoveryError('Schema incorreto ou tentativa de habilitar execução')
     if set(doc) != {'schema', 'execution', 'mode', 'boot_mode', 'source', 'roles', 'actions',
-                    'identity', 'software', 'keyboard', 'confirmed', 'acknowledge_override', 'warnings'}:
+                    'identity', 'software', 'keyboard', 'confirmed', 'acknowledge_override', 'home_cleanup', 'warnings'}:
         raise DiscoveryError('Campos desconhecidos no plano')
     if doc['mode'] != 'multidisk-reuse-preview' or doc['boot_mode'] != snapshot['boot_mode']:
         raise DiscoveryError('Modo ou firmware incompatível')
@@ -322,7 +324,8 @@ def validate_plan(doc: dict, snapshot: dict) -> dict:
                         esp=choices['esp'], home=choices['home'],
                         confirmed=doc['confirmed'], acknowledge_override=doc['acknowledge_override'],
                         **doc['identity'], preset=doc['software']['preset'],
-                        stacks=tuple(doc['software']['stacks']), keyboard=doc['keyboard'])
+                        stacks=tuple(doc['software']['stacks']), keyboard=doc['keyboard'],
+                        home_cleanup=doc['home_cleanup'])
     if rebuilt != doc:
         raise DiscoveryError('Plano alterado ou inventário/fstab mudou; refaça a detecção')
     return rebuilt
@@ -331,7 +334,7 @@ def validate_plan(doc: dict, snapshot: dict) -> dict:
 def render_plan(doc: dict, *, simulated: bool = False) -> str:
     prefix = 'SIMULAÇÃO ESTRUTURAL — SEM EXECUTAR' if simulated else 'REVISÃO MULTIDISCO — SOMENTE LEITURA'
     lines = ['WOLF INSTALLER — ' + prefix,
-             'EXECUÇÃO: BLOQUEADA PARA HARDWARE FÍSICO E PARA ESTE JSON',
+             'REVISÃO SOMENTE LEITURA; execução requer executor independente e consentimento',
              'Fonte: instalação identificada pelo fstab, UUIDs revalidados via lsblk.',
              f'Firmware: {doc["boot_mode"]} | Perfil: {doc["software"]["preset"]}',
              'Stacks: ' + (', '.join(doc['software']['stacks']) or 'nenhuma (Minimal)'),
@@ -343,10 +346,14 @@ def render_plan(doc: dict, *, simulated: bool = False) -> str:
             lines += [f'  UUID: {d["uuid"] or "sem UUID"} | filesystem: {d["fstype"]}',
                       '  Discos envolvidos: ' + ', '.join(d['parent_disks']),
                       '  PV(s) LVM: ' + (', '.join(d['lvm_pvs']) or 'nenhum')]
-    lines += ['', 'OPERAÇÕES HIPOTÉTICAS — NADA SERÁ EXECUTADO:',
+    cleanup = doc['home_cleanup']
+    lines += ['', 'LIMPEZA OPCIONAL DO /home:',
+              '  Dotfiles imediatos do usuário: ' + ('TODOS (.local, .steam, .ssh etc.)' if cleanup.get('enabled') else ('SELEÇÃO LEGADA: ' + ', '.join(cleanup['items']) if cleanup.get('items') else 'nenhum (preservar tudo)')),
+              '  Backup dos itens: ' + ('SIM, consome espaço adicional' if cleanup['backup'] else 'NÃO'),
+              '', 'ROTEIRO DE OPERAÇÕES — ESTA REVISÃO NÃO EXECUTA:', 
               '1. Revalidar UUID, tamanho, caminho e dependências de TODOS os dispositivos.',
-              '2. Solicitar backup e confirmação destrutiva específica para a raiz /.',
-              '3. Formataria SOMENTE a partição raiz / em ext4 (ainda NÃO implementado neste fluxo).',
+              '2. Confirmar especificamente a formatação da raiz /; backup geral recomendado, não obrigatório.',
+              '3. O executor físico, quando apto, formata SOMENTE a raiz / em ext4.',
               '4. Preservaria EFI' + (' e /home dedicada, inclusive todos os PVs do LVM.' if doc['roles']['home'] else '; /home integrada à raiz NÃO seria preservada.'),
               '5. Verificaria o carregador WolfLinux sem apagar entradas Windows/GRUB.',
               '6. Bloquearia qualquer mudança no destino entre planejamento e execução.',

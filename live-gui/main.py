@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Wolf Installer GUI 2.0 — BIOS/MBR na VM e console PTY integrado.
-
-Execução real somente em VM descartável, via backend Bash, após confirmação
-dupla do disco. Reutilização, manual e apagar são restritos a VM; nunca executar em hardware físico.
-"""
+"""Wolf Installer 2.0 — instalação física validada, seleção protegida de /home."""
 from __future__ import annotations
 
 import argparse
@@ -20,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from terminal_engine import InstallerPty
 import wolf_plan
 import wolf_discovery
+import wolf_home_cleanup
 
 VERSION = "2.1"
 STACKS = ("daily", "gaming", "development", "android", "containers", "extras")
@@ -342,7 +339,7 @@ def qt_main() -> int:
         def __init__(self, selected_keyboard):
             super().__init__()
             self.keyboard = selected_keyboard
-            self.setWindowTitle("Wolf Linux — Installer GUI 2.2 — físico controlado")
+            self.setWindowTitle("Wolf Linux — Instalador 2.0 alpha49")
             # Não ultrapassar o espaço disponível da Live (incluindo janelas 1024x768).
             screen = app.primaryScreen()
             available = screen.availableGeometry() if screen else None
@@ -363,11 +360,11 @@ def qt_main() -> int:
             headline = QLabel("WOLF LINUX 2.0   /   INSTALADOR GRÁFICO")
             headline.setStyleSheet("font-size:19pt;font-weight:700;color:#ffffff")
             layout.addWidget(headline)
-            warning = QLabel("EXECUÇÃO VM HOMOLOGADA; EXECUÇÃO FÍSICA SOMENTE POR CONTRATO MULTIDISCO PROTEGIDO: "
-                             "Apagar disco inteiro, Manual UEFI/GPT ou BIOS/MBR, e Reutilizar /home dedicada. "
-                             "No Reutilizar, apenas a raiz / será formatada; EFI e /home permanecem. "
-                             "Limpeza de configurações ocultas exige autorização separada. "
-                             "Ações destrutivas exigem confirmação; o modo físico só aceita raiz+EFI em NVMe distintos e /home LVM multi-PV.")
+            warning = QLabel(
+                "INSTALAÇÃO DE SISTEMA EXISTENTE: a raiz / será formatada APÓS validação de UUIDs e "
+                "confirmação dupla. EFI, /home LVM e outros volumes serão preservados. "
+                "O executor físico disponível nesta versão exige UEFI, dois NVMe e /home em LVM multidisco. "
+                "Nenhuma limpeza de arquivos pessoais será feita sem seleção e autorização adicionais.")
             warning.setWordWrap(True)
             warning.setStyleSheet("color:#ffcf91;border:1px solid #766039;padding:10px")
             layout.addWidget(warning)
@@ -402,15 +399,10 @@ def qt_main() -> int:
                 ("Diagnóstico", ["qterminal", "-e", "wolf-live-diagnostics"]),
                 ("Topologia de discos e LVM",
                  ["qterminal", "-e", "sudo", "wolf-live-storage-topology"]),
-                ("Pré-diagnóstico para hardware físico (somente leitura)",
-                 ["qterminal", "-e", "wolf-physical-preflight"]),
             ):
                 btn = QPushButton(title)
                 btn.clicked.connect(lambda checked=False, args=argv: self.run_command(args))
                 hv.addWidget(btn)
-            cleanup_btn = QPushButton("Recuperar tentativa anterior — desmontar /mnt")
-            cleanup_btn.clicked.connect(self.open_cleanup_assistant)
-            hv.addWidget(cleanup_btn)
             kb_btn = QPushButton("Alterar layout do teclado")
             kb_btn.clicked.connect(self.change_keyboard)
             hv.addWidget(kb_btn)
@@ -434,30 +426,33 @@ def qt_main() -> int:
             self.disk_combo.currentIndexChanged.connect(self.update_erase_bounds)
             self.disk_combo.currentIndexChanged.connect(self.refresh_summary)
             sv.addWidget(self.disk_combo)
+            self.disk_combo.hide()  # O executor físico escolhe pela detecção/UUID, não por disco isolado.
             self.disk_detail = QPlainTextEdit()
             self.disk_detail.setReadOnly(True)
             self.disk_detail.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
             self.disk_detail.setMinimumHeight(165)
             sv.addWidget(self.disk_detail)
+            self.disk_detail.hide()
             self.storage_mode = QComboBox()
-            self.storage_mode.addItem("Apagar TODO o disco (remove partições e dados)", "erase")
-            self.storage_mode.addItem("Reutilizar partições existentes", "reuse")
-            self.storage_mode.addItem("Avançado/manual (criar no GParted e atribuir montagens)", "manual")
+            self.storage_mode.addItem("Reutilizar instalação existente — preservar EFI e /home", "reuse")
+            # Modos legados de laboratório continuam no backend, fora da interface pública.
+            if os.environ.get('WOLF_SHOW_VM_LAB') == '1':
+                self.storage_mode.addItem("LAB: apagar disco de VM", "erase")
+                self.storage_mode.addItem("LAB: manual em VM", "manual")
             sv.addWidget(QLabel("Escolha como instalar o sistema:"))
             sv.addWidget(self.storage_mode)
             self.storage_mode.currentIndexChanged.connect(self.refresh_summary)
             self.storage_mode.currentIndexChanged.connect(self.update_storage_controls)
-            # Fluxo multidisco exclusivo de revisão/simulação. NÃO é aceito no
-            # executor VM nem habilita instalação física.
+            # Fluxo multidisco físico, sempre validado novamente pelo backend.
             self.md_snapshot = None
-            md_header = QLabel("REUTILIZAR — DETECÇÃO MULTIDISCO/LVM (SOMENTE PLANEJAMENTO)")
+            md_header = QLabel("DETECTAR E REUTILIZAR INSTALAÇÃO EXISTENTE")
             md_header.setStyleSheet("color:#b6dcff;font-weight:700;padding:8px;border:1px solid #40516b")
             sv.addWidget(md_header)
             md_hint = QLabel(
                 "Busca instalações existentes lendo o fstab de partições raiz ext4 com montagem "
                 "temporária SOMENTE LEITURA (ro,noload). Permite escolher EFI e /home em OUTROS SSDs "
-                "ou em volume LVM. Não formata nem instala. No modo Reutilizar, "
-                "após a detecção, a revisão usa o mapa multidisco, não a seleção de disco único acima.")
+                "ou em volume LVM. Esta detecção não altera os volumes. "
+                "Após conferir os UUIDs, a instalação poderá ser autorizada pelo executor físico protegido.")
             md_hint.setWordWrap(True)
             sv.addWidget(md_hint)
             self.md_scan_btn = QPushButton("Detectar instalações em TODOS os discos (inclui LVM)")
@@ -487,13 +482,13 @@ def qt_main() -> int:
                 combo.currentIndexChanged.connect(self.md_choices_changed)
                 self.md_roles[role] = combo
                 sv.addWidget(combo)
-            self.md_confirm = QCheckBox("CONFIRMO as partições identificadas para o pré-plano (não instala)")
+            self.md_confirm = QCheckBox("CONFIRMO que as partições e UUIDs foram identificados corretamente")
             self.md_confirm.stateChanged.connect(self.refresh_summary)
             sv.addWidget(self.md_confirm)
             self.md_override = QCheckBox("CONFIRMO divergências em relação ao fstab original")
             self.md_override.stateChanged.connect(self.refresh_summary)
             sv.addWidget(self.md_override)
-            self.md_warning = QLabel("Nenhuma operação no SSD físico será autorizada nesta revisão.")
+            self.md_warning = QLabel("Detecte e confira os volumes: a raiz será formatada apenas após preflight e confirmação.")
             self.md_warning.setWordWrap(True)
             self.md_warning.setStyleSheet("color:#ffcf91;border:1px solid #766039;padding:8px")
             sv.addWidget(self.md_warning)
@@ -503,6 +498,7 @@ def qt_main() -> int:
             part_tool = QPushButton("Abrir GParted — Particionador (ferramenta independente)")
             part_tool.clicked.connect(lambda: self.run_command(["wolf-live-gparted"]))
             sv.addWidget(part_tool)
+            legacy_start = sv.count()
             advanced_info = QLabel(
                 "APAGAR DISCO: remove tudo; UEFI cria EFI FAT32 de 1 GiB e BIOS cria MBR sem EFI. Você escolhe /home integrada ou separada e os tamanhos das partições. "
                 "MANUAL VM: UEFI requer GPT + EFI; BIOS requer MBR/DOS e NÃO usa EFI. Selecione / e /home opcional. "
@@ -625,6 +621,30 @@ def qt_main() -> int:
             cleanup_note.setWordWrap(True)
             cleanup_note.setStyleSheet("color:#ffcf91;border:1px solid #766039;padding:9px")
             sv.addWidget(cleanup_note)
+            if os.environ.get('WOLF_SHOW_VM_LAB') != '1':
+                # Esconde todos os controles antigos de disco único/VM, preservando
+                # os objetos no backend para não alterar os fluxos homologados.
+                for idx in range(legacy_start, sv.count()):
+                    element = sv.itemAt(idx)
+                    if element.widget():
+                        element.widget().hide()
+                    if element.layout():
+                        for j in range(element.layout().count()):
+                            if element.layout().itemAt(j).widget():
+                                element.layout().itemAt(j).widget().hide()
+            self.home_cleanup_spec = {'enabled': False, 'backup': False}
+            self.home_cleanup_source = None
+            self.home_cleanup_check = QCheckBox('Remover arquivos e pastas ocultos da raiz do usuário (/home/usuário/.*)')
+            self.home_cleanup_check.setChecked(False)
+            self.home_cleanup_check.toggled.connect(self.toggle_home_cleanup)
+            sv.addWidget(self.home_cleanup_check)
+            self.home_cleanup_button = QPushButton('Mostrar prévia e configurar backup (opcional)')
+            self.home_cleanup_button.clicked.connect(self.choose_home_cleanup)
+            sv.addWidget(self.home_cleanup_button)
+            self.home_cleanup_button.setEnabled(False)
+            self.home_cleanup_info = QLabel('Nenhuma limpeza selecionada — todos os dados de /home preservados.')
+            self.home_cleanup_info.setWordWrap(True)
+            sv.addWidget(self.home_cleanup_info)
             tabs.addTab(self.scrollable(storage), "Partições")
 
             profile = QWidget()
@@ -674,6 +694,7 @@ def qt_main() -> int:
             vm_trial.setStyleSheet("background:#5d2832;color:white;border:2px solid #be6570;padding:12px;")
             vm_trial.clicked.connect(self.execute_vm_install)
             rv.addWidget(vm_trial)
+            vm_trial.setVisible(os.environ.get('WOLF_SHOW_VM_LAB') == '1')
             self.lab42_button = QPushButton("Laboratório alpha42 — reinstalar somente a raiz da VM multidisco")
             self.lab42_button.setStyleSheet("background:#62472c;color:white;border:2px solid #bb925e;padding:12px;")
             self.lab42_button.setToolTip("SOMENTE VM de laboratório com seriais WOLF41EFI / WOLF41ROOT.\n"
@@ -704,10 +725,9 @@ def qt_main() -> int:
             legacy.clicked.connect(self.open_backend_plan)
             rv.addWidget(legacy)
             review_note = QLabel(
-                "Revisar e Simular NÃO alteram discos. Instalar em VM executa SOMENTE "
-                "Apagar disco inteiro ou Manual UEFI com partições explicitamente selecionadas. "
-                "Reutilizar VM UEFI preserva EFI e /home separada, formatando somente /. "
-                "O plano JSON não autoriza instalação sozinho; o modo físico exige preflight e confirmação dupla.")
+                "Revisão, simulação e ensaio não alteram discos. A instalação física exige "
+                "preflight independente, UUIDs confirmados e confirmações explícitas. "
+                "EFI, Windows e o volume /home serão preservados; apenas a raiz identificada será formatada.")
             review_note.setWordWrap(True)
             rv.addWidget(review_note)
             tabs.addTab(self.scrollable(review), "Revisão")
@@ -716,7 +736,7 @@ def qt_main() -> int:
             self.tabs = tabs
             console = QWidget()
             cv = QVBoxLayout(console)
-            self.console_info = QLabel("A instalação será exibida aqui; terminal integrado interativo. Nenhuma operação em hardware físico.")
+            self.console_info = QLabel("Terminal integrado interativo. A execução real requer preflight independente e confirmações explícitas; abrir esta aba não altera discos.")
             self.console_info.setWordWrap(True)
             cv.addWidget(self.console_info)
             self.console_output = QPlainTextEdit()
@@ -1178,7 +1198,7 @@ def qt_main() -> int:
                           Path('/dev/disk/by-id/virtio-WOLF41ROOT').is_symlink() and
                           Path('/run/archiso/airootfs').is_dir() and
                           Path('/sys/firmware/efi').is_dir())
-                self.lab42_button.setVisible(active and is_lab)
+                self.lab42_button.setVisible(active and is_lab and os.environ.get('WOLF_SHOW_VM_LAB') == '1')
                 self.lab42_button.setEnabled(active and is_lab and self._installer_pty is None)
             if hasattr(self, 'physical_rehearsal_button'):
                 self.physical_rehearsal_button.setVisible(active)
@@ -1192,7 +1212,130 @@ def qt_main() -> int:
             self.disk_combo.setEnabled(not active)
             for combo in self.partition_roles.values():
                 combo.setEnabled(not active)
+            if hasattr(self, 'home_cleanup_button'):
+                self.home_cleanup_button.setEnabled(active and self._installer_pty is None and bool(self.md_roles['home'].currentData()) and self.home_cleanup_check.isChecked())
+                self.home_cleanup_check.setEnabled(active and self._installer_pty is None and bool(self.md_roles['home'].currentData()))
+            if hasattr(self, 'home_cleanup_source'):
+                source = (self.md_roles['home'].currentData(), self.username.text().strip())
+                if self.home_cleanup_source != source:
+                    self.home_cleanup_spec = {'enabled': False, 'backup': False}
+                    self.home_cleanup_source = None
+                    self.home_cleanup_check.blockSignals(True)
+                    self.home_cleanup_check.setChecked(False)
+                    self.home_cleanup_check.blockSignals(False)
+                    self.home_cleanup_info.setText('Limpeza desativada — todos os dados de /home preservados.')
             self.refresh_summary()
+
+        def toggle_home_cleanup(self, checked):
+            """Uma única opção para todas as entradas ocultas imediatas."""
+            if not checked:
+                self.home_cleanup_spec = {'enabled': False, 'backup': False}
+                self.home_cleanup_source = None
+                self.home_cleanup_info.setText('Limpeza desativada — todos os dados de /home preservados.')
+                self.refresh_summary()
+                return
+            if not self.choose_home_cleanup():
+                self.home_cleanup_check.blockSignals(True)
+                self.home_cleanup_check.setChecked(False)
+                self.home_cleanup_check.blockSignals(False)
+                self.home_cleanup_spec = {'enabled': False, 'backup': False}
+                self.home_cleanup_source = None
+                self.home_cleanup_info.setText('Limpeza não confirmada — /home preservada.')
+            self.refresh_summary()
+
+        def choose_home_cleanup(self):
+            """Prévia SOMENTE LEITURA: os itens não são selecionados individualmente."""
+            if not self.multidisk_active() or not self.md_roles['home'].currentData():
+                QMessageBox.warning(self, 'Selecione /home', 'Detecte e confirme o volume /home primeiro.')
+                return False
+            device = self.md_roles['home'].currentData()
+            username = self.username.text().strip()
+            self.home_cleanup_info.setText('Lendo entradas ocultas da pasta pessoal (somente leitura)...')
+            QApplication.processEvents()
+            try:
+                cp = subprocess.run(
+                    ['sudo', '-n', '/usr/bin/python3',
+                     '/usr/local/share/wolf-linux-live/gui/wolf_home_cleanup.py',
+                     'scan-root', str(device), username],
+                    capture_output=True, text=True, timeout=420, check=False)
+                if cp.returncode:
+                    raise ValueError(cp.stderr[-1100:] or 'Não foi possível analisar /home.')
+                entries = json.loads(cp.stdout)
+                if not isinstance(entries, list):
+                    raise ValueError('Prévia retornou itens inválidos.')
+            except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+                self.home_cleanup_info.setText('Prévia indisponível; limpeza não autorizada.')
+                QMessageBox.warning(self, 'Falha na leitura de /home', str(exc))
+                return False
+            dialog = QDialog(self)
+            dialog.setWindowTitle('Limpar dotfiles da pasta pessoal — prévia')
+            dialog.resize(740, 520)
+            layout = QVBoxLayout(dialog)
+            title = QLabel(f'Entradas ocultas imediatamente em /home/{username}')
+            title.setStyleSheet('font-size:13pt;font-weight:700')
+            layout.addWidget(title)
+            description = QLabel(
+                'Se confirmar, TODAS as entradas listadas serão removidas, incluindo .local, .steam, '
+                '.ssh e perfis de navegadores, caso existam. Isso também pode apagar jogos da Steam, '
+                'chaves e credenciais. Nenhum arquivo ou diretório visível será excluído. '
+                'A partição /home e seus volumes LVM serão preservados.')
+            description.setWordWrap(True)
+            layout.addWidget(description)
+            area = QScrollArea()
+            area.setWidgetResizable(True)
+            body = QWidget()
+            bl = QVBoxLayout(body)
+            size_total = 0
+            for entry in entries:
+                name, size = entry['path'], int(entry['bytes'])
+                size_total += size
+                text = f'• {name} — {format_size(size)}'
+                if entry.get('sensitive'):
+                    text += '   ⚠ Pode conter dados importantes'
+                label = QLabel(text)
+                label.setWordWrap(True)
+                bl.addWidget(label)
+            if not entries:
+                bl.addWidget(QLabel('Nenhuma entrada oculta encontrada na raiz do usuário.'))
+            bl.addStretch()
+            area.setWidget(body)
+            layout.addWidget(area, 1)
+            backup = QCheckBox('Criar backup antes de remover (opcional, consome espaço adicional)')
+            backup.setChecked(self.home_cleanup_spec['backup'] if self.home_cleanup_source == (device, username) else False)
+            layout.addWidget(backup)
+            totals = QLabel()
+            totals.setWordWrap(True)
+            layout.addWidget(totals)
+            def refresh_totals(*_):
+                totals.setText(f'Total a remover: {len(entries)} entradas, cerca de {format_size(size_total)}  •  '
+                               f'Backup: {format_size(size_total) + " adicionais (estimativa)" if backup.isChecked() else "não (0 B extras)"}')
+            backup.stateChanged.connect(refresh_totals)
+            refresh_totals()
+            actions = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+            actions.button(QDialogButtonBox.StandardButton.Ok).setText('Confirmar opções')
+            actions.accepted.connect(dialog.accept)
+            actions.rejected.connect(dialog.reject)
+            layout.addWidget(actions)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return False
+            spec = wolf_home_cleanup.validate_spec({'enabled': True, 'backup': backup.isChecked()})
+            message = (f'A limpeza incluirá TODAS as {len(entries)} entradas ocultas listadas '
+                       f'em /home/{username}, aproximadamente {format_size(size_total)}.\n\n'
+                       + ('Backup será criado antes da remoção.' if spec['backup'] else
+                          'SEM BACKUP: as configurações, jogos, chaves e outros dados ocultos serão perdidos.')
+                       + '\n\nA remoção exige uma confirmação adicional no terminal ANTES da formatação da raiz.')
+            if QMessageBox.warning(self, 'Confirmar limpeza dos dotfiles', message,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Cancel) != QMessageBox.StandardButton.Yes:
+                return False
+            self.home_cleanup_spec = spec
+            self.home_cleanup_source = (device, username)
+            self.home_cleanup_info.setText(
+                f'Limpeza integral das entradas ocultas da pasta pessoal: {len(entries)} itens ({format_size(size_total)}). '
+                f'Backup: {"sim" if spec["backup"] else "não"}. '
+                'Os arquivos visíveis serão preservados. Uma nova verificação e confirmação ocorrerão antes da formatação.')
+            self.refresh_summary()
+            return True
 
         def multidisk_active(self):
             return (self.storage_mode.currentData() == 'reuse' and
@@ -1207,7 +1350,9 @@ def qt_main() -> int:
                 username=self.username.text().strip(), hostname=self.hostname.text().strip(),
                 preset=self.preset.currentText().lower(),
                 stacks=self.selected_stacks(),
-                keyboard=dict(zip(('layout','model','variant'), self.keyboard)))
+                keyboard=dict(zip(('layout','model','variant'), self.keyboard)),
+                home_cleanup=self.home_cleanup_spec if self.home_cleanup_source == (
+                    self.md_roles['home'].currentData(), self.username.text().strip()) else None)
 
         def current_preview(self):
             if self.multidisk_active():
@@ -1311,8 +1456,8 @@ def qt_main() -> int:
                                     (check.stderr or check.stdout)[-2800:])
                 return
             message = ('INSTALAÇÃO FÍSICA REAL.\n\n'
-                       + check.stdout + '\n\nNÃO HÁ BACKUP GERAL. '                       'A raiz será definitivamente formatada. Uma falha pode deixar o sistema sem boot.\n'
-                       'EFI, Microsoft, GRUB, NTFS e /home LVM serão preservados.\n'
+                       + check.stdout + '\n\nBACKUP GERAL NÃO É EXIGIDO NEM VERIFICADO. '                       'A raiz será definitivamente formatada. Uma falha pode deixar o sistema sem boot.\n'
+                       'O plano não formata EFI, Microsoft, GRUB, NTFS nem /home LVM. Ainda assim, faça cópia dos dados essenciais.\n'
                        'Depois serão exigidas duas confirmações no terminal. Prosseguir?')
             response = QMessageBox.warning(
                 self, 'RISCO DE PERDA REAL — SSD NVMe', message,
@@ -1333,7 +1478,7 @@ def qt_main() -> int:
             try:
                 log_dir = Path.home() / '.local/state/wolf-linux/live-installer'
                 log_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-                fd, name = tempfile.mkstemp(prefix='physical47-', suffix='.log', dir=str(log_dir))
+                fd, name = tempfile.mkstemp(prefix='physical49-', suffix='.log', dir=str(log_dir))
                 os.fchmod(fd, 0o600)
                 self._installer_log = os.fdopen(fd, 'w', encoding='utf-8', errors='replace')
                 engine = InstallerPty()
@@ -1624,9 +1769,18 @@ def qt_main() -> int:
             if not hasattr(self, "partition_roles"):
                 return
             try:
-                document = self.current_preview()
-                summary = (wolf_discovery.render_plan(document) if document.get('schema') == wolf_discovery.SCHEMA
-                           else wolf_plan.text_summary(document))
+                if os.environ.get('WOLF_SHOW_VM_LAB') != '1' and not self.multidisk_active():
+                    summary = ('WOLF LINUX — PLANEJAMENTO DE INSTALAÇÃO\n\n'
+                               '1. Vá à aba Partições.\n'
+                               '2. Selecione Reutilizar e detecte as instalações existentes.\n'
+                               '3. Confira a raiz, a EFI, /home LVM e os UUIDs.\n'
+                               '4. Opcionalmente, escolha itens ocultos para limpeza, com backup ou sem.\n'
+                               '5. Revise, simule e execute o preflight antes de confirmar a formatação.\n\n'
+                               'Esta versão física é restrita à topologia de dois NVMe e /home LVM multidisco.')
+                else:
+                    document = self.current_preview()
+                    summary = (wolf_discovery.render_plan(document) if document.get('schema') == wolf_discovery.SCHEMA
+                               else wolf_plan.text_summary(document))
             except (ValueError, TypeError) as exc:
                 summary = f"Erro de validação: {exc}"
             self.summary.setPlainText(summary)

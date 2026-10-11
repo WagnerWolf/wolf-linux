@@ -46,6 +46,8 @@ install -Dm0644 "$SOURCE/wolf_discovery.py" "$AIROOT/usr/local/share/wolf-linux-
 install -Dm0644 "$SOURCE/wolf_discovery.py" "$AIROOT/root/wolf-linux/live-gui/wolf_discovery.py"
 install -Dm0644 "$SOURCE/wolf_physical_rehearsal.py" "$AIROOT/root/wolf-linux/live-gui/wolf_physical_rehearsal.py"
 install -Dm0644 "$SOURCE/wolf_physical_executor.py" "$AIROOT/root/wolf-linux/live-gui/wolf_physical_executor.py"
+install -Dm0644 "$SOURCE/wolf_home_cleanup.py" "$AIROOT/root/wolf-linux/live-gui/wolf_home_cleanup.py"
+install -Dm0644 "$SOURCE/wolf_home_cleanup.py" "$AIROOT/usr/local/share/wolf-linux-live/gui/wolf_home_cleanup.py"
 install -Dm0644 "$SOURCE/wolf_lab42.py" "$AIROOT/root/wolf-linux/live-gui/wolf_lab42.py"
 install -Dm0644 "$SOURCE/wolf_home_identity.py" "$AIROOT/root/wolf-linux/live-gui/wolf_home_identity.py"
 install -Dm0644 "$SOURCE/wolf_storage_map.py" "$AIROOT/root/wolf-linux/live-gui/wolf_storage_map.py"

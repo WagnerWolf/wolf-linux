@@ -61,7 +61,7 @@ def main() -> int:
             outer.addWidget(subtitle)
 
             warning = QLabel('SOMENTE LEITURA — não executa reparos, montagem, formatação ou alterações em LVM. '
-                             'A instalação em hardware físico continua bloqueada.')
+                             'Não realiza instalações; use o instalador principal após verificar os volumes.')
             warning.setObjectName('warning')
             warning.setWordWrap(True)
             outer.addWidget(warning)

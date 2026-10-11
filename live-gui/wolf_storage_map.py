@@ -146,13 +146,13 @@ def build_map(fstab_text: str, lsblk_raw: str) -> tuple[str, list[str]]:
         efi_disks, _ = parent_disks(nodes, roles['/boot/efi'])
         if root_disks and efi_disks and not set(root_disks).intersection(efi_disks):
             lines.append('TOPOLOGIA MULTIDISCO: EFI e RAIZ / estão em discos diferentes.')
-            warnings.append('EFI e / em SSDs diferentes: instalação gráfica física ainda bloqueada.')
+            warnings.append('EFI e / em SSDs diferentes: exige preflight físico e confirmação da topologia.')
 
     lines.extend(['', 'RESTRIÇÕES DE SEGURANÇA:',
                   '- Este mapa NÃO é plano executável e não altera discos.',
                   '- Não formatar EFI, volumes LVM ou partições Windows existentes.',
                   '- Conferir backups, efibootmgr e identificação real antes de qualquer instalação.',
-                  '- Instalação em hardware físico continua BLOQUEADA na GUI.'])
+                  '- Instalação física somente pelo executor específico, após revalidação UUID/LVM.'])
     if warnings:
         lines.extend(['', 'AVISOS:'] + [f'! {warning}' for warning in warnings])
     return '\n'.join(lines) + '\n', warnings
