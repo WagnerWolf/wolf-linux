@@ -47,6 +47,7 @@ with tempfile.TemporaryDirectory(prefix='wolf-alpha40-') as tmp:
                  '--review-gui-plan', '--simulate-gui-plan', '--preflight-gui-plan-vm'):
         check([mode, '/tmp/preview.json'], [mode, '/tmp/preview.json'])
     check(['--execute-gui-plan-vm', '/tmp/preview.json'], ['--execute-gui-plan-vm', '/tmp/preview.json'])
+    check(['--execute-gui-plan-vm-click', '/tmp/preview.json'], ['--execute-gui-plan-vm-click', '/tmp/preview.json'])
     check(['--reset-state'], ['--reset-state'])
     check(['--help'], ['--help'])
     check(['--install'], ['--install'])

@@ -287,7 +287,7 @@ grep -Fq 'options+=(--extras)' "$INSTALLER" || err 'Extra não aciona Octopi no 
 [[ -f "$PROJECT/assets/zsh/zshrc" ]] && grep -Fq "typeset -g ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=250'" "$PROJECT/assets/zsh/zshrc" || err 'Correção fg=250 de autosuggestions ausente ao final do perfil'
 ok 'Control Center integrado; extras e plugin Zsh verificados'
 
-printf '\n>> Validando Wolf Live GUI experimental...\n'
+printf '\n>> Validando Wolf Installer 2.0...\n'
 if ! WOLF_PROJECT="$PROJECT" "$PROJECT/tests/wolf-test-live-desktop.sh"; then
     err 'Testes de staging da GUI Live falharam'
 fi

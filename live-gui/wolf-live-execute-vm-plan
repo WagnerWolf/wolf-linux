@@ -2,6 +2,11 @@
 # TESTE destrutivo real SOMENTE em VM descartável com disco VirtIO descartável.
 # A GUI só recebe sucesso se o instalador Bash terminar com código ZERO.
 set -Eeuo pipefail
+clicked=0
+if [[ "${1:-}" == '--click-confirmed' ]]; then
+    clicked=1
+    shift
+fi
 if (( $# < 1 || $# > 2 )); then
     echo '[ERRO] Uso: wolf-live-execute-vm-plan preview.json [arquivo-resultado]' >&2
     exit 2
@@ -19,7 +24,11 @@ fi
 printf '%s\n' 'WOLF INSTALLER GUI 1.1 — EXECUÇÃO EXPERIMENTAL VM' \
                 'ATENÇÃO: esta operação poderá apagar o disco INTEIRO ou FORMATAR a raiz selecionada, preservando EFI/home quando escolhido.'
 status=0
-sudo wolf-install --execute-gui-plan-vm "$plan" || status=$?
+if (( clicked == 1 )); then
+    sudo -n wolf-install --execute-gui-plan-vm-click "$plan" || status=$?
+else
+    sudo wolf-install --execute-gui-plan-vm "$plan" || status=$?
+fi
 printf '\nInstalador finalizado (código %s).\n' "$status"
 if (( status == 0 )); then
     printf '%s\n' 'Instalação concluída com sucesso.' \

@@ -30,6 +30,7 @@ STAGE_LABELS = {
     '61-identidade-wolf': 'Aplicaria a identidade visual do Wolf Linux no alvo.',
     '62-usuario-sudo': 'Criaria/configuraria a conta {username}, sudo e UID/GID da /home preservada; testaria escrita real.',
     '63-chaotic-aur': 'Configuraria Chaotic-AUR no alvo quando existirem stacks opcionais.',
+    '63b-vulkan': 'Instalaria antecipadamente o provedor Vulkan específico da GPU detectada apenas quando a stack Gaming estiver selecionada.',
     '64-resolver-stacks': 'Instalaria stacks na ordem Arch oficial -> Chaotic-AUR -> AUR fallback.',
     '67-servicos': 'Ativaria serviços do sistema (sem iniciar serviços do alvo neste ensaio).',
     '68-android-flutter': 'Instalaria Android/Flutter apenas se selecionados; caso contrário a rotina ignora a stack.',
@@ -121,6 +122,9 @@ def report(doc: dict, stages: list[str], *, mounts: bool = False) -> str:
     for stage in stages:
         if stage in ('63-chaotic-aur', '64-resolver-stacks') and not doc['software']['stacks']:
             lines.append(f'[NÃO APLICÁVEL] {stage}: Minimal não solicita stacks opcionais.')
+            continue
+        if stage == '63b-vulkan' and 'gaming' not in doc['software']['stacks']:
+            lines.append(f'[NÃO APLICÁVEL] {stage}: stack Gaming não selecionada.')
             continue
         description = STAGE_LABELS[stage].format(**a)
         lines.append(f'[NÃO EXECUTADO] {stage}: {description}')

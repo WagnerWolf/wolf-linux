@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Prévia SOMENTE leitura dos ocultos imediatos da pasta pessoal.
+set -Eeuo pipefail
+(( EUID == 0 )) || { echo 'Privilégios insuficientes para ler o volume.' >&2; exit 2; }
+[[ -d /run/archiso ]] || { echo 'Requer sessão Live Wolf/Archiso.' >&2; exit 2; }
+(( $# == 2 )) || exit 2
+volume="$1"; username="$2"
+[[ "$username" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || { echo 'Usuário inválido.' >&2; exit 2; }
+[[ "$volume" =~ ^/dev/(vd[a-z]+[0-9]+|sd[a-z]+[0-9]+|nvme[0-9]+n[0-9]+p[0-9]+|mmcblk[0-9]+p[0-9]+)$ ]] || { echo 'Partição inválida.' >&2; exit 2; }
+[[ -b "$volume" && ! -L "$volume" ]] || { echo 'Dispositivo inexistente ou symlink.' >&2; exit 2; }
+[[ "$(lsblk -dnro TYPE "$volume" | tr -d '[:space:]')" == part ]] || { echo 'Exige partição comum.' >&2; exit 2; }
+[[ "$(lsblk -dnro FSTYPE "$volume" | tr -d '[:space:]')" == ext4 ]] || { echo 'Exige volume ext4.' >&2; exit 2; }
+if findmnt -rn --source "$volume" >/dev/null; then
+    echo 'Volume montado: desmonte antes da prévia.' >&2; exit 2
+fi
+probe="$(mktemp -d /run/wolf-home-preview.XXXXXXXX)"
+finish() { if mountpoint -q "$probe"; then umount "$probe" || :; fi; rmdir "$probe" 2>/dev/null || :; }
+trap finish EXIT
+mount -t ext4 -o ro,noload,nosuid,nodev,noexec "$volume" "$probe"
+userdir="$probe/$username"
+[[ -d "$userdir" && ! -L "$userdir" ]] || { echo "Não existe /home/$username nesse volume."; exit 0; }
+find "$userdir" -mindepth 1 -maxdepth 1 -name '.*' -printf '%f\n' | LC_ALL=C sort

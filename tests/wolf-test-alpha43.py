@@ -98,7 +98,7 @@ assert 'wolf_home_identity.py' in staging and 'wolf-physical-preflight' in stagi
 main=(ROOT/'live-gui/main.py').read_text()
 assert "'--preflight-multidisk-physical'" in main
 assert 'wolf-physical-preflight' not in main  # botão piloto antigo saiu da GUI
-assert (ROOT/'VERSION').read_text().strip() in ('2.0.0-alpha44', '2.0.0-alpha45', '2.0.0-alpha46', '2.0.0-alpha47', '2.0.0-alpha48', '2.0.0-alpha49', '2.0.0-alpha50', '2.0.0-alpha51')
+assert (ROOT/'VERSION').read_text().strip() in ('2.0.0-alpha44', '2.0.0-alpha45', '2.0.0-alpha46', '2.0.0-alpha47', '2.0.0-alpha48', '2.0.0-alpha49', '2.0.0-alpha50', '2.0.0-alpha51', '2.0.0-alpha52', '2.0.0-alpha53', '2.0.0-alpha54', '2.0.0-alpha55', '2.0.0-alpha56', '2.0.0-alpha57', '2.0.0-alpha58', '2.0.0-alpha59', '2.0.0')
 print('[OK] alpha43: UID preservado quando livre, colisões e links bloqueados')
 print('[OK] alpha43: escrita verificada e correção limitada ao diretório pessoal')
 print('[OK] alpha43: diagnóstico físico somente leitura, sem liberação de instalação')

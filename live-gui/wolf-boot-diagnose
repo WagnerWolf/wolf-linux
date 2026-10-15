@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Diagnóstico UEFI SOMENTE LEITURA para instalações que terminaram mas não iniciam.
+set -Eeuo pipefail
+
+printf '\n=== Wolf Linux — diagnóstico de inicialização UEFI ===\n'
+if [[ -d /sys/firmware/efi/efivars ]]; then
+    echo 'Firmware: UEFI'
+else
+    echo 'Firmware: BIOS/Legacy ou EFI variables indisponíveis'
+fi
+printf '\n=== Discos e partições ===\n'
+lsblk -o NAME,PATH,SIZE,TYPE,FSTYPE,PARTTYPE,MOUNTPOINTS
+printf '\n=== Entradas do firmware (somente leitura) ===\n'
+if command -v efibootmgr >/dev/null 2>&1; then
+    efibootmgr -v 2>&1 || true
+fi
+
+if (( $# > 1 )); then
+    printf 'Uso: sudo wolf-boot-diagnose [ESP_DEV_EXPLICITO]\n' >&2
+    exit 2
+fi
+if (( $# == 0 )); then
+    echo
+    echo 'Para inspecionar os arquivos EFI, repita informando a partição ESP,'
+    echo 'por exemplo: sudo wolf-boot-diagnose /dev/vda1'
+    echo 'A inspeção monta a partição SOMENTE para leitura e a desmonta ao fim.'
+    exit 0
+fi
+(( EUID == 0 )) || { echo 'Informe a ESP usando sudo (necessário para montagem somente leitura).' >&2; exit 2; }
+ESP="$1"
+[[ -b "$ESP" ]] || { echo "Dispositivo inválido: $ESP" >&2; exit 2; }
+[[ "$(lsblk -nro FSTYPE "$ESP" | head -n1 | tr '[:upper:]' '[:lower:]')" == vfat ]] || {
+    echo 'Dispositivo informado não é FAT (vfat); inspeção recusada.' >&2
+    exit 2
+}
+MOUNT_DIR="$(mktemp -d /tmp/wolf-boot-diag.XXXXXXXX)"
+finish() {
+    mountpoint -q "$MOUNT_DIR" && umount "$MOUNT_DIR" || true
+    rmdir "$MOUNT_DIR" 2>/dev/null || true
+}
+trap finish EXIT
+mount -o ro "$ESP" "$MOUNT_DIR"
+echo
+printf '=== EFI detectada em %s ===\n' "$ESP"
+find "$MOUNT_DIR/EFI" -maxdepth 3 -type f \( -iname '*.efi' -o -iname 'grub.cfg' \) -printf '%P | %s bytes\n' 2>/dev/null | sort || true
+for file in EFI/WolfLinux/grubx64.efi EFI/BOOT/BOOTX64.EFI; do
+    if [[ -s "$MOUNT_DIR/$file" ]]; then
+        printf '[OK] %s (%s bytes)\n' "$file" "$(stat -c %s "$MOUNT_DIR/$file")"
+    else
+        printf '[AUSENTE] %s\n' "$file"
+    fi
+done
+echo 'Diagnóstico concluído. Nenhum arquivo foi alterado.'

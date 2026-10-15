@@ -58,7 +58,9 @@ ln -sfn ../wolf-loadkeys.service "$AIROOT/etc/systemd/system/multi-user.target.w
 
 cat > "$AIROOT/etc/os-release" <<'OSR'
 NAME="Wolf Linux Live"
-PRETTY_NAME="Wolf Linux Live"
+VERSION="2.0"
+VERSION_ID="2.0.0"
+PRETTY_NAME="Wolf Linux 2.0 Live"
 ID=wolf-linux
 ID_LIKE=arch
 VARIANT="Wolf Linux 2.0 Live Graphical Installer"
@@ -70,7 +72,7 @@ cat > "$AIROOT/etc/issue" <<'ISSUE'
 Wolf Linux Live — instalacao e recuperacao  \n \l
 ISSUE
 cat > "$AIROOT/etc/motd" <<'MOTD'
-Wolf Linux Live — abra Wolf Installer para iniciar o pre-planejamento grafico.
+Wolf Linux Live — abra Wolf Installer para iniciar a instalacao grafica.
 O instalador CLI continua disponivel com sudo wolf-install --help.
 MOTD
 printf '%s\n' wolf-live > "$AIROOT/etc/hostname"
@@ -96,7 +98,7 @@ export WOLF_ASSET_DIR="/root/wolf-linux/assets"
 needs_mode=1
 for arg in "$@"; do
     case "$arg" in
-        --install|--vm-install|--dry-run|--plan-only|--review-gui-plan|--simulate-gui-plan|--review-multidisk-plan|--simulate-multidisk-plan|--rehearse-multidisk-physical|--preflight-multidisk-physical|--execute-multidisk-physical|--preflight-multidisk-lab-vm|--execute-multidisk-lab-vm|--preflight-gui-plan-vm|--execute-gui-plan-vm|--list-stacks|--reset-state|-h|--help) needs_mode=0 ;;
+        --install|--vm-install|--dry-run|--plan-only|--review-gui-plan|--simulate-gui-plan|--review-multidisk-plan|--simulate-multidisk-plan|--rehearse-multidisk-physical|--preflight-multidisk-physical|--execute-multidisk-physical|--preflight-multidisk-lab-vm|--execute-multidisk-lab-vm|--preflight-gui-plan-vm|--execute-gui-plan-vm|--execute-gui-plan-vm-click|--list-stacks|--reset-state|-h|--help) needs_mode=0 ;;
         --full|--test|--minimal|--preset|--stacks) ;; # Seleções do instalador interativo legado.
         --*|-*) echo "[ERRO] Opção desconhecida do lançador Wolf: $arg" >&2; exit 2 ;;
     esac
@@ -134,10 +136,10 @@ echo "             $(cat /etc/wolf-linux-live-build)"
 echo "============================================================"
 echo "Instalador: wolf-install"
 echo "Full .....: wolf-install --full"
-echo "VM/Test ..: wolf-install --test"
+echo "Test .....: wolf-install --test"
 echo "Minimal ..: wolf-install --minimal"
 echo "Stacks ...: wolf-install --list-stacks"
-echo "SSH VM ...: wolf-enable-ssh-live  (alias: wolf-ssh)"
+echo "SSH .......: wolf-enable-ssh-live  (alias: wolf-ssh)"
 echo "============================================================"
 echo
 ZP

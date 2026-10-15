@@ -32,8 +32,10 @@ install -Dm0755 "$SOURCE/wolf-live-create-user" "$AIROOT/usr/local/bin/wolf-live
 # Laboratorio QEMU alpha41: somente discos VirtIO com seriais exclusivos.
 install -Dm0755 "$PROJECT/tests/wolf-lab41-particionar.sh" "$AIROOT/usr/local/bin/wolf-lab41-particionar"
 install -Dm0755 "$PROJECT/tests/wolf-lab41-verificar.sh" "$AIROOT/usr/local/bin/wolf-lab41-verificar"
+install -Dm0755 "$SOURCE/wolf-home-preview-live" "$AIROOT/usr/local/bin/wolf-home-preview-live"
 install -Dm0755 "$SOURCE/wolf-live-gparted" "$AIROOT/usr/local/bin/wolf-live-gparted"
 install -Dm0755 "$SOURCE/wolf-live-diagnostics" "$AIROOT/usr/local/bin/wolf-live-diagnostics"
+install -Dm0755 "$SOURCE/wolf-boot-diagnose" "$AIROOT/usr/local/bin/wolf-boot-diagnose"
 install -Dm0755 "$SOURCE/wolf-live-storage-topology" "$AIROOT/usr/local/bin/wolf-live-storage-topology"
 install -Dm0755 "$SOURCE/wolf-physical-preflight" "$AIROOT/usr/local/bin/wolf-physical-preflight"
 install -Dm0755 "$SOURCE/wolf-live-time-status" "$AIROOT/usr/local/bin/wolf-live-time-status"
@@ -57,6 +59,10 @@ rm -f "$AIROOT/usr/local/bin/wolf-live-mount-manager" "$AIROOT/usr/local/bin/wol
       "$AIROOT/usr/local/share/wolf-linux-live/mount_manager.py" \
       "$AIROOT/usr/local/share/wolf-linux-live/mount_backend.py"
 install -Dm0755 "$SOURCE/wolf-live-installer" "$AIROOT/usr/local/bin/wolf-live-installer"
+rm -f "$AIROOT/usr/local/bin/wolf-live-installer-classic"
+install -Dm0644 "$SOURCE/preview/app.py" "$AIROOT/usr/local/share/wolf-linux-live/gui/preview/app.py"
+install -Dm0644 "$SOURCE/preview/planner.py" "$AIROOT/usr/local/share/wolf-linux-live/gui/preview/planner.py"
+install -Dm0644 "$SOURCE/preview/vm_bridge.py" "$AIROOT/usr/local/share/wolf-linux-live/gui/preview/vm_bridge.py"
 install -Dm0755 "$SOURCE/wolf-live-review-plan" "$AIROOT/usr/local/bin/wolf-live-review-plan"
 install -Dm0755 "$SOURCE/wolf-live-simulate-plan" "$AIROOT/usr/local/bin/wolf-live-simulate-plan"
 install -Dm0755 "$SOURCE/wolf-live-physical-rehearsal" "$AIROOT/usr/local/bin/wolf-live-physical-rehearsal"
@@ -113,6 +119,7 @@ required={
     "/usr/local/bin/wolf-live-execute-vm-plan": "0:0:755",
     "/usr/local/bin/wolf-live-cleanup-vm": "0:0:755",
     "/usr/local/bin/wolf-live-gparted": "0:0:755",
+    "/usr/local/bin/wolf-home-preview-live": "0:0:755",
     "/usr/local/bin/wolf-live-storage-topology": "0:0:755",
     "/usr/local/bin/wolf-physical-preflight": "0:0:755",
     "/usr/local/bin/wolf-live-time-status": "0:0:755",
@@ -139,4 +146,4 @@ PY_PERMS
 
 [[ -x "$AIROOT/usr/local/bin/wolf-live-installer" ]] || { echo '[ERRO] wrapper Wolf Live ausente.' >&2; exit 1; }
 [[ -L "$AIROOT/etc/systemd/system/multi-user.target.wants/wolf-live-user.service" ]] || { echo '[ERRO] Serviço live não habilitado.' >&2; exit 1; }
-echo '[OK] Wolf Live GUI: Chromium, BlueZ/Blueman, Rescue e modo físico multidisco sob confirmação explícita.'
+echo '[OK] Wolf Live: instalador integrado e único; executor clássico permanece somente no código-fonte.'

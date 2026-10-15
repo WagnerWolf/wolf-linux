@@ -11,7 +11,7 @@ Isso impede que uma função secundária do instalador grave dados sem querer.
    detecte todos os discos e confirme raiz, ESP e `/home` em LVM; confirme o plano.
 2. Em **Revisão**, rode Validação JSON e Simulação (ambas devem terminar em 0).
 3. Clique **Ensaio físico integral — TODAS as etapas descritas, SEM EXECUTAR**.
-4. Confira o mapeamento da raiz, EFI, `/home` e PVs, as 25 etapas hipotéticas e
+4. Confira o mapeamento da raiz, EFI, `/home` e PVs, as etapas hipotéticas e
    o resultado `ENSAIO DE PLANO APROVADO`. `código 0` valida **somente o plano**.
 
 Também é possível executar `sudo wolf-install --rehearse-multidisk-physical

@@ -23,6 +23,7 @@ from pathlib import Path
 # do Bash/wolf_physical_executor (identidade, UUID, fstab, LVM, Live e UEFI).
 ALLOWED_EXECUTION_MODES = frozenset({
     "--execute-gui-plan-vm",
+    "--execute-gui-plan-vm-click",
     "--execute-multidisk-lab-vm",
     "--execute-multidisk-physical",
 })

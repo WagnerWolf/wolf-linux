@@ -25,6 +25,9 @@ def run_with_wipe(result):
     calls = []
     def runner(args, **kwargs):
         calls.append(args)
+        if args[0] == 'lsblk':
+            assert args == ['lsblk','-nr','-o','TYPE,MOUNTPOINTS','/dev/vda']
+            return subprocess.CompletedProcess(args,0,'disk\n','')
         if args[0] == 'wipefs':
             assert args == ['wipefs', '--no-act', '--noheadings', '--output', 'TYPE', '/dev/vda']
             if isinstance(result, Exception):
@@ -46,14 +49,14 @@ def run_with_wipe(result):
             return str(ex), calls
 
 valid, calls = run_with_wipe(subprocess.CompletedProcess([], 0, '', ''))
-assert valid[0] == '/dev/vda' and len(calls) == 3
+assert valid[0] == '/dev/vda' and len(calls) == 4
 signed, calls = run_with_wipe(subprocess.CompletedProcess([], 0, 'gpt\n', ''))
-assert signed[0] == '/dev/vda' and len(calls) == 3  # assinaturas permitidas no APAGAR DISCO
+assert signed[0] == '/dev/vda' and len(calls) == 4  # assinaturas permitidas no APAGAR DISCO
 failure, calls = run_with_wipe(subprocess.CompletedProcess([], 1, '', 'permissão negada'))
 assert 'Falha' in failure or 'não conseguiu' in failure
-assert 'permissão negada' in failure and len(calls) == 1
+assert 'permissão negada' in failure and len(calls) == 2
 exception, calls = run_with_wipe(OSError('wipefs ausente'))
-assert 'Falha técnica' in exception and len(calls) == 1
+assert 'Falha técnica' in exception and len(calls) == 2
 
 source = (root/'live-gui/main.py').read_text()
 tree = ast.parse(source)

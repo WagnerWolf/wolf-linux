@@ -45,7 +45,7 @@ reject('sem MAJ:MIN', lambda: wp.vm_erase_fields(c, disks=[{**D,'maj_min':''}], 
 reject('não VirtIO', lambda: wp.vm_erase_fields(make([{**D,'path':'/dev/sda'}]), disks=[{**D,'path':'/dev/sda'}], active_boot='UEFI'))
 reject('firmware unknown', lambda: wp.vm_erase_fields({**c,'boot_mode':'unknown'}, disks=[D], active_boot='UEFI'))
 reject('alterado', lambda: wp.vm_erase_fields({**c, 'execution':'enabled'}, disks=[D], active_boot='UEFI'))
-reject('teclado não suportado', lambda: wp.vm_erase_fields(make(kb={'layout':'us','model':'pc105','variant':''}), disks=[D], active_boot='UEFI'))
+reject('teclado não suportado', lambda: wp.vm_erase_fields(make(kb={'layout':'xx','model':'pc105','variant':''}), disks=[D], active_boot='UEFI'))
 reject('modo manual', lambda: wp.vm_erase_fields(make(mode='manual'), disks=[D], active_boot='UEFI'))
 reject('modo reuse', lambda: wp.vm_erase_fields(make(mode='reuse'), disks=[D], active_boot='UEFI'))
 with tempfile.TemporaryDirectory() as t:

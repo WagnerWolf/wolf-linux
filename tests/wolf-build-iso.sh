@@ -105,6 +105,8 @@ printf '[OK] SSH live confirmado dentro do squashfs final.\n'
 # A ISO final deve conter o launcher GUI e o ambiente do usuário temporário.
 for expected in \
   /usr/local/bin/wolf-live-installer \
+  /usr/local/share/wolf-linux-live/gui/preview/app.py \
+  /usr/local/share/wolf-linux-live/gui/preview/planner.py \
   /usr/local/share/wolf-linux-live/gui/main.py \
   /usr/local/share/wolf-linux-live/gui/wolf_plan.py \
   /usr/local/bin/wolf-live-create-user; do

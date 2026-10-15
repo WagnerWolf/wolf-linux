@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'live-gui'))
 from terminal_engine import InstallerPty, ALLOWED_EXECUTION_MODES
 
-EXPECTED = {'--execute-gui-plan-vm', '--execute-multidisk-lab-vm', '--execute-multidisk-physical'}
+EXPECTED = {'--execute-gui-plan-vm', '--execute-gui-plan-vm-click', '--execute-multidisk-lab-vm', '--execute-multidisk-physical'}
 assert ALLOWED_EXECUTION_MODES == EXPECTED
 for mode in ('--install', '--vm-install', '--reset-state', '--preflight-multidisk-physical',
              '--execute-multidisk-physical;mkfs.ext4', '', '--execute-anything'):
@@ -88,5 +88,5 @@ assert 'revalidate_gui_physical_target\n        mkfs.ext4 -F "$ROOT_DEVICE"' in 
 assert 'FORMAT_ROOT=yes; FORMAT_ESP=no; FORMAT_HOME=no; CLEAN_HOME_DOTFILES=no' in bash
 assert '"$SOURCE/terminal_engine.py"' in stage
 print('[OK] alpha48: PTY físico inicia processo mock, recebe confirmações e retorna 0')
-print('[OK] alpha48: conjunto fechado de 3 modos; flags genéricas recusadas')
+print('[OK] alpha48: conjunto fechado de 4 modos; flags genéricas recusadas')
 print('[OK] alpha48: staging inclui PTY corrigido; barreiras Bash preservadas')

@@ -54,7 +54,7 @@ source=(ROOT/'install/wolf-install.sh').read_text()
 a=source.index('    if (( ${#SELECTED_STACKS[@]} == 0 )); then',source.index('# Minimal não seleciona'))
 b=source.index('    stage "67-servicos"',a)
 branch=source[a:b]
-for stacklist, expect in [('',0),('SELECTED_STACKS[daily]=1',2)]:
+for stacklist, expect in [('',0),('SELECTED_STACKS[daily]=1',3)]:
     shell='''set -Eeuo pipefail
 declare -A SELECTED_STACKS=()
 ok(){ echo SKIP; }

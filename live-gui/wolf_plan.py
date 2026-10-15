@@ -32,6 +32,17 @@ PATH_RE = re.compile(r"^/dev/[a-zA-Z0-9._/+\-]+$")
 class PlanError(ValueError):
     pass
 
+ALLOWED_KEYBOARDS = frozenset({
+    ('br', 'abnt2', ''), ('br', 'abnt2', 'thinkpad'),
+    ('us', 'pc105', ''), ('pt', 'pc105', ''), ('es', 'pc105', ''),
+    ('fr', 'pc105', ''), ('de', 'pc105', ''), ('it', 'pc105', ''),
+})
+
+def require_supported_keyboard(keyboard: dict) -> None:
+    if (keyboard.get('layout'), keyboard.get('model'), keyboard.get('variant')) not in ALLOWED_KEYBOARDS:
+        raise PlanError('Teclado não suportado pelo instalador; escolha um layout disponível no seletor.')
+
+
 
 def inventory(raw: str | None = None) -> list[dict]:
     """Consulta lsblk sem alterar dispositivos. Não segue caminhos arbitrários."""
@@ -231,7 +242,7 @@ def build_preview(*, disks: list[dict], disk_path: str, mode: str,
         if mode == "erase" or (mode == "reuse" and formats["root"]):
             warnings.append("ATENÇÃO: formatar/apagar a raiz também elimina qualquer /home antigo armazenado nela")
     if mode == "manual":
-        warnings.append("Manual VM: em UEFI/GPT, selecione EFI FAT32 ou marque para formatar; em BIOS/MBR NÃO há EFI (GRUB é instalado no disco). BIOS/GPT com bios_grub fica bloqueado neste piloto.")
+        warnings.append("Manual: em UEFI/GPT, selecione EFI FAT32 ou marque para formatar; em BIOS/MBR NÃO há EFI (GRUB é instalado no disco). BIOS/GPT com bios_grub fica bloqueado neste modo.")
         for role, label in (("esp", "EFI"), ("home", "/home")):
             chosen = roles.get(role)
             if chosen and formats[role]:
@@ -258,8 +269,8 @@ def build_preview(*, disks: list[dict], disk_path: str, mode: str,
         if boot_mode == "UEFI" and not roles["esp"]:
             warnings.append("UEFI detectado: selecione a partição EFI antes de uma instalação futura")
         if any(formats.values()):
-            warnings.append("Formatação selecionada: a execução em VM depende de preflight específico e confirmação adicional")
-    warnings.append("O JSON não autoriza execução: somente comando VM independente, com nova verificação e confirmação explícita")
+            warnings.append("A execução exige pré-validação independente e confirmação dupla")
+    warnings.append("O JSON não autoriza execução: somente executor independente, com nova verificação e confirmação explícita")
     return {
         "schema": SCHEMA,
         "execution": "disabled",
@@ -347,12 +358,20 @@ def text_summary(doc: dict) -> str:
 
 
 
+# Apenas dispositivos de disco reais, não caminhos arbitrários nem links /dev/disk/by-*.
+# Discos USB/removíveis continuam protegidos para não apagar a própria mídia Live.
+DISK_PATH_RE = re.compile(r"/dev/(?:vd[a-z]+|sd[a-z]+|nvme[0-9]+n[0-9]+|mmcblk[0-9]+)")
+
+def require_install_disk_path(path: str) -> None:
+    if not isinstance(path, str) or not DISK_PATH_RE.fullmatch(path):
+        raise PlanError("Disco de destino não suportado; escolha um disco real SATA, NVMe, eMMC ou VirtIO")
+
+
 def vm_erase_fields(doc: dict, *, disks: list[dict], active_boot: str | None = None,
                     check_device: bool = False) -> tuple[str, ...]:
-    """Confere ALVO de teste VM; não atribui autorização de escrita ao JSON.
+    """Confere ALVO de instalação; não atribui autorização de escrita ao JSON.
 
-    Aceita SOMENTE disco VirtIO /dev/vd[a-z] para reduzir o risco de
-    escolher discos reais pass-through, USB, imagens em outros sistemas etc.
+    Aceita discos SATA/NVMe/eMMC/VirtIO não removíveis, conferidos via lsblk e kernel.
     O bash verifica também que estamos realmente em QEMU/KVM.
     """
     canonical = validate_document(doc, disks=disks)
@@ -363,17 +382,16 @@ def vm_erase_fields(doc: dict, *, disks: list[dict], active_boot: str | None = N
         raise PlanError("Papéis/formatações individuais não são permitidos no modo apagar disco")
     disk_info = st["disk"]
     if not disk_info:
-        raise PlanError("Selecione o disco descartável da VM")
+        raise PlanError("Selecione o disco de destino")
     disk_path = disk_info["path"]
-    if not re.fullmatch(r"/dev/vd[a-z]", disk_path):
-        raise PlanError("Execução VM limitada a discos VirtIO /dev/vda, /dev/vdb... (nunca discos físicos)")
+    require_install_disk_path(disk_path)
     actual = next((d for d in disks if d["path"] == disk_path), None)
     if actual is None or actual["removable"] or actual["transport"].lower() == "usb":
         raise PlanError("Disco inválido, removível ou USB")
     if any(actual.get("mountpoints") or []) or any(p.get("mountpoints") for p in actual["partitions"]):
         raise PlanError("Disco ou partição encontra-se montado; desmonte antes de APAGAR")
     if actual["size"] < VM_MIN_BYTES:
-        raise PlanError("Use um disco virtual de pelo menos 32 GiB")
+        raise PlanError("O disco deve ter pelo menos 32 GiB")
     if not re.fullmatch(r"[0-9]+:[0-9]+", actual["maj_min"]):
         raise PlanError("Identidade MAJ:MIN do disco indisponível")
     if canonical["boot_mode"] not in ("UEFI", "BIOS"):
@@ -381,8 +399,7 @@ def vm_erase_fields(doc: dict, *, disks: list[dict], active_boot: str | None = N
     if active_boot is not None and canonical["boot_mode"] != active_boot:
         raise PlanError("Modo BIOS/UEFI do plano não coincide com a sessão Live")
     keyboard = canonical["keyboard"]
-    if keyboard["layout"] != "br" or keyboard["variant"] not in ("", "abnt2", "thinkpad"):
-        raise PlanError("A execução VM inicial suporta apenas layouts br, br(abnt2), br(thinkpad)")
+    require_supported_keyboard(keyboard)
     if check_device:
         target = Path(disk_path)
         if target.is_symlink() or not target.exists() or not stat.S_ISBLK(target.stat().st_mode):
@@ -390,6 +407,21 @@ def vm_erase_fields(doc: dict, *, disks: list[dict], active_boot: str | None = N
         st_device = target.stat()
         if f"{os.major(st_device.st_rdev)}:{os.minor(st_device.st_rdev)}" != actual["maj_min"]:
             raise PlanError("Identidade kernel do disco não coincide com MAJ:MIN do plano")
+        # Descartar discos com montagens de qualquer descendente ou camadas
+        # gerenciadas (LVM/RAID/LUKS). Evita afetar PVs que se estendem a
+        # outros discos, ou a própria sessão Live.
+        hierarchy = subprocess.run(['lsblk', '-nr', '-o', 'TYPE,MOUNTPOINTS', disk_path],
+                                   capture_output=True, text=True, timeout=8, check=False)
+        if hierarchy.returncode:
+            raise PlanError('Não foi possível verificar montagens e camadas do disco.')
+        for line in hierarchy.stdout.splitlines():
+            fields = line.split(maxsplit=1)
+            if not fields:
+                continue
+            if fields[0] in ('lvm', 'crypt', 'raid0', 'raid1', 'raid5', 'raid6', 'raid10', 'md'):
+                raise PlanError('Apagar disco com volumes LVM/RAID/LUKS associados exige tratamento especializado.')
+            if len(fields) > 1 and fields[1].strip():
+                raise PlanError('Disco de destino contém um volume montado.')
         # util-linux wipefs: --noheadings (sem hífen interno), ou -i.
         # --no-headings não existe e fazia todo disco limpo ser recusado.
         try:
@@ -424,10 +456,10 @@ def vm_erase_fields(doc: dict, *, disks: list[dict], active_boot: str | None = N
 
 def vm_manual_fields(doc: dict, *, disks: list[dict], active_boot: str | None = None,
                      check_device: bool = False) -> tuple[str, ...]:
-    """Manual VM UEFI/GPT ou BIOS/MBR: formatar raiz; ESP apenas no UEFI.
+    """Manual UEFI/GPT ou BIOS/MBR: formatar raiz; ESP apenas no UEFI.
 
     Atribuir o papel EFI ajusta o tipo GPT para ESP na execução, quando necessário.
-    Não suporta discos físicos, BIOS/GPT, LVM ou partições de discos diferentes.
+    Ainda não suporta BIOS/GPT, LVM ou partições de discos diferentes.
     """
     canonical = validate_document(doc, disks=disks)
     storage = canonical["storage"]
@@ -436,8 +468,9 @@ def vm_manual_fields(doc: dict, *, disks: list[dict], active_boot: str | None = 
     if canonical["boot_mode"] not in ("UEFI", "BIOS") or (active_boot and active_boot != canonical["boot_mode"]):
         raise PlanError("Firmware atual diferente do plano UEFI/BIOS")
     disk = storage["disk"]
-    if not disk or not re.fullmatch(r"/dev/vd[a-z]", disk["path"]):
-        raise PlanError("Manual VM exige disco VirtIO selecionado (/dev/vda...)")
+    if not disk:
+        raise PlanError("Selecione o disco que contém as partições")
+    require_install_disk_path(disk["path"])
     actual = next((d for d in disks if d["path"] == disk["path"]), None)
     if not actual or actual["removable"] or actual["transport"].lower() == "usb":
         raise PlanError("Disco ausente/removível/USB")
@@ -446,7 +479,7 @@ def vm_manual_fields(doc: dict, *, disks: list[dict], active_boot: str | None = 
     root, esp, home = (storage["partitions"][k] for k in ("root", "esp", "home"))
     fmt = storage["format"]
     if not root or not fmt["root"]:
-        raise PlanError("Manual VM exige partição raiz / com formatação ext4")
+        raise PlanError("Particionamento manual exige partição raiz / com formatação ext4")
     if canonical["boot_mode"] == "UEFI" and not esp:
         raise PlanError("UEFI exige uma partição EFI selecionada")
     if canonical["boot_mode"] == "BIOS" and (esp or fmt["esp"]):
@@ -460,6 +493,9 @@ def vm_manual_fields(doc: dict, *, disks: list[dict], active_boot: str | None = 
         raise PlanError("Partição selecionada não existe mais no disco")
     root_part = part_by_path[root]
     esp_part = part_by_path[esp] if esp else None
+    for selected in (root, esp, home):
+        if selected and part_by_path[selected]['fstype'].lower() in ('lvm2_member', 'linux_raid_member', 'crypto_luks'):
+            raise PlanError('Partições pertencentes a LVM, RAID ou LUKS não podem ser sobrescritas por este modo.')
     if root_part["size"] < 20 * 1024**3:
         raise PlanError("A raiz / precisa de pelo menos 20 GiB no piloto manual")
     # A raiz será formatada em ext4: seu formato anterior não é restrição.
@@ -477,7 +513,7 @@ def vm_manual_fields(doc: dict, *, disks: list[dict], active_boot: str | None = 
         expected_table = "gpt" if canonical["boot_mode"] == "UEFI" else "dos"
         if pt.returncode or pt.stdout.strip().lower() != expected_table:
             if canonical["boot_mode"] == "BIOS":
-                raise PlanError("BIOS manual neste piloto exige tabela MBR/DOS. GPT exige bios_grub e ainda NÃO é suportado")
+                raise PlanError("BIOS manual neste modo exige tabela MBR/DOS. GPT exige bios_grub e ainda NÃO é suportado")
             raise PlanError("Modo manual UEFI requer tabela GPT no disco. Crie GPT no GParted")
     for part_path in (root, esp, home):
         if part_path and part_by_path[part_path].get("mountpoints"):
@@ -499,8 +535,7 @@ def vm_manual_fields(doc: dict, *, disks: list[dict], active_boot: str | None = 
         if swap.returncode or any(x in set(swap.stdout.split()) for x in (root, esp, home) if x):
             raise PlanError("Partição selecionada com swap ativa ou impossibilidade de verificar")
     kb = canonical["keyboard"]
-    if kb["layout"] != "br" or kb["variant"] not in ("", "abnt2", "thinkpad"):
-        raise PlanError("Layout do teclado ainda não suportado no executor experimental")
+    require_supported_keyboard(kb)
     return (disk["path"], str(actual["size"]), actual["maj_min"], canonical["boot_mode"],
             canonical["identity"]["hostname"], canonical["identity"]["username"],
             canonical["software"]["preset"], ",".join(canonical["software"]["stacks"]),
@@ -510,17 +545,17 @@ def vm_manual_fields(doc: dict, *, disks: list[dict], active_boot: str | None = 
 
 def vm_reuse_fields(doc: dict, *, disks: list[dict], active_boot: str | None = None,
                     check_device: bool = False) -> tuple[str, ...]:
-    """Reutilização VM UEFI/GPT ou BIOS/MBR: raiz nova, home preservada."""
+    """Reutilização UEFI/GPT ou BIOS/MBR: raiz nova, home preservada."""
     canonical = validate_document(doc, disks=disks)
     st = canonical["storage"]
     fmt = st["format"]
     if st["mode"] != "reuse" or st["home_layout"] != "separate":
-        raise PlanError("Reutilizar VM exige /home em partição dedicada")
+        raise PlanError("Reutilização exige /home em partição dedicada")
     if not fmt["root"] or fmt["esp"] or fmt["home"]:
         raise PlanError("Reutilização FORMATA apenas raiz /; EFI e /home devem ser preservadas")
     needed = ("root", "esp", "home") if canonical["boot_mode"] == "UEFI" else ("root", "home")
     if not all(st["partitions"].get(key) for key in needed):
-        raise PlanError("Reutilizar VM exige raiz /, /home separada e EFI apenas em UEFI")
+        raise PlanError("Reutilização exige raiz /, /home separada e EFI apenas em UEFI")
     if canonical["boot_mode"] == "BIOS" and st["partitions"].get("esp"):
         raise PlanError("Reutilizar em BIOS não aceita EFI")
     # Os mesmos guardrails de identidade, GPT, filesystem, firmware e mounts
@@ -576,7 +611,7 @@ def simulate_document(doc: dict, *, disks: list[dict]) -> str:
         issues.append("Disco de referência não selecionado")
     if mode == "reuse":
         if st["home_layout"] != "separate":
-            issues.append("Reutilização VM nesta fase exige /home separada")
+            issues.append("Reutilização exige /home separada")
         if not roles["root"]:
             issues.append("Selecione a partição raiz /")
         if not fmts["root"]:
@@ -588,7 +623,7 @@ def simulate_document(doc: dict, *, disks: list[dict]) -> str:
         if canonical["boot_mode"] == "UEFI" and not roles["esp"]:
             issues.append("Selecione EFI /boot/efi para instalação UEFI")
         if canonical["boot_mode"] == "BIOS":
-            issues.append("BIOS exige tabela MBR/DOS neste piloto; GRUB será instalado no DISCO, não em partição EFI")
+            issues.append("BIOS exige tabela MBR/DOS neste modo; GRUB será instalado no DISCO, não em partição EFI")
         parts = {p["path"]: p for d in disks for p in d["partitions"]}
         if roles["esp"] and not fmts["esp"] and parts[roles["esp"]]["fstype"].lower() not in ("vfat", "fat32", "fat"):
             issues.append("EFI preservada precisa ter sistema de arquivos FAT/vfat")
@@ -625,8 +660,8 @@ def simulate_document(doc: dict, *, disks: list[dict]) -> str:
     if issues:
         lines += ["ESTADO: INCOMPLETO / AINDA NÃO SUPORTADO", *["BLOQUEIO: " + m for m in issues]]
     else:
-        lines += ["ESTADO: PLANO COERENTE; executor VM separado exige revalidação e confirmação"]
-    lines += ["", "Esta simulação não inicia a rotina main do instalador. O executor VM separado exige confirmação."]
+        lines += ["ESTADO: PLANO COERENTE; executor exige revalidação e confirmação"]
+    lines += ["", "Esta simulação não inicia a rotina main do instalador. O executor independente exige confirmação."]
     return "\n".join(lines)
 
 
@@ -679,7 +714,7 @@ def main() -> int:
             if args.action == "vm-export":
                 sys.stdout.buffer.write(("\0".join(fields) + "\0").encode("utf-8"))
             else:
-                print("[OK] Plano de instalação VM validado (ainda SEM escrever no disco).")
+                print("[OK] Plano de instalação validado (ainda SEM escrever no disco).")
                 print(f"Destino: {fields[0]} ({int(fields[1]) / 2**30:.1f} GiB) | MAJ:MIN={fields[2]}")
                 print(f"Boot: {fields[3]} | Usuário: {fields[5]} | Perfil: {fields[6]} | Modo: {fields[10]}")
                 print("AVISO: a execução real exige outro comando, confirmação e validação renovada.")

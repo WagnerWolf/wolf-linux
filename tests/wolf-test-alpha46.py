@@ -78,6 +78,6 @@ assert 'def rehearse_physical(self)' in ui and 'wolf-live-physical-rehearsal' in
 stage = (ROOT/'tests/wolf-stage-live-desktop.sh').read_text()
 assert 'wolf_physical_rehearsal.py' in stage and 'wolf-live-physical-rehearsal' in stage
 assert pr.mount_guard({'devices': {'/dev/nvme1n1p1': {'mountpoints': ['/somewhere']}}}, plan)
-print('[OK] alpha46: roteiro em 25 etapas derivado do Bash, SEM chamar operações destrutivas')
+print(f'[OK] alpha46: roteiro em {len(stages)} etapas derivado do Bash, SEM chamar operações destrutivas')
 print('[OK] alpha46: bloqueios UEFI, EFI, PV, montagem e JSON alterado; Live exigida')
 print('[OK] alpha46: GUI/CLI/staging, segurança do lançador e divergência de etapas')

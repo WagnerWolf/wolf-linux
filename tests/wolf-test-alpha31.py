@@ -68,7 +68,7 @@ ui=(ROOT/'live-gui/main.py').read_text()
 assert 'HOME_CLEAN_CONFIRMED="yes"' in bash
 assert 'confirm_preserved_home_cleanup\n    stage "10-preparar-disco"' in bash
 assert 'Digite LIMPAR' in bash
-assert 'if is_supported_test_vm && [[ "$GUI_VM_MODE" != "reuse" ]]; then' in bash
+assert "if [[ \"$FORMAT_ESP\" == 'yes' || ! -e \"$fallback_path\" ]]; then" in bash
 assert '[[ "$FORMAT_ESP" == "no" && "$FORMAT_HOME" == "no"' not in bash or True
 assert 'self.cleanup_home_check' in ui and 'self.confirm_home_cleanup' in ui
 assert 'self.vm_install_button.setEnabled(True)' in ui

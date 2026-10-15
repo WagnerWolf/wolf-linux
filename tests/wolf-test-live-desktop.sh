@@ -6,8 +6,18 @@ SOURCE="$PROJECT/live-gui"
 CUSTOMIZER="$PROJECT/tests/wolf-customize-iso-profile.sh"
 STAGER="$PROJECT/tests/wolf-stage-live-desktop.sh"
 [[ -r "$SOURCE/main.py" && -x "$STAGER" ]] || { echo '[ERRO] Sources live GUI ausentes.' >&2; exit 1; }
-python3 -m py_compile "$SOURCE/main.py" "$SOURCE/wolf_plan.py" "$SOURCE/wolf_rescue.py" "$SOURCE/wolf_storage_map.py" "$SOURCE/wolf_discovery.py" "$SOURCE/wolf_lab42.py" "$SOURCE/wolf_physical_rehearsal.py" "$SOURCE/wolf_physical_executor.py" "$SOURCE/mount_backend.py" "$SOURCE/mount_manager.py"
+python3 -m py_compile "$SOURCE/preview/app.py" "$SOURCE/preview/planner.py" "$SOURCE/preview/vm_bridge.py" "$SOURCE/main.py" "$SOURCE/wolf_plan.py" "$SOURCE/wolf_rescue.py" "$SOURCE/wolf_storage_map.py" "$SOURCE/wolf_discovery.py" "$SOURCE/wolf_lab42.py" "$SOURCE/wolf_physical_rehearsal.py" "$SOURCE/wolf_physical_executor.py" "$SOURCE/mount_backend.py" "$SOURCE/mount_manager.py"
 python3 "$SOURCE/main.py" --self-test
+python3 "$PROJECT/tests/wolf-test-alpha52.py"
+python3 "$PROJECT/tests/wolf-test-alpha53.py"
+python3 "$PROJECT/tests/wolf-test-alpha54.py"
+python3 "$PROJECT/tests/wolf-test-alpha55.py"
+python3 "$PROJECT/tests/wolf-test-alpha56.py"
+python3 "$PROJECT/tests/wolf-test-alpha57.py"
+python3 "$PROJECT/tests/wolf-test-alpha58.py"
+python3 "$PROJECT/tests/wolf-test-alpha59.py"
+python3 "$PROJECT/tests/wolf-test-release-2.0.0.py"
+python3 "$PROJECT/tests/wolf_test_alpha52_ui.py" -q
 # A variante ThinkPad usa XKB br(thinkpad), sem interferir com ABNT2 padrão.
 grep -Fq '"Português (Brasil) — ThinkPad (IBM/Lenovo)", "br", "abnt2", "thinkpad"' "$SOURCE/main.py" || { echo '[ERRO] Variante ThinkPad brasileira ausente.' >&2; exit 1; }
 # Regressões específicas da alpha21: teclado primeiro, resumo sem botão,
@@ -85,6 +95,8 @@ if [[ -d "$PROJECT/iso-profile" ]]; then
     done
     for f in \
         "$PROFILE/airootfs/usr/local/bin/wolf-live-installer" \
+        "$PROFILE/airootfs/usr/local/share/wolf-linux-live/gui/preview/app.py" \
+        "$PROFILE/airootfs/usr/local/share/wolf-linux-live/gui/preview/planner.py" \
         "$PROFILE/airootfs/root/wolf-linux/live-gui/wolf_lab42.py" \
         "$PROFILE/airootfs/root/wolf-linux/live-gui/wolf_physical_rehearsal.py" \
         "$PROFILE/airootfs/root/wolf-linux/live-gui/wolf_physical_executor.py" \
@@ -105,6 +117,7 @@ if [[ -d "$PROJECT/iso-profile" ]]; then
         "$PROFILE/airootfs/usr/local/share/wolf-linux-live/gui/wolf_plan.py" \
         "$PROFILE/airootfs/usr/local/share/wolf-linux-live/gui/wolf_discovery.py" \
         "$PROFILE/airootfs/usr/local/share/wolf-linux-live/gui/terminal_engine.py" \
+        "$PROFILE/airootfs/usr/local/share/wolf-linux-live/gui/preview/vm_bridge.py" \
         "$PROFILE/airootfs/usr/local/bin/wolf-live-storage-topology" \
         "$PROFILE/airootfs/usr/local/bin/wolf-live-time-status" \
         "$PROFILE/airootfs/usr/local/bin/wolf-live-browser" \

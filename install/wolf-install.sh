@@ -7,13 +7,14 @@ fi
 
 set -Eeuo pipefail
 
-WOLF_VERSION="2.0.0-alpha49"
+WOLF_VERSION="2.0.0"
 DRY_RUN=0
 PLAN_ONLY=0
 RESET_STATE=0
 VM_INSTALL=0
 REAL_INSTALL=0
 GUI_VM_PLAN=""
+GUI_VM_CLICK_CONFIRMED=0
 GUI_LAB42_PLAN=""
 GUI_PHYSICAL_PLAN=""
 PHYSICAL_ROOT_UUID=""
@@ -158,7 +159,8 @@ Modos de instalação:
   --simulate-multidisk-plan F Revalida e simula plano multidisco (SEM executar).
   --rehearse-multidisk-physical F  Ensaio físico integral: roteiro, NENHUMA escrita.
   --preflight-gui-plan-vm F Valida instalação em VM (somente leitura).
-  --execute-gui-plan-vm F  Instala em disco VirtIO de VM; erase/manual/reuse UEFI.
+  --execute-gui-plan-vm F  Instala em disco VirtIO de VM; exige confirmação no terminal.
+  --execute-gui-plan-vm-click F  Executor VM autorizado após duas confirmações GUI.
   --preflight-multidisk-lab-vm F  Confere laboratório 2 VirtIO sem escrita.
   --execute-multidisk-lab-vm F   Reinstala laboratório alpha41 (APENAS VM QEMU).
   --preflight-multidisk-physical F  Pré-teste de segurança da instalação física.
@@ -196,6 +198,13 @@ while (($#)); do
         --dry-run) DRY_RUN=1 ;;
         --plan-only) PLAN_ONLY=1 ;;
         --vm-install) VM_INSTALL=1 ;;
+        --execute-gui-plan-vm-click)
+            shift
+            [[ $# -gt 0 && -z "$GUI_VM_PLAN" ]] || { echo '[ERRO] Plano da instalação GUI ausente/duplicado.' >&2; exit 2; }
+            GUI_VM_PLAN="$1"
+            VM_INSTALL=1
+            GUI_VM_CLICK_CONFIRMED=1
+            ;;
         --execute-gui-plan-vm)
             shift
             [[ $# -gt 0 && -z "$GUI_VM_PLAN" ]] || { echo "[ERRO] Plano VM ausente/duplicado." >&2; exit 2; }
@@ -255,7 +264,7 @@ fi
 if [[ -n "$GUI_VM_PLAN" ]]; then
     # Não permitir misturar opções interativas/override com um plano validado.
     (( VM_INSTALL == 1 && REAL_INSTALL == 0 && DRY_RUN == 0 && PLAN_ONLY == 0 && RESET_STATE == 0 )) || {
-        echo '[ERRO] Execução GUI VM não aceita modos/opções de instalação conflitantes.' >&2; exit 2;
+        echo '[ERRO] Execução GUI não aceita modos/opções de instalação conflitantes.' >&2; exit 2;
     }
     [[ -z "$STACK_PRESET" && -z "$STACKS_ARG" && "$LIST_STACKS" == 0 ]] || {
         echo '[ERRO] Não misture preset/stacks com o plano JSON.' >&2; exit 2;
@@ -277,7 +286,7 @@ fi
 
 if [[ -n "$GUI_VM_PLAN" || -n "$GUI_LAB42_PLAN" || -n "$GUI_PHYSICAL_PLAN" ]]; then
     if mountpoint -q /mnt 2>/dev/null || [[ -s "$CHECKPOINT_FILE" ]]; then
-        echo '[ERRO] Há /mnt montado ou checkpoints de outra instalação. Recusado; use VM descartável nova.' >&2
+        echo '[ERRO] Há /mnt montado ou checkpoints de outra instalação. Desmonte somente após conferir os dados; não é seguro continuar automaticamente.' >&2
         exit 2
     fi
 fi
@@ -421,7 +430,7 @@ EOF
     if (( DRY_RUN == 1 )); then
         echo "                    *** DRY RUN ***"
     elif (( VM_INSTALL == 1 )); then
-        echo "              *** INSTALAÇÃO EM VM ***"
+        echo "              *** INSTALAÇÃO GUI ***"
     elif (( REAL_INSTALL == 1 )); then
         echo "           *** INSTALAÇÃO EM HARDWARE ***"
     fi
@@ -463,7 +472,17 @@ check_runtime() {
     [[ -n "${BASH_VERSION:-}" ]] || die "O instalador precisa de Bash."
 
     detect_virtualization
-    info "Virtualização detectada: $VM_TYPE"
+    info "Ambiente detectado: $VM_TYPE"
+    if [[ -n "$GUI_VM_PLAN" ]]; then
+        [[ -d /run/archiso/airootfs ]] || die 'A instalação gráfica exige iniciar pela ISO Live Wolf/Archiso.'
+        # A nova GUI usa o mesmo contrato em máquina virtual ou física.
+        # Não liberar outras rotas (--install/--vm-install) por este ajuste.
+        if is_supported_test_vm; then
+            VM_INSTALL=1; REAL_INSTALL=0
+        else
+            VM_INSTALL=0; REAL_INSTALL=1
+        fi
+    fi
 
     if (( VM_INSTALL == 1 && REAL_INSTALL == 1 )); then
         die "Use apenas um modo: --vm-install OU --install."
@@ -472,7 +491,9 @@ check_runtime() {
     if (( DRY_RUN == 0 && PLAN_ONLY == 0 )); then
         (( EUID == 0 )) || die "A instalação real precisa ser executada como root."
 
-        if (( VM_INSTALL == 1 )); then
+        if [[ -n "$GUI_VM_PLAN" ]]; then
+            ok 'Sessão Live e plano da interface detectados; será exigida revalidação independente.'
+        elif (( VM_INSTALL == 1 )); then
             if is_supported_test_vm; then
                 ok "VM suportada confirmada ($VM_TYPE). Operações destrutivas liberadas para a VM."
             else
@@ -1367,7 +1388,7 @@ confirm_installation() {
         [[ "$answer" == 'FORMATAR /dev/vdb1' ]] || die 'Cancelado sem formatação.'
     elif [[ -n "$GUI_VM_PLAN" ]]; then
         if [[ "$GUI_VM_MODE" == "manual" ]]; then
-            printf 'EXECUÇÃO MANUAL VM: partição raiz %s será FORMATADA (PERDA TOTAL DE DADOS).\n' "$ROOT_DEVICE"
+            printf 'PARTICIONAMENTO MANUAL: partição raiz %s será FORMATADA (PERDA TOTAL DE DADOS).\n' "$ROOT_DEVICE"
             printf 'EFI %s: %s\n' "$( [[ "$FORMAT_ESP" == yes ]] && echo FORMATAR || echo PRESERVAR )" "$ESP_DEVICE"
             if [[ -n "$HOME_DEVICE" ]]; then
                 printf '/home %s: %s\n' "$( [[ "$FORMAT_HOME" == yes ]] && echo FORMATAR || echo PRESERVAR )" "$HOME_DEVICE"
@@ -1381,12 +1402,18 @@ confirm_installation() {
             printf 'Limpeza opcional de configurações ocultas: %s\n' "$CLEAN_HOME_DOTFILES"
             echo 'Arquivos de boot WolfLinux poderão ser atualizados na EFI, sem formatá-la.'
         else
-            printf 'EXECUÇÃO VM: disco %s INTEIRO será APAGADO, inclusive partições existentes.\n' "$INSTALL_DISK"
+            printf 'APAGAR DISCO: %s INTEIRO será APAGADO, inclusive partições existentes.\n' "$INSTALL_DISK"
         fi
-        echo 'Esta ação é irreversível. Confirme apenas em um DISCO DESCARTÁVEL da VM.'
-        read -r -p "Digite APAGAR para continuar: " answer
-        [[ "$answer" == "APAGAR" ]] || die 'Instalação VM cancelada.'
-    else
+        echo 'Esta ação é irreversível. Confirme apenas se o destino acima estiver correto.'
+        if (( GUI_VM_CLICK_CONFIRMED == 1 )); then
+            # Confirmações gráficas e contrato validados pelo executor real.
+            # O launcher usa esta flag SOMENTE após dois diálogos positivos.
+            # Proteções de disco, MAJ:MIN, montagens e checkpoint seguem ativas.
+            ok 'Consentimento da interface gráfica recebido; verificações independentes continuam obrigatórias.'
+        else
+            read -r -p "Digite APAGAR para continuar: " answer
+            [[ "$answer" == "APAGAR" ]] || die 'Instalação VM cancelada.'
+        fi    else
         read -r -p 'Digite INSTALAR-WOLF para continuar: ' answer
         [[ "$answer" == "INSTALAR-WOLF" ]] || die "Instalação cancelada."
     fi
@@ -1473,7 +1500,10 @@ format_and_mount() {
         fi
 
     if [[ "$FORMAT_ROOT" == "yes" ]]; then
-        # Revalidar no último instante antes de APAGAR a raiz física.
+        # Modo manual/reuso: revalidar o plano novamente imediatamente antes do mkfs.
+        if [[ -n "$GUI_VM_PLAN" && "$GUI_VM_MODE" != erase ]]; then
+            revalidate_gui_vm_target
+        fi
         revalidate_gui_physical_target
         mkfs.ext4 -F "$ROOT_DEVICE"
     fi
@@ -1556,6 +1586,21 @@ list_preserved_home_users() {
     done < <(find "$base" -mindepth 1 -maxdepth 1 -type d -print0)
 }
 
+# A GUI apresenta os ocultos APENAS do usuário escolhido; o executor deve
+# gerar a mesma seleção. O CLI anterior conserva a política de todos os usuários.
+list_home_cleanup_users() {
+    local base="$1" selected
+    selected="$base/${USERNAME_VALUE:-}"
+    if [[ -n "${GUI_VM_PLAN:-}" && "${GUI_VM_CLICK_CONFIRMED:-0}" == 1 ]]; then
+        [[ "$USERNAME_VALUE" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die 'Usuário inválido na limpeza.'
+        if [[ -d "$selected" && ! -L "$selected" ]]; then
+            printf '%s\0' "$selected"
+        fi
+    else
+        list_preserved_home_users "$base"
+    fi
+}
+
 # ANTES de formatar /, apresenta os arquivos que serão apagados e exige
 # uma segunda confirmação. Montagem temporária somente leitura, sem journal replay.
 confirm_preserved_home_cleanup() {
@@ -1613,7 +1658,7 @@ PYCLEAN
         echo '       PRÉVIA DE LIMPEZA DA /home PRESERVADA'
         echo '============================================================'
         echo "Partição: $HOME_DEVICE (NÃO será formatada)"
-        echo 'Serão removidas APENAS entradas ocultas imediatas de cada usuário:'
+        echo 'Serão removidas APENAS as entradas ocultas listadas do usuário selecionado:'
         total=0
         while IFS= read -r -d '' userdir; do
             echo "Usuário: /home/${userdir##*/}"
@@ -1622,16 +1667,22 @@ PYCLEAN
                 printf '%s\0' "${userdir##*/}/${item##*/}" >> "$HOME_CLEAN_LIST_FILE"
                 total=$((total+1))
             done < <(find "$userdir" -mindepth 1 -maxdepth 1 -name '.*' -print0)
-        done < <(list_preserved_home_users "$probe")
+        done < <(list_home_cleanup_users "$probe")
         echo "Total de entradas ocultas: $total"
         echo 'Diretórios/arquivos VISÍVEIS são preservados.'
         echo 'ATENÇÃO: .ssh, .gnupg, .mozilla, .local e outros dados privados'
         echo 'também SERÃO APAGADOS se aparecerem acima. Faça backup antes!'
         echo '============================================================'
         sort -z "$HOME_CLEAN_LIST_FILE" -o "$HOME_CLEAN_LIST_FILE"
-        printf 'Digite LIMPAR para remover os itens listados (ou Enter para cancelar): '
-        read -r answer
-        [[ "$answer" == 'LIMPAR' ]] || { echo '[AVISO] Limpeza NÃO autorizada; instalação cancelada ANTES de formatar /.'; exit 3; }
+        if (( GUI_VM_CLICK_CONFIRMED == 1 )); then
+            # Consentimento GUI já incluiu a remoção dos dotfiles nas DUAS janelas.
+            # A lista real é revalidada antes da exclusão; a GUI não bypassa essa proteção.
+            echo '[OK] Limpeza /home autorizada nas duas confirmações da interface.'
+        else
+            printf 'Digite LIMPAR para remover os itens listados (ou Enter para cancelar): '
+            read -r answer
+            [[ "$answer" == 'LIMPAR' ]] || { echo '[AVISO] Limpeza NÃO autorizada; instalação cancelada ANTES de formatar /.'; exit 3; }
+        fi
         umount "$probe" || { echo '[ERRO] Não foi possível desmontar o volume de prévia; instalação cancelada.'; exit 4; }
     ); then
         die 'Limpeza de /home não autorizada ou falha na prévia: NENHUMA formatação foi iniciada.'
@@ -1694,7 +1745,7 @@ PYCLEAN
         while IFS= read -r -d '' item; do
             printf '%s\0' "${userdir##*/}/${item##*/}" >> "$current"
         done < <(find "$userdir" -mindepth 1 -maxdepth 1 -name '.*' -print0)
-    done < <(list_preserved_home_users /mnt/home)
+    done < <(list_home_cleanup_users /mnt/home)
     sort -z "$current" -o "$current"
     if ! cmp -s "$current" "$HOME_CLEAN_LIST_FILE"; then
         rm -f -- "$current"
@@ -1875,7 +1926,18 @@ configure_system_base() {
     printf 'LANG=pt_BR.UTF-8\n' > /mnt/etc/locale.conf
 
     # Console/TTY continua no mapa ABNT2. A variante ThinkPad é XKB gráfica.
-    printf 'KEYMAP=br-abnt2\nFONT=ter-v16n\n' > /mnt/etc/vconsole.conf
+    local console_keymap=br-abnt2
+    case "$XKB_LAYOUT" in
+        br) console_keymap=br-abnt2 ;;
+        us) console_keymap=us ;;
+        pt) console_keymap=pt-latin1 ;;
+        es) console_keymap=es ;;
+        fr) console_keymap=fr ;;
+        de) console_keymap=de ;;
+        it) console_keymap=it ;;
+        *) die 'Layout de teclado não suportado para o sistema instalado.' ;;
+    esac
+    printf 'KEYMAP=%s\nFONT=ter-v16n\n' "$console_keymap" > /mnt/etc/vconsole.conf
 
     mkdir -p /mnt/etc/X11/xorg.conf.d
 
@@ -1913,7 +1975,9 @@ configure_wolf_identity() {
 
     cat > /mnt/etc/os-release <<'EOF'
 NAME="Wolf Linux"
-PRETTY_NAME="Wolf Linux"
+PRETTY_NAME="Wolf Linux 2.0"
+VERSION="2.0"
+VERSION_ID="2.0.0"
 LOGO="wolf-linux"
 VENDOR_NAME="Wolf Linux"
 ID=arch
@@ -1963,7 +2027,7 @@ EOF
         printf 'GRUB_DISABLE_BOOTNEXT=true\n' >> /mnt/etc/default/grub
     fi
 
-    grep -q '^PRETTY_NAME="Wolf Linux"$' /mnt/etc/os-release ||
+    grep -q '^PRETTY_NAME="Wolf Linux 2.0"$' /mnt/etc/os-release ||
         die "Falha ao gravar identidade Wolf Linux em /etc/os-release."
 
     ok "Sistema identificado como Wolf Linux (compatibilidade ID=arch)."
@@ -2618,7 +2682,8 @@ install_selected_stack_packages() {
     local -a repo_packages=()
     local -a aur_packages=()
     local -A seen=()
-    local pkg repo
+    local pkg repo decision
+    local -A optional_skipped=()
 
     : > "$PACKAGE_RESOLUTION_LOG"
 
@@ -2669,9 +2734,28 @@ install_selected_stack_packages() {
             ((i+=1))
             repo="$(package_repository "$pkg" || true)"
             info "[$i/$total] $pkg (${repo:-repositório configurado})"
-            if ! arch-chroot /mnt pacman -S --needed --noconfirm "$pkg"; then
-                die "Falha ao instalar '$pkg' via pacman (${repo:-origem desconhecida}). Consulte $PACKAGE_RESOLUTION_LOG."
-            fi
+            while true; do
+                if arch-chroot /mnt pacman -S --needed --noconfirm "$pkg"; then
+                    break
+                fi
+                if [[ "${repo,,}" != chaotic-aur* ]]; then
+                    die "Falha ao instalar '$pkg' via pacman (${repo:-origem desconhecida}). Consulte $PACKAGE_RESOLUTION_LOG."
+                fi
+                warn "Pacote opcional do Chaotic-AUR '$pkg' não pôde ser instalado."
+                echo '[1] Tentar novamente  [2] Pular este pacote e continuar'
+                read -r -p 'Escolha 1 ou 2: ' decision || decision=2
+                case "$decision" in
+                    1) continue ;;
+                    2)
+                        optional_skipped["$pkg"]=1
+                        printf 'Pacote Chaotic-AUR pendente: %s\n' "$pkg" >> "$STATE_DIR/optional-failures.log"
+                        mkdir -p /mnt/var/log
+                        cp "$STATE_DIR/optional-failures.log" /mnt/var/log/wolf-optional-failures.log || true
+                        warn "'$pkg' ficou pendente; continuando instalação."
+                        break ;;
+                    *) echo 'Escolha inválida.' ;;
+                esac
+            done
         done
     fi
 
@@ -2692,20 +2776,35 @@ EOF
         for pkg in "${aur_packages[@]}"; do
             ((j+=1))
             info "[AUR $j/$aur_total] $pkg"
-            if ! arch-chroot /mnt runuser -u "$USERNAME_VALUE" -- \
-                env \
-                HOME="/home/$USERNAME_VALUE" \
-                XDG_CACHE_HOME="/home/$USERNAME_VALUE/.cache" \
-                yay -S \
-                    --aur \
-                    --needed \
-                    --noconfirm \
-                    --answerclean None \
-                    --answerdiff None \
-                    "$pkg"; then
-                rm -f "$AUR_TEMP_SUDOERS"
-                die "Falha no fallback AUR para '$pkg'. Consulte $PACKAGE_RESOLUTION_LOG."
-            fi
+            while true; do
+                if arch-chroot /mnt runuser -u "$USERNAME_VALUE" -- \
+                    env \
+                    HOME="/home/$USERNAME_VALUE" \
+                    XDG_CACHE_HOME="/home/$USERNAME_VALUE/.cache" \
+                    yay -S \
+                        --aur \
+                        --needed \
+                        --noconfirm \
+                        --answerclean None \
+                        --answerdiff None \
+                        "$pkg"; then
+                    break
+                fi
+                warn "Não foi possível instalar o pacote opcional AUR '$pkg'."
+                echo '[1] Tentar novamente  [2] Pular este pacote e continuar'
+                read -r -p 'Escolha 1 ou 2: ' decision || decision=2
+                case "$decision" in
+                    1) continue ;;
+                    2)
+                        optional_skipped["$pkg"]=1
+                        printf 'Pacote AUR pendente: %s\n' "$pkg" >> "$STATE_DIR/optional-failures.log"
+                        mkdir -p /mnt/var/log
+                        cp "$STATE_DIR/optional-failures.log" /mnt/var/log/wolf-optional-failures.log || true
+                        warn "'$pkg' ficou pendente. A instalação do sistema continuará."
+                        break ;;
+                    *) echo 'Escolha inválida.' ;;
+                esac
+            done
         done
 
         rm -f "$AUR_TEMP_SUDOERS"
@@ -2717,6 +2816,8 @@ EOF
     for pkg in "${requested[@]}"; do
         if arch-chroot /mnt pacman -Q "$pkg" >/dev/null 2>&1; then
             ok "$pkg instalado."
+        elif [[ "${optional_skipped[$pkg]:-0}" == 1 ]]; then
+            warn "'$pkg' não foi instalado por escolha do usuário. Registrado como pendência opcional."
         else
             warn "$pkg não aparece no banco local do pacman após a instalação."
             validation_failed=1
@@ -2870,11 +2971,11 @@ EOF
     info "Instalando Flutter SDK stable em /opt/flutter..."
 
     if [[ -d "$flutter_dir/.git" ]]; then
-        arch-chroot /mnt git -C "$target_flutter" fetch --depth=1 origin stable
+        timeout 900s arch-chroot /mnt git -C "$target_flutter" fetch --depth=1 origin stable
         arch-chroot /mnt git -C "$target_flutter" reset --hard origin/stable
     else
         rm -rf "$flutter_dir"
-        arch-chroot /mnt git clone \
+        timeout 900s arch-chroot /mnt git clone \
             --depth=1 \
             --branch stable \
             https://github.com/flutter/flutter.git \
@@ -2914,7 +3015,7 @@ EOF
 
     # Primeira execução baixa o Dart SDK/cache necessário. Fazemos isso já
     # como o usuário que será dono do SDK para evitar arquivos root-owned.
-    arch-chroot /mnt runuser -u "$USERNAME_VALUE" -- \
+    timeout 900s arch-chroot /mnt runuser -u "$USERNAME_VALUE" -- \
         env \
         HOME="$user_home" \
         ANDROID_HOME=/opt/android-sdk \
@@ -3054,7 +3155,7 @@ install_oh_my_zsh_and_profile() {
         arch-chroot /mnt git -C "$target_omz" pull --ff-only
     else
         rm -rf "$omz"
-        arch-chroot /mnt git clone \
+        timeout 900s arch-chroot /mnt git clone \
             --depth=1 \
             https://github.com/ohmyzsh/ohmyzsh.git \
             "$target_omz"
@@ -8698,6 +8799,27 @@ EOF
 
     ok "Integrações MATE prontas: VS Code no Caja + edge barrier multi-monitor."
 }
+# A stack gaming pode solicitar o provedor virtual vulkan-driver no pacman.
+# Instalar previamente o provedor da GPU identificada evita escolhas implícitas
+# (como NVIDIA numa VM VirtIO), antes da etapa geral de aplicativos.
+install_preferred_vulkan_provider() {
+    stack_selected gaming || return 0
+    local -a providers=(vulkan-icd-loader lib32-vulkan-icd-loader)
+    case "$GPU_PROFILE" in
+        virtio) providers+=(vulkan-virtio lib32-vulkan-virtio) ;;
+        intel) providers+=(vulkan-intel lib32-vulkan-intel) ;;
+        amd) providers+=(vulkan-radeon lib32-vulkan-radeon) ;;
+        nvidia-modern) providers+=(nvidia-utils lib32-nvidia-utils) ;;
+        virtualbox|generic) providers+=(vulkan-swrast lib32-vulkan-swrast) ;;
+        nvidia-kepler-nouveau|nvidia-legacy-or-unknown)
+            providers+=(vulkan-nouveau lib32-vulkan-nouveau) ;;
+        *) providers+=(vulkan-swrast lib32-vulkan-swrast) ;;
+    esac
+    info "Definindo provedor Vulkan para $GPU_PROFILE antes das stacks de jogos..."
+    arch-chroot /mnt pacman -S --needed --noconfirm "${providers[@]}"
+    ok 'Provedor Vulkan selecionado conforme a GPU detectada.'
+}
+
 install_gpu_profile() {
     local -a packages=()
     local -a early_modules=()
@@ -10706,8 +10828,8 @@ configure_bootloader() {
         info "Instalando GRUB UEFI..."
 
         local -a physical_grub_options=()
-        if [[ -n "$GUI_PHYSICAL_PLAN" ]]; then
-            # Atualiza somente EFI/WolfLinux, SEM criar/alterar entradas NVRAM.
+        if [[ -n "$GUI_PHYSICAL_PLAN" || ( -n "$GUI_VM_PLAN" && "$GUI_VM_MODE" == "reuse" && "$VM_TYPE" == "none" ) ]]; then
+            # Preservar entradas NVRAM em instalações que reutilizam uma ESP existente.
             physical_grub_options+=(--no-nvram)
         fi
         arch-chroot /mnt grub-install \
@@ -10717,16 +10839,21 @@ configure_bootloader() {
             "${physical_grub_options[@]}" \
             --recheck
 
-        # Na VM instalamos também o caminho UEFI fallback.
-        # Assim ela consegue iniciar mesmo sem uma entrada NVRAM válida.
-        if is_supported_test_vm && [[ "$GUI_VM_MODE" != "reuse" ]]; then
-            info "VM UEFI: instalando fallback EFI/BOOT/BOOTX64.EFI..."
-
+        # Em ESP criada/formatada pelo Wolf, oferecemos também o caminho
+        # fallback EFI/BOOT/BOOTX64.EFI para firmwares que ignoram BootOrder.
+        # Se a ESP é preservada, NUNCA sobrescrever o fallback já existente
+        # (pode ser do Windows, outro SO ou gerenciador de boot).
+        local fallback_path='/mnt/boot/efi/EFI/BOOT/BOOTX64.EFI'
+        if [[ "$FORMAT_ESP" == 'yes' || ! -e "$fallback_path" ]]; then
+            info 'Configurando caminho EFI alternativo sem substituir um loader existente...'
             arch-chroot /mnt grub-install \
                 --target=x86_64-efi \
                 --efi-directory=/boot/efi \
                 --removable \
+                --no-nvram \
                 --recheck
+        else
+            info 'Caminho EFI/BOOT existente preservado; WolfLinux em EFI/WolfLinux.'
         fi
     else
         info "Instalando GRUB BIOS/Legacy..."
@@ -10817,6 +10944,10 @@ validate_boot_installation() {
 
         [[ -n "$found_efi" ]] ||
             die "Nenhum executável EFI foi encontrado na ESP."
+        [[ -s /mnt/boot/efi/EFI/WolfLinux/grubx64.efi ]] ||
+            die 'GRUB EFI WolfLinux ausente (EFI/WolfLinux/grubx64.efi).'
+        findmnt -rn --mountpoint /mnt/boot/efi >/dev/null ||
+            die 'A ESP não está montada em /mnt/boot/efi durante a validação do boot.'
 
         echo
         echo "Executáveis EFI:"
@@ -10826,16 +10957,14 @@ validate_boot_installation() {
             -iname '*.efi' \
             -print 2>/dev/null || true
 
-        if is_supported_test_vm && [[ "$GUI_VM_MODE" != "reuse" ]]; then
-            [[ -s "$fallback_efi" ]] ||
-                die "Fallback UEFI da VM ausente: EFI/BOOT/BOOTX64.EFI"
-
-            ok "Fallback UEFI da VM validado."
-        fi
+        [[ -s "$fallback_efi" ]] ||
+            warn 'EFI/BOOT/BOOTX64.EFI não existe: sem fallback UEFI (a entrada WolfLinux dependerá da NVRAM).'
 
         echo
-        echo "Entradas NVRAM:"
-        efibootmgr -v 2>/dev/null || true
+        echo 'Entradas NVRAM e caminhos EFI (para diagnóstico de boot):'
+        efibootmgr -v 2>/dev/null || warn 'Firmware não disponibilizou efibootmgr -v; confira pelo menu de boot.'
+        echo 'Destino EFI WolfLinux:'
+        ls -lh /mnt/boot/efi/EFI/WolfLinux/grubx64.efi "$fallback_efi" 2>/dev/null || true
     fi
 
     ok "GRUB, kernel, initramfs e arquivos de boot validados."
@@ -11812,7 +11941,7 @@ finalize_vm_install() {
     sync
     echo
     echo "============================================================"
-    echo "       WOLF LINUX 2.0 KDE BASELINE INSTALADA"
+    echo "         WOLF LINUX 2.0 — INSTALAÇÃO CONCLUÍDA"
     echo "============================================================"
     echo "Desktop ....: KDE Plasma / Wayland"
     echo "Usuário ....: $USERNAME_VALUE"
@@ -11828,6 +11957,12 @@ finalize_vm_install() {
     echo "  wolf-control-center"
     echo "  wolf-grub-manager"
     echo "  wolf-gamepad-setup"
+    if [[ -s "$STATE_DIR/optional-failures.log" ]]; then
+        echo
+        warn 'Instalação do sistema concluída COM PENDÊNCIAS OPCIONAIS:'
+        cat "$STATE_DIR/optional-failures.log"
+        echo 'Registro: /var/log/wolf-optional-failures.log no sistema instalado.'
+    fi
     echo "============================================================"
 }
 
@@ -11972,7 +12107,9 @@ revalidate_gui_lab42_target() {
 load_gui_vm_plan() {
     [[ -n "$GUI_VM_PLAN" ]] || return 0
     (( EUID == 0 )) || die 'A execução VM exige root.'
-    is_supported_test_vm || die 'Execução GUI permitida SOMENTE em QEMU/KVM ou VirtualBox detectado.'
+    if (( GUI_VM_CLICK_CONFIRMED == 1 )); then
+        [[ -d /run/archiso/airootfs ]] || die 'Instalação autorizada por cliques exige a sessão Live Archiso.'
+    fi
     # Um temporário privado permite capturar corretamente o exit code do Python;
     # process substitution com mapfile ocultaria falhas de validação.
     local tmp
@@ -12066,17 +12203,14 @@ load_gui_vm_plan() {
     fi
     XKB_LAYOUT="${fields[8]}"
     XKB_VARIANT="${fields[9]}"
-    if [[ "$XKB_VARIANT" == "thinkpad" ]]; then
-        KEYBOARD_PROFILE=thinkpad
-        CINNAMON_LAYOUT=br+thinkpad
-        MATE_LAYOUT=$'br\tthinkpad'
-    else
-        KEYBOARD_PROFILE=abnt2
-        XKB_VARIANT=abnt2
-        CINNAMON_LAYOUT=br
-        MATE_LAYOUT=$'br\tabnt2'
-    fi
-    ok "Plano VM importado: $INSTALL_DISK; usuário=$USERNAME_VALUE; preset=$STACK_PRESET; $BOOT_MODE"
+    case "$XKB_LAYOUT:$XKB_VARIANT" in
+        br:thinkpad) KEYBOARD_PROFILE=thinkpad; CINNAMON_LAYOUT=br+thinkpad; MATE_LAYOUT=$'br\tthinkpad' ;;
+        br:abnt2|br:) KEYBOARD_PROFILE=abnt2; XKB_VARIANT=abnt2; CINNAMON_LAYOUT=br; MATE_LAYOUT=$'br\tabnt2' ;;
+        us:|pt:|es:|fr:|de:|it:)
+            KEYBOARD_PROFILE="$XKB_LAYOUT"; CINNAMON_LAYOUT="$XKB_LAYOUT"; MATE_LAYOUT="$XKB_LAYOUT" ;;
+        *) die 'Teclado recebido fora da lista permitida.' ;;
+    esac
+    ok "Plano gráfico importado: $INSTALL_DISK; usuário=$USERNAME_VALUE; perfil=$STACK_PRESET; $BOOT_MODE"
 }
 
 revalidate_gui_vm_target() {
@@ -12094,7 +12228,7 @@ revalidate_gui_vm_target() {
     (( ${#fields[@]} == 19 )) || die 'Revalidação VM com dados incompletos.' 
     [[ "${fields[0]}" == "$INSTALL_DISK" && "${fields[2]}" == "$GUI_VM_MAJMIN" ]] ||
         die 'Disco/identidade da VM mudou após confirmação.'
-    [[ "$INSTALL_DISK" == /dev/vd? ]] || die 'Disco deixou de ser VirtIO suportado.'
+    [[ -b "$INSTALL_DISK" && ! -L "$INSTALL_DISK" ]] || die 'Disco de destino deixou de ser um dispositivo de bloco válido.'
     [[ "${fields[10]}" == "$GUI_VM_MODE" ]] || die 'Modo GUI mudou após confirmação.'
     if [[ "$GUI_VM_MODE" == "erase" ]]; then
         local expected_home_role=""
@@ -12110,7 +12244,40 @@ revalidate_gui_vm_target() {
     if mountpoint -q /mnt 2>/dev/null; then
         die 'Montagem inesperada em /mnt. Recusando alterar partições.'
     fi
-    ok "Alvo VM revalidado imediatamente antes das operações de armazenamento: $INSTALL_DISK ($GUI_VM_MODE)."
+    ok "Destino revalidado imediatamente antes das operações de armazenamento: $INSTALL_DISK ($GUI_VM_MODE)."
+}
+
+# Falhas de SDK de terceiros não devem impedir a configuração do boot.
+# O subshell mantém errexit ativo dentro de install_flutter_sdk, mesmo quando
+# chamado num 'if' de retry. Comando timeout específico para git/flutter abaixo.
+install_optional_flutter_sdk() {
+    stack_selected android || { info 'Flutter não selecionado; ignorando SDK opcional.'; return 0; }
+    local decision status attempt=0
+    while true; do
+        attempt=$((attempt+1))
+        if (set -Eeuo pipefail; install_flutter_sdk); then
+            ok 'Flutter/Android SDK concluídos.'
+            return 0
+        else
+            status=$?
+        fi
+        warn "Flutter/Android falhou (tentativa $attempt, código $status). O sistema básico e o GRUB serão configurados normalmente se você pular."
+        printf '%s\n' ' [1] Tentar novamente' ' [2] Pular Flutter e continuar a instalação'
+        while true; do
+            read -r -p 'Escolha 1 ou 2: ' decision || decision=2
+            case "$decision" in
+                1) break ;;
+                2)
+                    printf 'Flutter pendente: etapa 68 falhou (%s), usuário pulou.\n' "$status" >> "$STATE_DIR/optional-failures.log"
+                    if [[ -d /mnt/var/log ]]; then
+                        cp "$STATE_DIR/optional-failures.log" /mnt/var/log/wolf-optional-failures.log || true
+                    fi
+                    warn 'Continuando sem validar Flutter. Depois da inicialização, conclua a instalação do SDK manualmente.'
+                    return 0 ;;
+                *) echo 'Escolha 1 para repetir ou 2 para pular.' ;;
+            esac
+        done
+    done
 }
 
 main() {
@@ -12175,10 +12342,11 @@ main() {
         ok "Perfil sem stacks opcionais: etapas 63 Chaotic-AUR e 64 AUR ignoradas."
     else
         stage "63-chaotic-aur" configure_chaotic_aur
+        stage "63b-vulkan" install_preferred_vulkan_provider
         stage "64-resolver-stacks" install_selected_stack_packages
     fi
     stage "67-servicos" configure_services
-    stage "68-android-flutter" install_flutter_sdk
+    stage "68-android-flutter" install_optional_flutter_sdk
     stage "69-video" install_gpu_profile
     stage "69b-validar-video" validate_graphics_stack
     stage "69c-branding-boot" install_wolf_branding
