@@ -23,7 +23,7 @@ check_shell(){
 }
 
 printf '%s\n' '======================================================'
-printf '%s\n' '    WOLF LINUX 2.0 KDE BASELINE - SMOKE TEST'
+printf '%s\n' '    WOLF LINUX 2.1 KDE BASELINE - SMOKE TEST'
 printf '%s\n' '======================================================'
 
 for f in "$INSTALLER" "$CUSTOMIZER" "$STAGE_SSH" "$PROJECT/tests/wolf-build-iso.sh" "$PROJECT/tests/wolf-test-iso.sh" "$PROJECT/tests/wolf-vm.sh" "$PROJECT/tests/wolf-enable-ssh-live.sh" "$PROJECT/tests/wolf-vm-ssh.sh" "$PROJECT/tests/wolf-stage-live-desktop.sh" "$PROJECT/tests/wolf-test-live-desktop.sh" "$PROJECT/tools/wolf-helper-manager-0.2.sh" "$PROJECT/tools/wolf-validate-helpers-0.1.sh"; do
@@ -283,7 +283,7 @@ bash -n "$PROJECT/tools/control-center/install-local.sh" || err 'Instalador loca
 python "$PROJECT/tests/wolf-test-control-center.py" || err 'Testes do Control Center falharam'
 grep -Fq 'pyside6' "$PACKAGES" || err 'Pacote PySide6 não declarado no KDE'
 grep -Fq 'gui_source="$source_root/control-center"' "$INSTALLER" || err 'Control Center não integrado ao instalador'
-grep -Fq 'options+=(--extras)' "$INSTALLER" || err 'Extra não aciona Octopi no perfil do usuário'
+grep -Fq 'install_wolf_package_manager' "$INSTALLER" || err 'Wolf Package Manager não integrado ao instalador'
 [[ -f "$PROJECT/assets/zsh/zshrc" ]] && grep -Fq "typeset -g ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=250'" "$PROJECT/assets/zsh/zshrc" || err 'Correção fg=250 de autosuggestions ausente ao final do perfil'
 ok 'Control Center integrado; extras e plugin Zsh verificados'
 

@@ -86,7 +86,7 @@ assert 'os.environ.get(\'WOLF_SHOW_VM_LAB\')' in ui
 assert "self.storage_mode.addItem(\"Reutilizar instalação existente" in ui
 assert 'self.home_cleanup_button' in ui and 'self.home_cleanup_spec' in ui
 assert '"$SOURCE/wolf_home_cleanup.py"' in staging
-assert (ROOT/'VERSION').read_text().strip() in ('2.0.0-alpha49', '2.0.0-alpha50', '2.0.0-alpha51', '2.0.0-alpha52', '2.0.0-alpha53', '2.0.0-alpha54', '2.0.0-alpha55', '2.0.0-alpha56', '2.0.0-alpha57', '2.0.0-alpha58', '2.0.0-alpha59', '2.0.0')
+assert (ROOT/'VERSION').read_text().strip() in ('2.0.0-alpha49', '2.0.0-alpha50', '2.0.0-alpha51', '2.0.0-alpha52', '2.0.0-alpha53', '2.0.0-alpha54', '2.0.0-alpha55', '2.0.0-alpha56', '2.0.0-alpha57', '2.0.0-alpha58', '2.0.0-alpha59', '2.0.0', '2.1.0-rc1', '2.1.0')
 print('[OK] alpha49: seleção estrita, backup opcional, Steam/SSH preservados por padrão')
 print('[OK] alpha49: simulação de limpeza + backup, sem acesso a dispositivos físicos')
 print('[OK] alpha49: contrato físico, validação SHA, PTY/EFI/LVM preservados, interface simplificada')

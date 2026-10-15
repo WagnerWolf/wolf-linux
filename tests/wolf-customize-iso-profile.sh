@@ -20,7 +20,7 @@ DEVKIT_VERSION="$(< "$VERSION_FILE")"
 [[ -d "$PROJECT/tools" ]] || { echo "[ERRO] Diretório tools ausente."; exit 1; }
 
 echo "======================================================"
-echo "   WOLF LINUX 2.0 - CUSTOMIZAÇÃO ISO KDE BASELINE"
+echo "   WOLF LINUX 2.1 - CUSTOMIZAÇÃO ISO KDE BASELINE"
 echo "======================================================"
 
 mkdir -p \
@@ -58,12 +58,12 @@ ln -sfn ../wolf-loadkeys.service "$AIROOT/etc/systemd/system/multi-user.target.w
 
 cat > "$AIROOT/etc/os-release" <<'OSR'
 NAME="Wolf Linux Live"
-VERSION="2.0"
-VERSION_ID="2.0.0"
-PRETTY_NAME="Wolf Linux 2.0 Live"
+VERSION="2.1"
+VERSION_ID="2.1.0"
+PRETTY_NAME="Wolf Linux 2.1 Live"
 ID=wolf-linux
 ID_LIKE=arch
-VARIANT="Wolf Linux 2.0 Live Graphical Installer"
+VARIANT="Wolf Linux 2.1 Live Graphical Installer"
 VARIANT_ID=wolf-linux-live
 BUILD_ID=rolling
 ANSI_COLOR="1;37"
@@ -159,7 +159,7 @@ for k,v in {
     'iso_name':'"wolf-linux"',
     'iso_label':'"WOLFLINUX_$(date +%Y%m)"',
     'iso_publisher':'"Wolf Linux"',
-    'iso_application':'"Wolf Linux 2.0 Graphical Live Installer"',
+    'iso_application':'"Wolf Linux 2.1 Graphical Live Installer"',
 }.items():
     pat=rf'^{re.escape(k)}=.*$'; line=f'{k}={v}'
     t=re.sub(pat,line,t,flags=re.M) if re.search(pat,t,flags=re.M) else t+'\n'+line+'\n'

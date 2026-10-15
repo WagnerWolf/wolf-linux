@@ -23,13 +23,13 @@ def main() -> None:
             raise AssertionError("Bad helper name must be denied")
         home = root / "home"
         home.mkdir()
-        assert backend.notifier_status(home, root / "missing") == "Octopi Notifier não instalado"
-        notifier = root / "octopi-notifier"
+        assert backend.notifier_status(home, root / "missing") == "Wolf Package Manager não instalado"
+        notifier = root / "wolf-package-manager"
         notifier.write_text("#!/bin/sh\n", encoding="utf-8")
         notifier.chmod(0o755)
         assert backend.notifier_status(home, notifier) == "Autostart ainda não configurado"
         result = backend.enable_notifier(home, notifier)
-        assert result == home / ".config/autostart/octopi-notifier.desktop"
+        assert result == home / ".config/autostart/wolf-package-manager.desktop"
         assert "Hidden=false" in result.read_text(encoding="utf-8")
         assert "OnlyShowIn=KDE;" in result.read_text(encoding="utf-8")
         # Idempotency and backup for prior user configuration
@@ -51,7 +51,7 @@ def main() -> None:
         assert "ausente" in backend.autosuggestions_status(home, root / "non-existent")
         rc, out = backend.command_output(["/bin/echo", "Wolf OK"])
         assert rc == 0 and out == "Wolf OK"
-    print("[OK] Control Center backend 0.1.2: helpers allowlist, Octopi enable/disable, backup e Zsh")
+    print("[OK] Control Center backend 0.2.0: helpers allowlist, Package Manager enable/disable, backup e Zsh")
 
 
 if __name__ == "__main__":

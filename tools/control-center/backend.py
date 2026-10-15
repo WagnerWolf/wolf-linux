@@ -7,7 +7,7 @@ import os
 import shutil
 import subprocess
 
-VERSION = "0.1.2"
+VERSION = "0.2.0"
 HELPERS_DIR = Path("/usr/local/lib/wolf-linux/helpers")
 HELPER_NAMES = {
     "monitor": "experimental/wolf-plasma-multimonitor-0.3.sh",
@@ -15,15 +15,15 @@ HELPER_NAMES = {
     "gamepad": "stable/wolf-gamepad-setup-0.3.sh",
     "grub": "stable/wolf-grub-manager-0.3.sh",
 }
-NOTIFIER_BIN = Path("/usr/bin/octopi-notifier")
-AUTOSTART_NAME = "octopi-notifier.desktop"
+NOTIFIER_BIN = Path("/usr/local/bin/wolf-package-manager")
+AUTOSTART_NAME = "wolf-package-manager.desktop"
 AUTOSTART_TEXT = """[Desktop Entry]
 Type=Application
-Name=Octopi Notifier
-Comment=Avisos de atualizações de pacotes
-Exec=/usr/bin/octopi-notifier
-TryExec=/usr/bin/octopi-notifier
-Icon=octopi
+Name=Wolf Package Manager (Monitor)
+Comment=Monitor de atualizações no tray do KDE
+Exec=/usr/local/bin/wolf-package-manager --tray
+TryExec=/usr/local/bin/wolf-package-manager
+Icon=wolf-package-manager
 Terminal=false
 OnlyShowIn=KDE;
 Hidden=false
@@ -63,7 +63,7 @@ def notifier_installed(binary: Path = NOTIFIER_BIN) -> bool:
 
 def notifier_status(home: Path | None = None, binary: Path = NOTIFIER_BIN) -> str:
     if not notifier_installed(binary):
-        return "Octopi Notifier não instalado"
+        return "Wolf Package Manager não instalado"
     user_file = user_autostart(home)
     system_file = Path("/etc/xdg/autostart") / AUTOSTART_NAME
     if user_file.is_file():
@@ -79,7 +79,7 @@ def notifier_status(home: Path | None = None, binary: Path = NOTIFIER_BIN) -> st
         config = "Autostart ainda não configurado"
     # Consulta sob demanda, nunca cria watcher nem atualizador automático.
     if home is None:
-        result, _ = command_output(["pgrep", "-u", str(os.getuid()), "-x", "octopi-notifier"], 2)
+        result, _ = command_output(["pgrep", "-u", str(os.getuid()), "-x", "wolf-package-manager"], 2)
         config += " | processo: " + ("em execução" if result == 0 else "não detectado")
     return config
 
@@ -93,7 +93,7 @@ def _save_previous_autostart(target: Path, new_text: str) -> None:
 
 def enable_notifier(home: Path | None = None, binary: Path = NOTIFIER_BIN) -> Path:
     if not notifier_installed(binary):
-        raise RuntimeError("Octopi Notifier não encontrado. Instale o Octopi antes de ativar.")
+        raise RuntimeError("Wolf Package Manager não encontrado.")
     target = user_autostart(home)
     target.parent.mkdir(parents=True, exist_ok=True)
     _save_previous_autostart(target, AUTOSTART_TEXT)
@@ -103,7 +103,7 @@ def enable_notifier(home: Path | None = None, binary: Path = NOTIFIER_BIN) -> Pa
 
 def disable_notifier(home: Path | None = None, binary: Path = NOTIFIER_BIN) -> Path:
     if not notifier_installed(binary):
-        raise RuntimeError("Octopi Notifier não instalado.")
+        raise RuntimeError("Wolf Package Manager não instalado.")
     target = user_autostart(home)
     target.parent.mkdir(parents=True, exist_ok=True)
     disabled = AUTOSTART_TEXT.replace("Hidden=false", "Hidden=true")
@@ -151,7 +151,7 @@ def status_text() -> str:
     for key, name in [("monitor", "MultiMonitor"), ("branding", "Branding"), ("gamepad", "Gamepad"), ("grub", "GRUB Manager")]:
         path = helper_file(key)
         lines.append(f"{name}: {'disponível' if path.is_file() and os.access(path, os.X_OK) else 'não encontrado'}")
-    lines.append("Octopi: " + notifier_status())
+    lines.append("Pacotes: " + notifier_status())
     lines.append("Zsh: " + autosuggestions_status())
     lines.append("Zsh runtime: " + autosuggestions_runtime_status())
     marker = Path.home() / ".local/state/wolf-linux/first-login-plasma/completed"

@@ -16,7 +16,8 @@ python3 "$PROJECT/tests/wolf-test-alpha56.py"
 python3 "$PROJECT/tests/wolf-test-alpha57.py"
 python3 "$PROJECT/tests/wolf-test-alpha58.py"
 python3 "$PROJECT/tests/wolf-test-alpha59.py"
-python3 "$PROJECT/tests/wolf-test-release-2.0.0.py"
+python3 "$PROJECT/tests/wolf-test-release-2.1.0.py"
+python3 "$PROJECT/tests/wolf-test-package-manager.py"
 python3 "$PROJECT/tests/wolf_test_alpha52_ui.py" -q
 # A variante ThinkPad usa XKB br(thinkpad), sem interferir com ABNT2 padrão.
 grep -Fq '"Português (Brasil) — ThinkPad (IBM/Lenovo)", "br", "abnt2", "thinkpad"' "$SOURCE/main.py" || { echo '[ERRO] Variante ThinkPad brasileira ausente.' >&2; exit 1; }

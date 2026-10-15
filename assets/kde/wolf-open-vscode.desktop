@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Service
+MimeType=inode/directory;
+X-KDE-Priority=TopLevel
+Actions=wolfOpenVSCode;
+
+[Desktop Action wolfOpenVSCode]
+Name=Abrir pasta no Visual Studio Code
+Icon=visual-studio-code
+Exec=code -- %f

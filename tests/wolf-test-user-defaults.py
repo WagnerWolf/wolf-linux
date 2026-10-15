@@ -31,7 +31,6 @@ def main() -> None:
         home = fake_root(root)
         (home / ".config").mkdir()
         (root / "usr/bin").mkdir(parents=True)
-        (root / "usr/bin/octopi-notifier").write_text("#!/bin/sh\n", encoding="utf-8")
         (home / ".config" / "kwinrc").write_text("[Windows]\nMyOwnValue=yes\n", encoding="utf-8")
         configure(root, "wolf", PROJECT / "assets", True, True, True)
         check_expected(home, ".config/kwinrc", ["MultiScreenMode=1", "Placement=UnderMouse", "ActiveMouseScreen=true", "MyOwnValue=yes"])
@@ -57,7 +56,7 @@ def main() -> None:
         ])
         check_expected(home, ".local/share/kio/servicemenus/wolf-open-vscode.desktop", ["MimeType=inode/directory", "Exec=code -- %f"])
         check_expected(home, ".zshrc", ["powerlevel10k.zsh-theme", "oh-my-zsh.sh"])
-        check_expected(home, ".config/autostart/octopi-notifier.desktop", ["Exec=/usr/bin/octopi-notifier", "OnlyShowIn=KDE;", "Hidden=false"])
+        assert not (home / ".config/autostart/octopi-notifier.desktop").exists(), "Octopi não deve ser configurado"
         check_expected(home, ".zshrc", ["zsh-autosuggestions.zsh", "ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE"])
 
         check_expected(home, ".p10k.zsh", ["POWERLEVEL9K_"])

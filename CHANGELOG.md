@@ -1,5 +1,17 @@
 # Changelog — Wolf Linux DevKit
 
+## 2.1.0 — lançamento estável (2026-10-15)
+
+- Promovida a 2.1.0-rc1 validada pelo mantenedor, sem alterações funcionais no instalador, particionamento ou boot.
+- Identidade de versão padronizada no DevKit, Live e sistema instalado; documentação oficial atualizada.
+- Inclui Wolf Package Manager 0.3.1 em substituição ao Octopi, com autostart na bandeja e integração ao Control Center.
+
+## 2.1.0-rc1 — prévia (2026-10-15)
+
+- Substitui Octopi por Wolf Package Manager 0.3.1.
+- Autostart KDE, Control Center, dependências pacman-contrib e yay.
+- Teste da ISO/instalação ainda pendente.
+
 ## 2.0.0 — lançamento final (2026-10-14)
 
 - Promovida a base alpha59 para a versão 2.0.0 após testes práticos de instalação e inicialização UEFI informados pelo mantenedor.

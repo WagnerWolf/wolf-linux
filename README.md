@@ -1,8 +1,8 @@
-# Wolf Linux DevKit 2.0.0
+# Wolf Linux DevKit 2.1.0
 
-**Versão final 2.0.0 — KDE Plasma / Wayland, base Arch Linux.**
+**Versão estável 2.1.0 — KDE Plasma / Wayland, base Arch Linux.**
 
-O Wolf Linux 2.0 utiliza uma interface gráfica própria na mídia Live para instalar o sistema em máquinas BIOS/Legacy ou UEFI. A interface é o instalador principal: o executor Bash realiza o particionamento e a instalação após revisão do plano e duas confirmações. O terminal de progresso permanece dentro da janela do instalador.
+O Wolf Linux 2.1 utiliza uma interface gráfica própria na mídia Live para instalar o sistema em máquinas BIOS/Legacy ou UEFI. A interface é o instalador principal: o executor Bash realiza o particionamento e a instalação após revisão do plano e duas confirmações. O terminal de progresso permanece dentro da janela do instalador.
 
 ## Modos de instalação
 
@@ -19,7 +19,7 @@ Antes de confirmar, confira com atenção **qual disco e quais partições serã
 No Arch Linux, extraia o DevKit e abra o diretório:
 
 ```bash
-cd wolf-linux-devkit-2.0.0
+cd wolf-linux-devkit-2.1.0
 ./preparar_ambiente_wolf_linux.sh
 ```
 
@@ -60,8 +60,9 @@ Flutter e alguns pacotes de terceiros podem falhar por conexão, indisponibilida
 - Áudio: PipeWire.
 - Gerenciador de inicialização: GRUB (BIOS/UEFI conforme o computador).
 - Repositórios: Arch oficial → Chaotic-AUR → AUR direto somente quando necessário.
+- Gerenciador gráfico: Wolf Package Manager 0.3.1 (repositórios + yay/AUR; bandeja KDE, checagem de atualizações a cada 2 horas ajustável).
 - Utilitários: Wolf Control Center, comandos `wolf-helper`, Wolf Rescue na mídia Live.
-- Versão: arquivo `VERSION` no DevKit e identificação `Wolf Linux 2.0` no sistema instalado.
+- Versão: arquivo `VERSION` no DevKit e identificação `Wolf Linux 2.1` no sistema instalado.
 
 ## Manutenção e diagnóstico
 
@@ -80,4 +81,4 @@ A identidade dos discos é conferida novamente pelo executor antes das alteraç�
 
 ## Histórico de desenvolvimento
 
-A sequência alpha10–alpha59 e os documentos de testes históricos permanecem preservados em `docs/historico-alphas/`. Essas anotações **não descrevem o comportamento atual de todas as funções**. Para a versão final, consulte este README e `RELEASE-NOTES-2.0.0.md`.
+A sequência alpha10–alpha59 e os documentos de testes históricos permanecem preservados em `docs/historico-alphas/`. A prévia 2.1.0-rc1 está arquivada em `docs/historico-releases/`. Essas anotações **não descrevem o comportamento atual de todas as funções**. Para a versão final, consulte este README e `RELEASE-NOTES-2.1.0.md` (e notas estáveis 2.0.0 para referência).

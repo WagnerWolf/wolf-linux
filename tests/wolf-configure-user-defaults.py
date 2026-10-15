@@ -158,23 +158,6 @@ Terminal=false
 X-KDE-autostart-phase=2
 """, encoding="utf-8")
 
-    octopi_autostart = config / "autostart" / "octopi-notifier.desktop"
-    if extras and (root / "usr/bin/octopi-notifier").is_file():
-        octopi_autostart.write_text("""[Desktop Entry]
-Type=Application
-Name=Octopi Notifier
-Comment=Avisos de atualizações no Plasma
-Exec=/usr/bin/octopi-notifier
-TryExec=/usr/bin/octopi-notifier
-Icon=octopi
-Terminal=false
-OnlyShowIn=KDE;
-Hidden=false
-X-KDE-autostart-phase=2
-""", encoding="utf-8")
-    elif extras:
-        print("[AVISO] Octopi Notifier indisponível; autostart não criado.", file=sys.stderr)
-
     if development:
         service_dir = home / ".local" / "share" / "kio" / "servicemenus"
         copy_profile(assets / "kde" / "wolf-open-vscode.desktop", service_dir / "wolf-open-vscode.desktop")
@@ -199,8 +182,6 @@ X-KDE-autostart-phase=2
                         config / "fastfetch" / "config.jsonc", config / "fastfetch" / "config-tty.jsonc"]
         if development:
             targets.append(home / ".local" / "share" / "kio" / "servicemenus" / "wolf-open-vscode.desktop")
-        if octopi_autostart.is_file() and extras:
-            targets.append(octopi_autostart)
         for p in targets:
             os.chown(p, uid, gid)
             parent = p.parent

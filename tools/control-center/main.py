@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Wolf Control Center 0.1.2 — interface de administração manual para KDE Plasma."""
+"""Wolf Control Center 0.2.0 — interface de administração manual para KDE Plasma."""
 from __future__ import annotations
 
 import sys
@@ -155,11 +155,12 @@ class Center(QMainWindow):
         actions.addWidget(self._button("Abrir assistente de controles", lambda: self._terminal("gamepad")))
 
         start = self._page()
-        self.octopi_label = QLabel("", objectName="subtitle")
-        actions = self._card(start, "Octopi Notifier", "Avisos de atualizações ao entrar no KDE. Não instala atualizações automaticamente.")
-        actions.addWidget(self._button("Ativar no login", self._enable_octopi))
-        actions.addWidget(self._button("Desativar no próximo login", self._disable_octopi))
-        start.addWidget(self.octopi_label)
+        self.package_label = QLabel("", objectName="subtitle")
+        actions = self._card(start, "Wolf Package Manager", "Monitor de atualizações na bandeja do KDE, com atualizações e instalações sempre autorizadas pelo usuário.")
+        actions.addWidget(self._button("Ativar no login", self._enable_packages))
+        actions.addWidget(self._button("Desativar no próximo login", self._disable_packages))
+        actions.addWidget(self._button("Abrir gerenciador de pacotes", self._open_package_manager, activity=False))
+        start.addWidget(self.package_label)
         self.zsh_label = QLabel("", objectName="subtitle")
         actions = self._card(start, "Zsh Autosuggestions", "Confere plugin, configuração fg=250 e carregamento em uma nova sessão Zsh.")
         actions.addWidget(self._button("Verificar plugin", self._check_zsh))
@@ -268,11 +269,21 @@ class Center(QMainWindow):
         else:
             self._log("[OK] Assistente aberto no Konsole.")
 
-    def _enable_octopi(self) -> None:
-        if not notifier_installed():
-            self._warn("Octopi Notifier não instalado: verifique seu pacote Octopi.")
+    def _open_package_manager(self) -> None:
+        command = "/usr/local/bin/wolf-package-manager"
+        if not Path(command).is_file():
+            self._warn("Wolf Package Manager não instalado.")
             return
-        if not self._confirm("Criar/atualizar o autostart Octopi Notifier deste usuário? Uma cópia anterior será preservada."):
+        launched = QProcess.startDetached(command, [])
+        started = launched[0] if isinstance(launched, tuple) else launched
+        if not started:
+            self._warn("Não foi possível iniciar o Wolf Package Manager.")
+
+    def _enable_packages(self) -> None:
+        if not notifier_installed():
+            self._warn("Wolf Package Manager não instalado.")
+            return
+        if not self._confirm("Ativar o Wolf Package Manager na inicialização deste usuário? Uma cópia anterior será preservada."):
             return
         try:
             target = enable_notifier()
@@ -281,15 +292,15 @@ class Center(QMainWindow):
             self._warn(str(exc))
         self.refresh()
 
-    def _disable_octopi(self) -> None:
+    def _disable_packages(self) -> None:
         if not notifier_installed():
-            self._warn("Octopi Notifier não instalado.")
+            self._warn("Wolf Package Manager não instalado.")
             return
-        if not self._confirm("Desativar Octopi Notifier no próximo login? O processo atual não será interrompido."):
+        if not self._confirm("Desativar Wolf Package Manager no próximo login? O processo atual não será interrompido."):
             return
         try:
             target = disable_notifier()
-            self._log(f"[OK] Octopi desativado no login: {target}")
+            self._log(f"[OK] Wolf Package Manager desativado no login: {target}")
         except (OSError, RuntimeError) as exc:
             self._warn(str(exc))
         self.refresh()
@@ -306,7 +317,7 @@ class Center(QMainWindow):
         summary = status_text()
         self.system_label.setText(summary.replace("\n", "\n"))
         from backend import notifier_status
-        self.octopi_label.setText(notifier_status())
+        self.package_label.setText(notifier_status())
         self.zsh_label.setText(autosuggestions_status())
         self.info_label.setText("Pronto" if self.proc is None else "Operação em andamento...")
 

@@ -7,7 +7,7 @@ fi
 
 set -Eeuo pipefail
 
-WOLF_VERSION="2.0.0"
+WOLF_VERSION="2.1.0"
 DRY_RUN=0
 PLAN_ONLY=0
 RESET_STATE=0
@@ -279,7 +279,7 @@ Stacks opcionais disponíveis:
   development  Compiladores, Python, JDK, VS Code, Insomnia
   android      Android Studio/SDK + Flutter (stack grande)
   containers   Docker, Compose, Buildx, lazydocker
-  extras       JDownloader, AB Download Manager, Balena Etcher, Octopi
+  extras       JDownloader, AB Download Manager, Balena Etcher
 EOF
     exit 0
 fi
@@ -715,7 +715,7 @@ Stacks opcionais disponíveis:
   development  Compiladores, Python, JDK, VS Code, Insomnia
   android      Android Studio/SDK + Flutter (stack grande)
   containers   Docker, Compose, Buildx, lazydocker
-  extras       JDownloader, AB Download Manager, Balena Etcher, Octopi
+  extras       JDownloader, AB Download Manager, Balena Etcher
 EOF
 }
 
@@ -1975,9 +1975,9 @@ configure_wolf_identity() {
 
     cat > /mnt/etc/os-release <<'EOF'
 NAME="Wolf Linux"
-PRETTY_NAME="Wolf Linux 2.0"
-VERSION="2.0"
-VERSION_ID="2.0.0"
+PRETTY_NAME="Wolf Linux 2.1"
+VERSION="2.1"
+VERSION_ID="2.1.0"
 LOGO="wolf-linux"
 VENDOR_NAME="Wolf Linux"
 ID=arch
@@ -2027,7 +2027,7 @@ EOF
         printf 'GRUB_DISABLE_BOOTNEXT=true\n' >> /mnt/etc/default/grub
     fi
 
-    grep -q '^PRETTY_NAME="Wolf Linux 2.0"$' /mnt/etc/os-release ||
+    grep -q '^PRETTY_NAME="Wolf Linux 2.1"$' /mnt/etc/os-release ||
         die "Falha ao gravar identidade Wolf Linux em /etc/os-release."
 
     ok "Sistema identificado como Wolf Linux (compatibilidade ID=arch)."
@@ -3605,29 +3605,6 @@ X-GNOME-Autostart-enabled=true
 EOF
 
     ok "Padrão dos terminais preparado."
-}
-
-configure_octopi_notifier() {
-    if [[ ! -x /mnt/usr/bin/octopi-notifier ]]; then
-        die "Octopi foi solicitado, mas /usr/bin/octopi-notifier não foi instalado."
-    fi
-
-    mkdir -p /mnt/etc/xdg/autostart
-
-    cat > /mnt/etc/xdg/autostart/octopi-notifier.desktop <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=Octopi Notifier
-Comment=Verifica atualizações de pacotes após o login
-Exec=/usr/bin/octopi-notifier
-TryExec=/usr/bin/octopi-notifier
-Terminal=false
-Hidden=false
-NoDisplay=true
-X-GNOME-Autostart-enabled=true
-EOF
-
-    ok "Octopi Notifier configurado para iniciar após o login."
 }
 
 set_mkinitcpio_modules() {
@@ -11869,6 +11846,73 @@ install_wolf_plasma_panel_defaults() {
     ok 'Baseline Plasma sem Discover e painel padrão revisado.'
 }
 
+install_wolf_package_manager() {
+    # Distributed in the ISO project: installed for ALL presets including Minimal.
+    # This is a GUI wrapper around pacman/yay; NEVER run it with root privileges.
+    local src="$PROJECT_DIR/tools/package-manager"
+    local dst="/mnt/usr/local/lib/wolf-linux/package-manager"
+    local file relative
+    [[ -f "$src/main.py" && -f "$src/wolfpkg/app.py" && -f "$src/wolfpkg/assets/wolf-logo.png" ]] || \
+        die 'Fontes do Wolf Package Manager ausentes no DevKit.'
+    [[ -x /mnt/usr/bin/checkupdates ]] || die 'pacman-contrib/checkupdates não foi instalado.'
+    [[ -x /mnt/usr/bin/script ]] || die 'util-linux/script não foi instalado.'
+    install -d /mnt/usr/local/bin /mnt/usr/share/applications \
+        /mnt/usr/share/icons/hicolor/256x256/apps /mnt/etc/xdg/autostart
+    rm -rf -- "$dst"
+    install -d "$dst/wolfpkg/assets"
+    install -m 0644 "$src/main.py" "$dst/main.py"
+    for file in "$src"/wolfpkg/*.py; do
+        install -m 0644 "$file" "$dst/wolfpkg/$(basename "$file")"
+    done
+    install -m 0755 "$src/wolfpkg/askpass.sh" "$dst/wolfpkg/askpass.sh"
+    for file in "$src"/wolfpkg/assets/*.png; do
+        install -m 0644 "$file" "$dst/wolfpkg/assets/$(basename "$file")"
+    done
+    install -m 0644 "$src/wolfpkg/assets/wolf-logo.png" \
+        /mnt/usr/share/icons/hicolor/256x256/apps/wolf-package-manager.png
+    cat > /mnt/usr/local/bin/wolf-package-manager <<'WOLF_PKG_LAUNCHER'
+#!/usr/bin/env sh
+exec /usr/bin/python3 /usr/local/lib/wolf-linux/package-manager/main.py "$@"
+WOLF_PKG_LAUNCHER
+    chmod 0755 /mnt/usr/local/bin/wolf-package-manager
+    cat > /mnt/usr/share/applications/wolf-package-manager.desktop <<'WOLF_PKG_DESKTOP'
+[Desktop Entry]
+Type=Application
+Name=Wolf Package Manager
+GenericName=Gerenciador de pacotes
+Comment=Pesquisar, instalar e atualizar pacotes do Arch, Chaotic-AUR e AUR
+Exec=/usr/local/bin/wolf-package-manager
+TryExec=/usr/local/bin/wolf-package-manager
+Icon=wolf-package-manager
+Categories=System;PackageManager;Qt;
+Terminal=false
+StartupNotify=true
+WOLF_PKG_DESKTOP
+    cat > /mnt/etc/xdg/autostart/wolf-package-manager.desktop <<'WOLF_PKG_AUTOSTART'
+[Desktop Entry]
+Type=Application
+Name=Wolf Package Manager (Monitor)
+Comment=Verificar atualizações e mostrar status na bandeja do KDE
+Exec=/usr/local/bin/wolf-package-manager --tray
+TryExec=/usr/local/bin/wolf-package-manager
+Icon=wolf-package-manager
+OnlyShowIn=KDE;
+Terminal=false
+X-KDE-autostart-after=panel
+WOLF_PKG_AUTOSTART
+    # Yay is a user-run AUR helper. Never invoke it as root.
+    if [[ ! -x /mnt/usr/bin/yay ]]; then
+        if ( ensure_yay ); then
+            ok 'yay instalado para o Wolf Package Manager.'
+        else
+            warn 'Não foi possível instalar yay; pesquisas oficiais seguem disponíveis, AUR ficará pendente.'
+            mkdir -p /mnt/var/log
+            echo 'wolf-package-manager: yay ausente; instalar como usuário para ativar AUR' >> /mnt/var/log/wolf-optional-failures.log
+        fi
+    fi
+    ok 'Wolf Package Manager integrado (menu + autostart KDE em modo tray).'
+}
+
 install_wolf_helper_bundle() {
     local source_root="$PROJECT_DIR/tools"
     local target_root="/mnt/usr/local/lib/wolf-linux/helpers"
@@ -11934,14 +11978,15 @@ EOF
         warn "Removendo autostarts Wolf globais herdados: mantido apenas o setup unico do usuario."
         find /mnt/etc/xdg/autostart -maxdepth 1 -type f -name 'wolf-*.desktop' -delete
     fi
-    ok "Helpers copiados. Use 'wolf-helper list' para inspecioná-los após o boot."
+    install_wolf_package_manager
+    ok "Helpers e Wolf Package Manager instalados. Use 'wolf-helper list' após o boot."
 }
 
 finalize_vm_install() {
     sync
     echo
     echo "============================================================"
-    echo "         WOLF LINUX 2.0 — INSTALAÇÃO CONCLUÍDA"
+    echo "         WOLF LINUX 2.1 — INSTALAÇÃO CONCLUÍDA"
     echo "============================================================"
     echo "Desktop ....: KDE Plasma / Wayland"
     echo "Usuário ....: $USERNAME_VALUE"
@@ -11955,6 +12000,7 @@ finalize_vm_install() {
     echo "  wolf-helper list"
     echo "  wolf-helper validate"
     echo "  wolf-control-center"
+    echo "  wolf-package-manager"
     echo "  wolf-grub-manager"
     echo "  wolf-gamepad-setup"
     if [[ -s "$STATE_DIR/optional-failures.log" ]]; then
