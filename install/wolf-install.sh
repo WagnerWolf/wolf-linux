@@ -7,7 +7,7 @@ fi
 
 set -Eeuo pipefail
 
-WOLF_VERSION="2.1.0"
+WOLF_VERSION="2.1.2"
 DRY_RUN=0
 PLAN_ONLY=0
 RESET_STATE=0
@@ -174,6 +174,7 @@ Seleção de software:
   --preset test         VM/teste: daily + gaming + development + extras.
                         Não instala Android/Flutter nem containers.
   --preset minimal      Somente sistema + KDE Plasma/Wayland.
+  --preset basic        KDE + LibreOffice, Chrome, áudio/vídeo e PDF.
   --preset custom       Abre seleção interativa das stacks.
   --stacks LISTA        Seleção explícita, separada por vírgulas.
                         Ex.: daily,gaming,development
@@ -232,6 +233,7 @@ while (($#)); do
             ;;
         --full) STACK_PRESET="full" ;;
         --test) STACK_PRESET="test" ;;
+        --basic) STACK_PRESET="basic" ;;
         --minimal) STACK_PRESET="minimal" ;;
         --stacks)
             shift
@@ -755,6 +757,7 @@ apply_preset() {
         test)
             for name in daily gaming development extras; do select_stack "$name"; done
             ;;
+        basic) select_stack daily ;;
         minimal) ;;
         custom) return 1 ;;
         *) die "Preset inválido: $preset" ;;
@@ -768,7 +771,8 @@ choose_stacks_interactive() {
     echo "  1) Full    - todas as stacks [padrão]"
     echo "  2) Test    - sem Android/Flutter e containers"
     echo "  3) Minimal - somente KDE/base"
-    echo "  4) Custom  - escolher stack por stack"
+    echo "  4) Basic   - escritório, navegador e multimídia"
+    echo "  5) Custom  - escolher stack por stack"
     echo
     read -r -p "Perfil [1]: " choice
     choice="${choice:-1}"
@@ -776,7 +780,8 @@ choose_stacks_interactive() {
         1) apply_preset full ;;
         2) apply_preset test ;;
         3) apply_preset minimal ;;
-        4)
+        4) apply_preset basic ;;
+        5)
             local name answer
             for name in daily gaming development android containers extras; do
                 read -r -p "Instalar stack '$name'? [s/N]: " answer
@@ -1486,15 +1491,18 @@ format_and_mount() {
         # Na instalação manual, selecionar a EFI dispensa ajustar a flag esp
         # pelo GParted. O tipo GPT da partição escolhida é marcado como ESP.
         if [[ "$BOOT_MODE" == "UEFI" && -n "$GUI_VM_PLAN" && "$GUI_VM_MODE" == "manual" ]]; then
-            local partition_number esp_typecode disk_table
+            local partition_number esp_typecode disk_table esp_parent_disk
             partition_number="$(lsblk -dnro PARTN "$ESP_DEVICE" | tr -d '[:space:]')"
-            disk_table="$(lsblk -dnro PTTYPE "$INSTALL_DISK" | tr -d '[:space:]')"
+            esp_parent_disk="$(lsblk -dnro PKNAME "$ESP_DEVICE" | tr -d '[:space:]')"
+            [[ -n "$esp_parent_disk" ]] || die 'Não foi possível identificar o disco físico da EFI.'
+            [[ "$esp_parent_disk" == /dev/* ]] || esp_parent_disk="/dev/$esp_parent_disk"
+            disk_table="$(lsblk -dnro PTTYPE "$esp_parent_disk" | tr -d '[:space:]')"
             [[ "$partition_number" =~ ^[0-9]+$ && "$disk_table" == "gpt" ]] || die 'Não foi possível conferir partição EFI/GPT.'
             esp_typecode="$(lsblk -dnro PARTTYPE "$ESP_DEVICE" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
             if [[ "$esp_typecode" != "c12a7328-f81f-11d2-ba4b-00a0c93ec93b" ]]; then
                 warn "Ajustando tipo GPT da partição $ESP_DEVICE para EFI System (ESP), sem modificar outras partições."
-                sgdisk --typecode="${partition_number}:ef00" "$INSTALL_DISK"
-                partprobe "$INSTALL_DISK"
+                sgdisk --typecode="${partition_number}:ef00" "$esp_parent_disk"
+                partprobe "$esp_parent_disk"
                 udevadm settle
             fi
         fi
@@ -1977,7 +1985,7 @@ configure_wolf_identity() {
 NAME="Wolf Linux"
 PRETTY_NAME="Wolf Linux 2.1"
 VERSION="2.1"
-VERSION_ID="2.1.0"
+VERSION_ID="2.1.2"
 LOGO="wolf-linux"
 VENDOR_NAME="Wolf Linux"
 ID=arch
@@ -2096,6 +2104,42 @@ reconcile_preserved_home_access() {
     ok "Acesso de escrita confirmado para /home/$USERNAME_VALUE, preservando arquivos dos usuários."
 }
 
+# Evita que o root deixe ~/.cache inacessível ao usuário (observado no Minimal).
+# Somente o diretório .cache / wolf-linux pode ser ajustado, NUNCA recursivamente.
+prepare_user_cache() {
+    local user_home="/mnt/home/$USERNAME_VALUE"
+    local uid gid dir cur_owner
+    uid="$(arch-chroot /mnt id -u "$USERNAME_VALUE")" || die 'UID de usuário não encontrado.'
+    gid="$(arch-chroot /mnt id -g "$USERNAME_VALUE")" || die 'GID de usuário não encontrado.'
+    [[ -d "$user_home" && ! -L "$user_home" ]] || die 'Home ausente ou link: não criar cache.'
+    [[ "$(stat -c %u -- "$user_home")" == "$uid" ]] || die 'Home pertence a outro UID; cache não será alterado.'
+    for dir in "$user_home/.cache" "$user_home/.cache/wolf-linux"; do
+        [[ ! -L "$dir" ]] || die "Cache é link simbólico: $dir"
+        if [[ -e "$dir" ]]; then
+            [[ -d "$dir" ]] || die "Cache não é diretório: $dir"
+            cur_owner="$(stat -c %u -- "$dir")"
+            if [[ "$cur_owner" == 0 ]]; then
+                # Caso conhecido: diretório criado pelo instalador, como root.
+                chown --no-dereference "$uid:$gid" -- "$dir"
+            elif [[ "$cur_owner" != "$uid" ]]; then
+                die "Cache pertence a outro usuário (UID $cur_owner): $dir"
+            fi
+        else
+            install -d -m 0700 -o "$uid" -g "$gid" -- "$dir"
+        fi
+    done
+    # shellcheck disable=SC2016 # $1 e $p são expandidos dentro do /bin/sh do usuário (chroot).
+    if ! arch-chroot /mnt runuser -u "$USERNAME_VALUE" -- /bin/sh -c '
+        set -eu
+        test -w "$1" && test -x "$1" || exit 1
+        p="$(mktemp "$1/.wolf-access.XXXXXXXX")" || exit 1
+        rm -f -- "$p"
+    ' _ "/home/$USERNAME_VALUE/.cache"; then
+        die "Usuário $USERNAME_VALUE não consegue escrever no próprio cache."
+    fi
+    ok "Cache pessoal: dono e escrita verificados para $USERNAME_VALUE."
+}
+
 configure_user_sudo() {
     local user_shell="/bin/bash"
     local -a desired_groups
@@ -2162,6 +2206,7 @@ EOF
     # Desktop pessoal: administração via sudo; root sem senha de login.
     arch-chroot /mnt passwd -l root
 
+    prepare_user_cache
     ok "Usuário e sudo configurados."
 }
 
@@ -2225,7 +2270,25 @@ enable_one_service() {
     esac
 }
 
+install_baloo_qt_offscreen() {
+    # Baloo indexer/extractor does not need a graphical display.  This
+    # override applies ONLY to kde-baloo.service and processes it spawns;
+    # the rest of Plasma/Qt stays on the user's Wayland platform.
+    # Avoid writing into users' /home or into the Live running system.
+    local dropin_dir="/mnt/etc/systemd/user/kde-baloo.service.d"
+    install -d -m 0755 "$dropin_dir"
+    cat > "$dropin_dir/override.conf" <<'WOLF_BALOO_QT_OFFSCREEN'
+[Service]
+Environment=QT_QPA_PLATFORM=offscreen
+WOLF_BALOO_QT_OFFSCREEN
+    chmod 0644 "$dropin_dir/override.conf"
+    ok 'Baloo: extrator Qt configurado em modo offscreen (apenas kde-baloo.service).'
+}
+
 configure_services() {
+    # Installed system only: on first user login systemd --user reads this
+    # global drop-in. Never override QT_QPA_PLATFORM for the KDE session.
+    install_baloo_qt_offscreen
     local -a services=(NetworkManager.service bluetooth.service sddm.service)
     stack_selected daily && services+=(cups.service)
     stack_selected containers && services+=(docker.service)
@@ -2461,18 +2524,27 @@ EOF
 }
 
 collect_selected_official_packages() {
-    stack_selected daily && printf '%s
-' "${DAILY_PACKAGES[@]}"
-    stack_selected gaming && printf '%s
-' "${GAMING_PACKAGES[@]}"
-    stack_selected development && printf '%s
-' "${DEVELOPMENT_PACKAGES[@]}"
-    stack_selected android && printf '%s
-' "${ANDROID_PACKAGES[@]}"
-    stack_selected containers && printf '%s
-' "${CONTAINER_PACKAGES[@]}"
-    stack_selected extras && printf '%s
-' "${EXTRA_PACKAGES[@]}"
+    # Não emitir diagnósticos para stdout: esta função alimenta uma lista de pacotes.
+    # Sob set -Ee, o último teste falso não pode produzir o ERR trap herdado.
+    if stack_selected daily; then
+        printf '%s\n' "${DAILY_PACKAGES[@]}"
+    fi
+    if stack_selected gaming; then
+        printf '%s\n' "${GAMING_PACKAGES[@]}"
+    fi
+    if stack_selected development; then
+        printf '%s\n' "${DEVELOPMENT_PACKAGES[@]}"
+    fi
+    if stack_selected android; then
+        printf '%s\n' "${ANDROID_PACKAGES[@]}"
+    fi
+    if stack_selected containers; then
+        printf '%s\n' "${CONTAINER_PACKAGES[@]}"
+    fi
+    if stack_selected extras; then
+        printf '%s\n' "${EXTRA_PACKAGES[@]}"
+    fi
+    return 0
 }
 
 install_official_personal_apps() {
@@ -2498,6 +2570,7 @@ install_official_personal_apps() {
 }
 
 ensure_yay() {
+    prepare_user_cache
     if [[ -x /mnt/usr/bin/yay ]]; then
         ok "yay já instalado."
         return 0
@@ -2519,8 +2592,7 @@ ensure_yay() {
     local build_dir="/home/$USERNAME_VALUE/.cache/wolf-linux/yay-bin"
 
     arch-chroot /mnt rm -rf "$build_dir"
-    arch-chroot /mnt install -d -o "$USERNAME_VALUE" -g "$USERNAME_VALUE" \
-        "/home/$USERNAME_VALUE/.cache/wolf-linux"
+    # .cache/wolf-linux já foi criada/validada pelo prepare_user_cache.
 
     arch-chroot /mnt runuser -u "$USERNAME_VALUE" -- \
         git clone --depth=1 \
@@ -2550,18 +2622,27 @@ ensure_yay() {
 }
 
 collect_third_party_packages() {
-    stack_selected daily && printf '%s
-' "${DAILY_THIRD_PARTY_PACKAGES[@]}"
-    stack_selected gaming && printf '%s
-' "${GAMING_THIRD_PARTY_PACKAGES[@]}"
-    stack_selected development && printf '%s
-' "${DEVELOPMENT_THIRD_PARTY_PACKAGES[@]}"
-    stack_selected android && printf '%s
-' "${ANDROID_THIRD_PARTY_PACKAGES[@]}"
-    stack_selected containers && printf '%s
-' "${CONTAINER_THIRD_PARTY_PACKAGES[@]}"
-    stack_selected extras && printf '%s
-' "${EXTRA_THIRD_PARTY_PACKAGES[@]}"
+    # Não emitir diagnósticos para stdout: esta função alimenta uma lista de pacotes.
+    # Sob set -Ee, o último teste falso não pode produzir o ERR trap herdado.
+    if stack_selected daily; then
+        printf '%s\n' "${DAILY_THIRD_PARTY_PACKAGES[@]}"
+    fi
+    if stack_selected gaming; then
+        printf '%s\n' "${GAMING_THIRD_PARTY_PACKAGES[@]}"
+    fi
+    if stack_selected development; then
+        printf '%s\n' "${DEVELOPMENT_THIRD_PARTY_PACKAGES[@]}"
+    fi
+    if stack_selected android; then
+        printf '%s\n' "${ANDROID_THIRD_PARTY_PACKAGES[@]}"
+    fi
+    if stack_selected containers; then
+        printf '%s\n' "${CONTAINER_THIRD_PARTY_PACKAGES[@]}"
+    fi
+    if stack_selected extras; then
+        printf '%s\n' "${EXTRA_THIRD_PARTY_PACKAGES[@]}"
+    fi
+    return 0
 }
 
 install_third_party_apps() {
@@ -2657,12 +2738,27 @@ EOF
 
 
 collect_selected_stack_packages() {
-    stack_selected daily && printf '%s\n' "${DAILY_PACKAGES[@]}" "${DAILY_THIRD_PARTY_PACKAGES[@]}"
-    stack_selected gaming && printf '%s\n' "${GAMING_PACKAGES[@]}" "${GAMING_THIRD_PARTY_PACKAGES[@]}"
-    stack_selected development && printf '%s\n' "${DEVELOPMENT_PACKAGES[@]}" "${DEVELOPMENT_THIRD_PARTY_PACKAGES[@]}"
-    stack_selected android && printf '%s\n' "${ANDROID_PACKAGES[@]}" "${ANDROID_THIRD_PARTY_PACKAGES[@]}"
-    stack_selected containers && printf '%s\n' "${CONTAINER_PACKAGES[@]}" "${CONTAINER_THIRD_PARTY_PACKAGES[@]}"
-    stack_selected extras && printf '%s\n' "${EXTRA_PACKAGES[@]}" "${EXTRA_THIRD_PARTY_PACKAGES[@]}"
+    # Não emitir diagnósticos para stdout: esta função alimenta uma lista de pacotes.
+    # Sob set -Ee, o último teste falso não pode produzir o ERR trap herdado.
+    if stack_selected daily; then
+        printf '%s\n' "${DAILY_PACKAGES[@]}" "${DAILY_THIRD_PARTY_PACKAGES[@]}"
+    fi
+    if stack_selected gaming; then
+        printf '%s\n' "${GAMING_PACKAGES[@]}" "${GAMING_THIRD_PARTY_PACKAGES[@]}"
+    fi
+    if stack_selected development; then
+        printf '%s\n' "${DEVELOPMENT_PACKAGES[@]}" "${DEVELOPMENT_THIRD_PARTY_PACKAGES[@]}"
+    fi
+    if stack_selected android; then
+        printf '%s\n' "${ANDROID_PACKAGES[@]}" "${ANDROID_THIRD_PARTY_PACKAGES[@]}"
+    fi
+    if stack_selected containers; then
+        printf '%s\n' "${CONTAINER_PACKAGES[@]}" "${CONTAINER_THIRD_PARTY_PACKAGES[@]}"
+    fi
+    if stack_selected extras; then
+        printf '%s\n' "${EXTRA_PACKAGES[@]}" "${EXTRA_THIRD_PARTY_PACKAGES[@]}"
+    fi
+    return 0
 }
 
 package_repository() {
@@ -2689,6 +2785,11 @@ install_selected_stack_packages() {
 
     while IFS= read -r pkg; do
         [[ -n "${pkg//[[:space:]]/}" ]] || continue
+        # Falha fechada: texto de log, espaços, mensagens de erro e opções
+        # não podem virar nomes de pacotes ou argumentos passados ao pacman/yay.
+        if [[ ! "$pkg" =~ ^[a-z0-9][a-z0-9@._+-]*$ ]]; then
+            die "Nome inválido na lista de pacotes; instalação interrompida antes de consultar pacman/yay: $(printf '%q' "$pkg")"
+        fi
         [[ -z "${seen[$pkg]:-}" ]] || continue
         seen["$pkg"]=1
         requested+=("$pkg")

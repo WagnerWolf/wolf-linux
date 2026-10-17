@@ -66,19 +66,23 @@ def build_vm_plan(inv, choice, username, hostname, preset, keyboard, *, disks=No
             raise BridgeError('Reutilização requer /home separada. Selecione a partição /home ou use o modo Manual.')
         if inv.firmware == 'BIOS' and not choice.bios_disk:
             raise BridgeError('Selecione o disco do GRUB para instalações BIOS.')
-        # O executor de VM atual aceita APENAS partições pertencentes ao MESMO
-        # disco VirtIO. Não tentar degradar LVM/multidisco em /dev/sd*.
+        # Disco de referência da raiz (ou disco BIOS escolhido).
+        # A EFI pode estar em outro dispositivo; /home pode ser um LV com
+        # vários PVs, porém PVs nunca podem receber formatação diretamente.
         root_disks = inv.disk_ancestors(choice.root)
-        if len(root_disks) != 1:
-            raise BridgeError('Este modo aceita uma partição raiz comum em um único disco. Volumes LVM requerem o fluxo especializado.')
-        disk_path = next(iter(root_disks))
-        if inv.firmware == 'BIOS' and choice.bios_disk != disk_path:
-            raise BridgeError('O disco de inicialização deve ser o mesmo da raiz neste modo.')
-        for path in (choice.root, choice.efi if inv.firmware == 'UEFI' else '', choice.home):
-            if path and inv.disk_ancestors(path) != {disk_path}:
-                raise BridgeError('Neste modo, raiz, EFI e /home precisam pertencer ao mesmo disco; não é possível misturar discos ou LVM.')
-            if path and (not inv.get(path) or inv.get(path).kind != 'part'):
-                raise BridgeError('Neste modo são aceitas apenas partições comuns; volumes LVM precisam do instalador especializado.')
+        root_dev = inv.get(choice.root)
+        if len(root_disks) != 1 or not root_dev or root_dev.kind != 'part':
+            raise BridgeError('A raiz precisa ser uma partição física válida.')
+        disk_path = choice.bios_disk if inv.firmware == 'BIOS' else next(iter(root_disks))
+        for path, allowed_types in ((choice.root, ('part',)),
+                                    (choice.efi if inv.firmware == 'UEFI' else '', ('part',)),
+                                    (choice.home, ('part', 'lvm'))):
+            if path and (not inv.get(path) or inv.get(path).kind not in allowed_types):
+                raise BridgeError(f'Volume não suportado para este papel: {path}')
+            if path and not inv.disk_ancestors(path):
+                raise BridgeError(f'Disco físico de origem não identificado: {path}')
+        if choice.home and inv.get(choice.home).kind == 'lvm' and choice.format_home:
+            raise BridgeError('Não é permitido formatar diretamente um LV /home neste modo.')
         roles['root'] = choice.root
         roles['esp'] = choice.efi if inv.firmware == 'UEFI' else None
         roles['home'] = choice.home or None

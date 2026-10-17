@@ -22,6 +22,7 @@ VERSION = "2.1"
 STACKS = ("daily", "gaming", "development", "android", "containers", "extras")
 PRESETS = {
     "Minimal": (),
+    "Basic": ("daily",),
     "Test": ("daily", "gaming", "development", "extras"),
     "Full": STACKS,
 }

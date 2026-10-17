@@ -17,6 +17,7 @@ HELPER_NAMES = {
 }
 NOTIFIER_BIN = Path("/usr/local/bin/wolf-package-manager")
 AUTOSTART_NAME = "wolf-package-manager.desktop"
+SYSTEM_AUTOSTART_DIR = Path("/etc/xdg/autostart")
 AUTOSTART_TEXT = """[Desktop Entry]
 Type=Application
 Name=Wolf Package Manager (Monitor)
@@ -65,7 +66,7 @@ def notifier_status(home: Path | None = None, binary: Path = NOTIFIER_BIN) -> st
     if not notifier_installed(binary):
         return "Wolf Package Manager não instalado"
     user_file = user_autostart(home)
-    system_file = Path("/etc/xdg/autostart") / AUTOSTART_NAME
+    system_file = SYSTEM_AUTOSTART_DIR / AUTOSTART_NAME
     if user_file.is_file():
         text = user_file.read_text(encoding="utf-8", errors="replace")
         if any(line.strip() in ("Hidden=true", "X-GNOME-Autostart-enabled=false")

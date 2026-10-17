@@ -22,6 +22,7 @@ VM_MIN_BYTES = 32 * 1024**3
 STACKS = ("daily", "gaming", "development", "android", "containers", "extras")
 PRESETS = {
     "minimal": (),
+    "basic": ("daily",),
     "test": ("daily", "gaming", "development", "extras"),
     "full": STACKS,
 }
@@ -49,7 +50,7 @@ def inventory(raw: str | None = None) -> list[dict]:
     if raw is None:
         try:
             proc = subprocess.run(
-                ["lsblk", "--json", "-b", "-o", "NAME,PATH,TYPE,SIZE,MODEL,TRAN,RM,MAJ:MIN,FSTYPE,PARTTYPE,MOUNTPOINTS"],
+                ["lsblk", "--json", "-b", "-o", "NAME,PATH,TYPE,SIZE,MODEL,TRAN,RM,MAJ:MIN,FSTYPE,UUID,PARTTYPE,MOUNTPOINTS"],
                 capture_output=True, text=True, check=False, timeout=8,
             )
         except (OSError, subprocess.TimeoutExpired):
@@ -78,6 +79,7 @@ def inventory(raw: str | None = None) -> list[dict]:
         if size <= 0:
             continue
         parts = []
+        volumes = []
         for c in d.get("children") or []:
             if not isinstance(c, dict) or c.get("type") != "part":
                 continue
@@ -88,17 +90,97 @@ def inventory(raw: str | None = None) -> list[dict]:
                 cs = int(c.get("size") or 0)
             except (TypeError, ValueError):
                 continue
-            parts.append({"path": cp, "size": cs,
+            parts.append({"path": cp, "size": cs, "type": "part",
+                          "uuid": str(c.get("uuid") or ""),
                           "fstype": str(c.get("fstype") or ""),
                           "mountpoints": c.get("mountpoints") or [], "maj_min": str(c.get("maj:min") or ""),
                           "parttype": str(c.get("parttype") or "").lower()})
+            # O mesmo LV pode aparecer repetido sob diferentes PVs, inclusive
+            # localizados em discos físicos distintos. Manter a proveniência.
+            def visit(layer, parent):
+                for child in layer.get("children") or []:
+                    kind = str(child.get("type") or "")
+                    name = str(child.get("path") or "")
+                    if kind == "lvm" and PATH_RE.fullmatch(name):
+                        try:
+                            length = int(child.get("size") or 0)
+                        except (ValueError, TypeError):
+                            length = 0
+                        volumes.append({"path": name, "size": length, "type": "lvm",
+                                        "fstype": str(child.get("fstype") or ""),
+                                        "uuid": str(child.get("uuid") or ""),
+                                        "maj_min": str(child.get("maj:min") or ""),
+                                        "mountpoints": child.get("mountpoints") or [],
+                                        "pv": parent})
+                    visit(child, name)
+            visit(c, cp)
         out.append({"path": path, "size": size,
                     "maj_min": str(d.get("maj:min") or ""),
                     "model": str(d.get("model") or "").strip(),
                     "transport": str(d.get("tran") or ""),
                     "removable": str(d.get("rm") or "").lower() in ("1", "true", "yes"),
-                    "mountpoints": d.get("mountpoints") or [], "partitions": parts})
+                    "mountpoints": d.get("mountpoints") or [], "partitions": parts,
+                    "volumes": volumes})
     return out
+
+
+def _role_devices(disks: list[dict]) -> dict[str, dict]:
+    """Volumes globais: partições físicas e LV, sem confundir LV com PV."""
+    found = {}
+    for disk in disks:
+        for part in disk.get('partitions', []):
+            item = dict(part)
+            item.update(type='part', ancestor_disks=[disk['path']], pvs=[])
+            found[part['path']] = item
+        for volume in disk.get('volumes', []):
+            name = volume['path']
+            if name in found:
+                obj = found[name]
+                # Mesmo LV listado sob PVs diferentes por lsblk.
+                if (obj['maj_min'], obj['size'], obj['fstype'], obj['uuid']) != (
+                    volume['maj_min'], volume['size'], volume['fstype'], volume['uuid']):
+                    raise PlanError(f'LV {name} inconsistente entre discos/PVs')
+            else:
+                obj = dict(volume)
+                obj.update(type='lvm', ancestor_disks=[], pvs=[])
+                found[name] = obj
+            if disk['path'] not in obj['ancestor_disks']:
+                obj['ancestor_disks'].append(disk['path'])
+            if volume.get('pv') and volume['pv'] not in obj['pvs']:
+                obj['pvs'].append(volume['pv'])
+    return found
+
+
+def _role_fingerprint(roles: dict, disks: list[dict]) -> dict:
+    devices = _role_devices(disks)
+    snapshot = {}
+    for role, path in roles.items():
+        if not path:
+            continue
+        item = devices.get(path)
+        if not item:
+            raise PlanError(f'Volume {role} deixou de existir no inventário')
+        if not re.fullmatch(r'[0-9]+:[0-9]+', str(item.get('maj_min', ''))):
+            raise PlanError(f'Identidade kernel ausente em {path}')
+        snapshot[role] = dict(path=path, type=item['type'], size=item['size'],
+                              maj_min=item['maj_min'], uuid=item.get('uuid', ''),
+                              disks=sorted(item['ancestor_disks']), pvs=sorted(item['pvs']),
+                              fstype=item['fstype'])
+    # PVs são capturados por caminho e MAJ:MIN, não apenas pelo nome do VG.
+    pvs = sorted({pv for entry in snapshot.values() for pv in entry['pvs']})
+    for pv in pvs:
+        part = devices.get(pv)
+        if not part or part['type'] != 'part' or part['fstype'].lower() != 'lvm2_member':
+            raise PlanError(f'PV LVM inválido ou alterado: {pv}')
+    if any(entry['type'] == 'lvm' for entry in snapshot.values() if isinstance(entry, dict)) and not pvs:
+        raise PlanError('Não foi possível reconstruir os PVs do volume LVM; operação bloqueada.')
+    snapshot['pv_members'] = [{k: devices[pv].get(k, '') for k in ('path', 'maj_min', 'uuid', 'size', 'fstype')}
+                              for pv in pvs]
+    snapshot['physical_disks'] = [dict(path=d['path'], maj_min=d['maj_min'], size=d['size'])
+                                   for d in sorted(disks, key=lambda x: x['path'])
+                                   if d['path'] in {x for r in snapshot.values() if isinstance(r, dict)
+                                                    for x in r.get('disks', [])}]
+    return snapshot
 
 
 def _valid_ident(hostname: str, username: str) -> None:
@@ -214,14 +296,29 @@ def build_preview(*, disks: list[dict], disk_path: str, mode: str,
     if cleanup_home and (not roles.get("home") or formats.get("home")):
         raise PlanError("Limpeza exige partição /home selecionada e SEM formatação")
     if mode in ("reuse", "manual"):
-        allowed = {p["path"] for p in (disk or {}).get("partitions", [])}
+        devices = _role_devices(disks)
+        allowed = set(devices)
         if any(value is not None and (not isinstance(value, str) or value not in allowed) for value in roles.values()):
-            raise PlanError("Partição não pertence ao disco selecionado")
+            raise PlanError("Volume escolhido não existe no inventário atual")
+        if roles.get('root') and devices[roles['root']]['type'] != 'part':
+            raise PlanError('A raiz precisa ser uma partição física neste executor.')
+        if roles.get('esp') and devices[roles['esp']]['type'] != 'part':
+            raise PlanError('EFI deve ser uma partição física, não LVM.')
+        if roles.get('home') and devices[roles['home']]['type'] == 'lvm' and formats['home']:
+            raise PlanError('Por segurança, não é permitido formatar um LV LVM. Preserve-o.')
+        if disk and roles.get('root') and disk['path'] not in devices[roles['root']]['ancestor_disks'] and boot_mode == 'UEFI':
+            raise PlanError('Disco de referência não corresponde ao disco da raiz.')
         selected = [p for p in roles.values() if p is not None]
         if len(selected) != len(set(selected)):
             raise PlanError("Uma mesma partição não pode ter vários papéis")
         if any(formats[k] and not roles[k] for k in formats):
             raise PlanError("Formatação solicitada sem partição selecionada")
+    fingerprints = None
+    if mode in ('reuse', 'manual') and disk and roles.get('root'):
+        devices = _role_devices(disks)
+        targets = [devices[r] for r in roles.values() if r]
+        if any(dev['type'] == 'lvm' or disk['path'] not in dev['ancestor_disks'] for dev in targets):
+            fingerprints = _role_fingerprint(roles, disks)
     warnings = []
     if cleanup_home:
         warnings.append("LIMPEZA DE CONFIGURAÇÕES: arquivos e pastas ocultos diretamente dentro de CADA usuário da /home preservada serão REMOVIDOS, incluindo possíveis chaves .ssh/.gnupg. Arquivos visíveis permanecem. Exige confirmação LIMPAR antes de formatar /.")
@@ -286,6 +383,7 @@ def build_preview(*, disks: list[dict], disk_path: str, mode: str,
             "format": formats,
             "cleanup_home": cleanup_home,
             "erase_sizes": erase_sizes,
+            **({"role_identity": fingerprints} if fingerprints is not None else {}),
         },
         "warnings": warnings,
     }
@@ -301,7 +399,8 @@ def validate_document(doc: dict, *, disks: list[dict]) -> dict:
     ident, software, storage = doc["identity"], doc["software"], doc["storage"]
     if not all(isinstance(x, dict) for x in (ident, software, storage)):
         raise PlanError("Seções malformadas")
-    if set(ident) != {"hostname", "username"} or set(software) != {"preset", "stacks"} or set(storage) != {"mode", "home_layout", "disk", "partitions", "format", "cleanup_home", "erase_sizes"}:
+    if set(ident) != {"hostname", "username"} or set(software) != {"preset", "stacks"} or (set(storage) not in ({"mode", "home_layout", "disk", "partitions", "format", "cleanup_home", "erase_sizes"},
+                                             {"mode", "home_layout", "disk", "partitions", "format", "cleanup_home", "erase_sizes", "role_identity"})):
         raise PlanError("Campos de identidade/software/armazenamento inconsistentes")
     if not isinstance(doc["warnings"], list) or any(not isinstance(x, str) for x in doc["warnings"]):
         raise PlanError("Lista de avisos inválida")
@@ -456,91 +555,119 @@ def vm_erase_fields(doc: dict, *, disks: list[dict], active_boot: str | None = N
 
 def vm_manual_fields(doc: dict, *, disks: list[dict], active_boot: str | None = None,
                      check_device: bool = False) -> tuple[str, ...]:
-    """Manual UEFI/GPT ou BIOS/MBR: formatar raiz; ESP apenas no UEFI.
+    """Plano com raiz/EFI em discos distintos e /home ext4 física ou LV LVM.
 
-    Atribuir o papel EFI ajusta o tipo GPT para ESP na execução, quando necessário.
-    Ainda não suporta BIOS/GPT, LVM ou partições de discos diferentes.
+    Escrita APENAS na raiz, e na EFI/home quando explicitamente autorizada
+    pelo modo Manual. PVs LVM nunca são formatados neste executor.
     """
     canonical = validate_document(doc, disks=disks)
-    storage = canonical["storage"]
-    if storage["mode"] != "manual":
-        raise PlanError("Esta operação exige o modo Avançado/manual")
-    if canonical["boot_mode"] not in ("UEFI", "BIOS") or (active_boot and active_boot != canonical["boot_mode"]):
-        raise PlanError("Firmware atual diferente do plano UEFI/BIOS")
-    disk = storage["disk"]
+    st = canonical['storage']
+    if st['mode'] != 'manual':
+        raise PlanError('Esta operação exige modo Manual.')
+    firmware = canonical['boot_mode']
+    if firmware not in ('UEFI', 'BIOS') or (active_boot and firmware != active_boot):
+        raise PlanError('Firmware UEFI/BIOS não coincide com o plano.')
+    disk = st['disk']
     if not disk:
-        raise PlanError("Selecione o disco que contém as partições")
-    require_install_disk_path(disk["path"])
-    actual = next((d for d in disks if d["path"] == disk["path"]), None)
-    if not actual or actual["removable"] or actual["transport"].lower() == "usb":
-        raise PlanError("Disco ausente/removível/USB")
-    if actual["size"] < VM_MIN_BYTES or not re.fullmatch(r"[0-9]+:[0-9]+", actual["maj_min"]):
-        raise PlanError("Disco pequeno demais ou identidade do kernel desconhecida")
-    root, esp, home = (storage["partitions"][k] for k in ("root", "esp", "home"))
-    fmt = storage["format"]
-    if not root or not fmt["root"]:
-        raise PlanError("Particionamento manual exige partição raiz / com formatação ext4")
-    if canonical["boot_mode"] == "UEFI" and not esp:
-        raise PlanError("UEFI exige uma partição EFI selecionada")
-    if canonical["boot_mode"] == "BIOS" and (esp or fmt["esp"]):
-        raise PlanError("BIOS/Legacy NÃO usa partição EFI; deixe o campo EFI vazio")
-    if fmt["home"] and storage["home_layout"] != "separate":
-        raise PlanError("Não é possível formatar /home separadamente quando ela fica dentro de /")
-    if storage["home_layout"] == "separate" and not home:
-        raise PlanError("Escolha uma partição /home ou use /home dentro de /")
-    part_by_path = {p["path"]: p for p in actual["partitions"]}
-    if root not in part_by_path or (esp and esp not in part_by_path) or (home and home not in part_by_path):
-        raise PlanError("Partição selecionada não existe mais no disco")
-    root_part = part_by_path[root]
-    esp_part = part_by_path[esp] if esp else None
-    for selected in (root, esp, home):
-        if selected and part_by_path[selected]['fstype'].lower() in ('lvm2_member', 'linux_raid_member', 'crypto_luks'):
-            raise PlanError('Partições pertencentes a LVM, RAID ou LUKS não podem ser sobrescritas por este modo.')
-    if root_part["size"] < 20 * 1024**3:
-        raise PlanError("A raiz / precisa de pelo menos 20 GiB no piloto manual")
-    # A raiz será formatada em ext4: seu formato anterior não é restrição.
-    if esp_part and esp_part["size"] < 512 * 1024**2:
-        raise PlanError("Partição EFI deve ter ao menos 512 MiB")
-    if esp_part and not fmt["esp"] and esp_part["fstype"].lower() not in ("vfat", "fat32", "fat"):
-        raise PlanError("Para preservar a EFI, ela precisa conter FAT32; marque FORMATAR EFI para inicializá-la")
-    if home and not fmt["home"] and part_by_path[home]["fstype"].lower() != "ext4":
-        raise PlanError("Para preservar /home, ela precisa ser ext4; marque FORMATAR /home para inicializá-la")
-    # A seleção do papel EFI é suficiente: o backend ajustará o tipo GPT
-    # para ESP, independentemente da flag configurada pelo GParted.
+        raise PlanError('Disco da raiz/bootloader não definido.')
+    require_install_disk_path(disk['path'])
+    all_disks = {d['path']: d for d in disks}
+    actual = all_disks.get(disk['path'])
+    if not actual or actual['removable'] or actual['transport'].lower() == 'usb':
+        raise PlanError('Disco de referência inválido ou removível.')
+    if actual['size'] < VM_MIN_BYTES or not re.fullmatch(r'[0-9]+:[0-9]+', actual['maj_min']):
+        raise PlanError('Disco de referência sem identidade confiável.')
+    root, esp, home = (st['partitions'][k] for k in ('root', 'esp', 'home'))
+    fmt = st['format']
+    if not root or not fmt['root']:
+        raise PlanError('Raiz obrigatória e formatada em ext4.')
+    if firmware == 'UEFI' and not esp:
+        raise PlanError('UEFI exige EFI selecionada.')
+    if firmware == 'BIOS' and (esp or fmt['esp']):
+        raise PlanError('BIOS não utiliza EFI.')
+    if st['home_layout'] == 'separate' and not home:
+        raise PlanError('Selecione /home separada.')
+    devices = _role_devices(disks)
+    selected = {'root': root, 'esp': esp, 'home': home}
+    if any(path and path not in devices for path in selected.values()):
+        raise PlanError('Um volume selecionado não existe mais.')
+    if devices[root]['type'] != 'part':
+        raise PlanError('Raiz LVM não é formatável por este executor.')
+    if disk['path'] not in devices[root]['ancestor_disks'] and firmware == 'UEFI':
+        raise PlanError('Disco de referência não corresponde ao dispositivo raiz.')
+    if esp and devices[esp]['type'] != 'part':
+        raise PlanError('EFI precisa ser uma partição física.')
+    if home and devices[home]['type'] not in ('part', 'lvm'):
+        raise PlanError('Tipo de /home não suportado.')
+    if home and devices[home]['type'] == 'lvm' and fmt['home']:
+        raise PlanError('LVM de /home deve ser preservado, nunca formatado.')
+    for role, path in selected.items():
+        if not path:
+            continue
+        target = devices[path]
+        if target['fstype'].lower() in ('lvm2_member', 'linux_raid_member', 'crypto_luks'):
+            raise PlanError('PVs LVM, RAID e LUKS não podem ser selecionados como volumes de dados.')
+        for ancestor in target['ancestor_disks']:
+            d = all_disks.get(ancestor)
+            if not d or d['removable'] or d['transport'].lower() == 'usb':
+                raise PlanError(f'Volume {role} usa disco ausente/removível: {ancestor}')
+    if devices[root]['size'] < 20 * 1024**3:
+        raise PlanError('A raiz precisa ter pelo menos 20 GiB.')
+    if esp:
+        ed = devices[esp]
+        if ed['size'] < 512 * 1024**2:
+            raise PlanError('EFI deve ter ao menos 512 MiB.')
+        if not fmt['esp'] and ed['fstype'].lower() not in ('vfat', 'fat32', 'fat'):
+            raise PlanError('EFI preservada precisa ser FAT32/vfat.')
+    if home and not fmt['home'] and devices[home]['fstype'].lower() != 'ext4':
+        raise PlanError('Para preservar /home, é necessário ext4.')
+    # A formatação em outro disco não deve alterar parttype ou partições da raiz.
     if check_device:
-        pt = subprocess.run(["lsblk", "-dnro", "PTTYPE", disk["path"]],
+        firmware_disk = next(iter(devices[esp]['ancestor_disks'])) if esp else disk['path']
+        pt = subprocess.run(['lsblk', '-dnro', 'PTTYPE', firmware_disk],
                             capture_output=True, text=True, timeout=8, check=False)
         expected_table = "gpt" if canonical["boot_mode"] == "UEFI" else "dos"
         if pt.returncode or pt.stdout.strip().lower() != expected_table:
-            if canonical["boot_mode"] == "BIOS":
-                raise PlanError("BIOS manual neste modo exige tabela MBR/DOS. GPT exige bios_grub e ainda NÃO é suportado")
-            raise PlanError("Modo manual UEFI requer tabela GPT no disco. Crie GPT no GParted")
-    for part_path in (root, esp, home):
-        if part_path and part_by_path[part_path].get("mountpoints"):
-            raise PlanError(f"Partição está montada: {part_path}")
+            raise PlanError(f'Boot {firmware} exige tabela {expected_table} em {firmware_disk}.')
+    for role, path in selected.items():
+        if path and devices[path].get('mountpoints'):
+            raise PlanError(f'Volume montado: {path}')
     if check_device:
-        for path, majmin in [(disk["path"], actual["maj_min"]),
-                             *((part, part_by_path[part]["maj_min"]) for part in (root, esp, home) if part)]:
-            device = Path(path)
-            if device.is_symlink() or not device.exists() or not stat.S_ISBLK(device.stat().st_mode):
-                raise PlanError(f"Dispositivo de bloco inválido: {path}")
-            rdev = device.stat().st_rdev
-            if not re.fullmatch(r"[0-9]+:[0-9]+", majmin) or f"{os.major(rdev)}:{os.minor(rdev)}" != majmin:
-                raise PlanError(f"Identidade da partição mudou: {path}")
-            if subprocess.run(["findmnt", "--source", path], stdout=subprocess.DEVNULL,
-                              stderr=subprocess.DEVNULL, check=False).returncode == 0:
-                raise PlanError(f"Dispositivo está em uso: {path}")
-        swap = subprocess.run(["swapon", "--show=NAME", "--noheadings"],
+        required_paths = [(disk['path'], actual['maj_min'])]
+        required_paths.extend((path, devices[path]['maj_min']) for path in selected.values() if path)
+        for identity in st.get('role_identity', {}).get('pv_members', []):
+            required_paths.append((identity['path'], identity['maj_min']))
+        for identity in st.get('role_identity', {}).get('physical_disks', []):
+            required_paths.append((identity['path'], identity['maj_min']))
+        for path, majmin in required_paths:
+            block = Path(path)
+            # /dev/mapper/VG-LV é symlink gerenciado pelo device-mapper.
+            if block.is_symlink() and not (path.startswith('/dev/mapper/')
+                                           and re.fullmatch(r'/dev/dm-[0-9]+', os.path.realpath(path))
+                                           and devices[path]['type'] == 'lvm'):
+                raise PlanError(f'Symlink não autorizado: {path}')
+            if not block.exists() or not stat.S_ISBLK(block.stat().st_mode):
+                raise PlanError(f'Dispositivo inválido: {path}')
+            if not re.fullmatch(r'[0-9]+:[0-9]+', str(majmin)):
+                raise PlanError(f'MAJ:MIN ausente: {path}')
+            rdev = block.stat().st_rdev
+            if f'{os.major(rdev)}:{os.minor(rdev)}' != majmin:
+                raise PlanError(f'Identidade kernel alterada: {path}')
+        for path in selected.values():
+            if path and subprocess.run(['findmnt', '--source', path], stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL, check=False).returncode == 0:
+                raise PlanError(f'Volume montado: {path}')
+        swap = subprocess.run(['swapon', '--show=NAME', '--noheadings'],
                               capture_output=True, text=True, check=False)
-        if swap.returncode or any(x in set(swap.stdout.split()) for x in (root, esp, home) if x):
-            raise PlanError("Partição selecionada com swap ativa ou impossibilidade de verificar")
-    kb = canonical["keyboard"]
+        if swap.returncode or any(p in set(swap.stdout.split()) for p in selected.values() if p):
+            raise PlanError('Partição swap ativa ou impossibilidade de verificar swap.')
+    kb = canonical['keyboard']
     require_supported_keyboard(kb)
-    return (disk["path"], str(actual["size"]), actual["maj_min"], canonical["boot_mode"],
-            canonical["identity"]["hostname"], canonical["identity"]["username"],
-            canonical["software"]["preset"], ",".join(canonical["software"]["stacks"]),
-            kb["layout"], kb["variant"], "manual", root, esp or "", home or "",
-            "yes" if fmt["esp"] else "no", "yes" if fmt["home"] else "no")
+    return (disk['path'], str(actual['size']), actual['maj_min'], firmware,
+            canonical['identity']['hostname'], canonical['identity']['username'],
+            canonical['software']['preset'], ','.join(canonical['software']['stacks']),
+            kb['layout'], kb['variant'], 'manual', root, esp or '', home or '',
+            'yes' if fmt['esp'] else 'no', 'yes' if fmt['home'] else 'no')
 
 
 def vm_reuse_fields(doc: dict, *, disks: list[dict], active_boot: str | None = None,

@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QEvent, QProcess, QTimer, QSocketNotifier
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QPushButton, QFrame, QRadioButton, QButtonGroup, QComboBox,
@@ -30,6 +31,7 @@ from vm_bridge import build_vm_plan, check_vm_plan, BridgeError
 # Mesmo motor PTY usado no instalador clássico: o Bash não roda na thread Qt.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from terminal_engine import InstallerPty
+from terminal_display import TerminalLines
 
 BASE = Path(__file__).resolve().parent
 STYLE = """
@@ -354,14 +356,15 @@ class MainWindow(QMainWindow):
         nav.addWidget(section('3. Perfil de instalação — obrigatório'))
         nav.addWidget(text_label('Escolha quais programas instalar. A revisão ficará bloqueada até selecionar um perfil.', name='info'))
         self.preset_combo = make_combo()
-        self.preset_combo.addItem('Escolha Minimal, Test ou Full...', None)
-        self.preset_combo.addItem('Minimal — sistema básico', 'minimal')
+        self.preset_combo.addItem('Escolha Minimal, Basic, Test ou Full...', None)
+        self.preset_combo.addItem('Minimal — KDE essencial', 'minimal')
+        self.preset_combo.addItem('Basic — escritório, navegador e multimídia', 'basic')
         self.preset_combo.addItem('Test — apps principais', 'test')
         self.preset_combo.addItem('Full — todas as stacks', 'full')
         nav.addWidget(self.preset_combo)
         self.preset_combo.setObjectName('requiredProfile')
         self.preset_combo.currentIndexChanged.connect(self.update_state)
-        self.space_help = text_label('Estimativas de espaço em / (GiB): Minimal 25–35; Test 40–60; Full 75–110. Varia conforme downloads e atualizações.', name='info')
+        self.space_help = text_label('Estimativas de espaço em / (GiB): Minimal 25–35; Basic 30–45; Test 40–60; Full 75–110. Varia conforme downloads e atualizações.', name='info')
         nav.addWidget(self.space_help)
         nav.addWidget(section('4. Identificação'))
         nav.addWidget(text_label('Nome de usuário'))
@@ -580,7 +583,7 @@ class MainWindow(QMainWindow):
     def build_manual_page(self):
         page, v = self.inner_page()
         v.addWidget(button('Abrir GParted ↗', lambda: self.launch_utility('gparted')))
-        v.addWidget(text_label('Escolha os volumes para cada função. Neste modo, selecione partições de um mesmo disco. LVM multidisco requer o instalador especializado.', name='info'))
+        v.addWidget(text_label('Atribua cada volume à sua função. EFI, raiz e /home podem estar em discos diferentes; volumes LVM ext4 podem ser preservados como /home.', name='info'))
         rootbox = QGroupBox('Sistema operacional')
         rl = vertical(6)
         rootbox.setLayout(rl)
@@ -608,13 +611,13 @@ class MainWindow(QMainWindow):
         self.manual_format_home.toggled.connect(self.update_state)
         hl.addWidget(self.manual_format_home)
         v.addWidget(homebox)
-        v.addWidget(text_label('Crie/redimensione as partições no GParted e atualize a lista. Após usar o GParted, a lista será atualizada automaticamente. Neste modo, selecione partições do mesmo disco.', name='info'))
+        v.addWidget(text_label('Crie/redimensione as partições no GParted e atualize a lista. Após usar o GParted, a lista será atualizada automaticamente. Os volumes podem estar em discos diferentes.', name='info'))
         v.addStretch()
         return page
 
     def build_reuse_page(self):
         page, v = self.inner_page()
-        v.addWidget(text_label('Escolha partições existentes para reutilizar. Raiz, EFI e /home precisam estar em partições comuns do mesmo disco. LVM não é suportado neste modo.', name='info'))
+        v.addWidget(text_label('Escolha partições existentes para reutilizar. Raiz, EFI e /home podem estar em discos distintos. /home também pode ser um volume lógico LVM ext4, preservado integralmente.', name='info'))
         self.reuse_root = self.role_combo(v, 'Raiz / (obrigatória — formatar ext4)', self.update_state)
         self.reuse_efi_group = QGroupBox('Inicialização UEFI')
         el = vertical(6)
@@ -687,6 +690,7 @@ class MainWindow(QMainWindow):
         self.terminal_info = text_label('A instalação só começa após revisar e confirmar o plano.', name='info')
         layout.addWidget(self.terminal_info)
         self.terminal_output = QPlainTextEdit()
+        self._terminal_lines = TerminalLines()
         self.terminal_output.setReadOnly(True)
         self.terminal_output.document().setMaximumBlockCount(6000)
         self.terminal_output.setStyleSheet('font: 10pt monospace; background: #090e15; color: #d6e4f5;')
@@ -739,8 +743,20 @@ class MainWindow(QMainWindow):
             if self._installer_log:
                 self._installer_log.write(output)
                 self._installer_log.flush()
-            self.terminal_output.appendPlainText(output.replace('\r', ''))
-            self.terminal_output.ensureCursorVisible()
+            finished, pending, changed = self._terminal_lines.feed(output)
+            if changed:
+                # Rewrite only the mutable last line. Unlike appendPlainText,
+                # this does not create a new row for every pacman redraw.
+                scroll = self.terminal_output.verticalScrollBar()
+                keep_following = scroll.value() >= scroll.maximum() - 2
+                cursor = self.terminal_output.textCursor()
+                cursor.movePosition(QTextCursor.MoveOperation.End)
+                cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock,
+                                    QTextCursor.MoveMode.KeepAnchor)
+                cursor.insertText('\n'.join([*finished, pending]))
+                if keep_following:
+                    self.terminal_output.setTextCursor(cursor)
+                    self.terminal_output.ensureCursorVisible()
         if ended and self._pty_notifier:
             self._pty_notifier.setEnabled(False)
 
@@ -949,8 +965,9 @@ class MainWindow(QMainWindow):
         self.reuse_clean.setEnabled(enabled)
         if not enabled:
             self.reuse_clean.setChecked(False)
-        self.manual_format_home.setEnabled(bool(self.manual_home.currentData()))
-        if not self.manual_home.currentData():
+        manual_home = self.inventory.get(self.manual_home.currentData() or '')
+        self.manual_format_home.setEnabled(bool(manual_home and manual_home.kind == 'part'))
+        if not manual_home or manual_home.kind == 'lvm':
             self.manual_format_home.setChecked(False)
         self.on_clean_changed()
 
@@ -1013,7 +1030,7 @@ class MainWindow(QMainWindow):
 
     def update_profile_space(self):
         """Advisory only: root filesystem sizes vary with optional downloads."""
-        estimates = {'minimal': (25, 35), 'test': (40, 60), 'full': (75, 110)}
+        estimates = {'minimal': (25, 35), 'basic': (30, 45), 'test': (40, 60), 'full': (75, 110)}
         preset = self.preset_combo.currentData()
         if preset not in estimates:
             self.disk_space_advice.setText('Escolha um perfil para ver a estimativa de espaço em / (não inclui jogos e arquivos pessoais).')
@@ -1048,7 +1065,8 @@ class MainWindow(QMainWindow):
             self.update_erase_table()
             self.update_erase_budget()
         if hasattr(self, 'manual_format_home'):
-            self.manual_format_home.setEnabled(bool(self.manual_home.currentData()))
+            selected_home = self.inventory.get(self.manual_home.currentData() or '')
+            self.manual_format_home.setEnabled(bool(selected_home and selected_home.kind == 'part'))
         try:
             self.operations = validate_plan(self.inventory, self.choices())
         except PreviewError as exc:
@@ -1059,7 +1077,7 @@ class MainWindow(QMainWindow):
             self.validation_label.setText('Plano pronto para revisão. Execução somente após validação independente e duas confirmações.')
             self.continue_button.setEnabled(True)
         if self.preset_combo.currentData() is None:
-            self.validation_label.setText('Escolha um perfil de instalação (Minimal, Test ou Full) para continuar.')
+            self.validation_label.setText('Escolha um perfil de instalação (Minimal, Basic, Test ou Full) para continuar.')
             self.continue_button.setEnabled(False)
 
     @staticmethod
@@ -1088,37 +1106,51 @@ class MainWindow(QMainWindow):
         return super().eventFilter(watched, event)
 
     def open_utilities(self):
+        """Lista com títulos legíveis mesmo em janelas de resolução reduzida."""
         dialog = QDialog(self)
         dialog.setWindowTitle('Ferramentas auxiliares')
         screen = QApplication.primaryScreen()
         available = screen.availableGeometry() if screen else None
-        dialog.resize(min(650, available.width()-55) if available else 650,
-                      min(600, available.height()-65) if available else 600)
-        layout = vertical(9)
-        layout.setContentsMargins(14, 14, 14, 14)
+        dialog.resize(min(690, available.width()-55) if available else 690,
+                      min(620, available.height()-65) if available else 620)
+        dialog.setMinimumWidth(480)
+        layout = vertical(12)
+        layout.setContentsMargins(18, 18, 18, 16)
         dialog.setLayout(layout)
+        layout.addWidget(section('Ferramentas da sessão Live'))
+        layout.addWidget(text_label(
+            'Abra os programas disponíveis. Atenção: o GParted pode modificar discos '
+            'independentemente do instalador.', name='warning'))
         scroller = QScrollArea(dialog)
         scroller.setWidgetResizable(True)
+        scroller.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         holder = QWidget()
-        utility_layout = vertical(9)
+        utility_layout = vertical(7)
+        utility_layout.setContentsMargins(4, 4, 4, 4)
         holder.setLayout(utility_layout)
         scroller.setWidget(holder)
         layout.addWidget(scroller, 1)
-        utility_layout.addWidget(section('Ferramentas da sessão Live'))
-        utility_layout.addWidget(text_label('Abra os programas disponíveis no ambiente atual. '
-                                    'Alguns utilitários podem alterar discos independentemente do instalador.',
-                                    name='warning'))
         for key, title, _commands in UTILITIES:
             cmd = utility_command(key)
-            row = QHBoxLayout()
-            row.addWidget(text_label(title))
-            row.addStretch(1)
+            item = QFrame(holder)
+            item.setObjectName('card')
+            row = QHBoxLayout(item)
+            row.setContentsMargins(12, 6, 10, 6)
+            row.setSpacing(10)
+            # text_label() usa QSizePolicy.Ignored para os blocos laterais.
+            # Aqui precisamos garantir espaço para o nome da ferramenta.
+            name = QLabel(title, item)
+            name.setWordWrap(True)
+            name.setMinimumWidth(145)
+            name.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            row.addWidget(name, 1)
             action = button('Abrir  ↗' if cmd else 'Indisponível',
                             lambda _checked=False, k=key: self.launch_utility(k))
+            action.setFixedWidth(125)
             action.setEnabled(bool(cmd))
-            row.addWidget(action)
-            utility_layout.addLayout(row)
-        utility_layout.addStretch()
+            row.addWidget(action, 0)
+            utility_layout.addWidget(item)
+        utility_layout.addStretch(1)
         layout.addWidget(button('Fechar', dialog.accept))
         dialog.exec()
 
@@ -1161,7 +1193,7 @@ class MainWindow(QMainWindow):
 
     def go_review(self):
         if self.preset_combo.currentData() is None:
-            QMessageBox.warning(self, 'Perfil obrigatório', 'Selecione Minimal, Test ou Full antes de revisar a instalação.')
+            QMessageBox.warning(self, 'Perfil obrigatório', 'Selecione Minimal, Basic, Test ou Full antes de revisar a instalação.')
             self.preset_combo.setFocus()
             return
         try:
@@ -1247,6 +1279,7 @@ class MainWindow(QMainWindow):
         self.terminal_back.setEnabled(False)
         self.terminal_reboot.hide()
         self.terminal_output.clear()
+        self._terminal_lines.reset()
         self.terminal_info.setText('Executando o instalador Bash. Respostas e solicitações aparecerão abaixo.')
         try:
             log_dir = Path.home()/'.local/state/wolf-linux/live-installer'
@@ -1292,7 +1325,17 @@ class MainWindow(QMainWindow):
 def main() -> int:
     parser = argparse.ArgumentParser(description='Instalador Wolf Linux: instalações reais com confirmação')
     parser.add_argument('--demonstracao', action='store_true', help='exibir inventário fictício ilustrativo')
+    parser.add_argument('--self-test', action='store_true', help='testar importações Qt e construção da GUI sem acessar discos')
     args = parser.parse_args()
+    if args.self_test:
+        # Validacao em chroot Archiso com QT_QPA_PLATFORM=offscreen.
+        # Não acessa dispositivos reais e não inicia nenhum executor Bash.
+        app = QApplication(sys.argv[:1])
+        window = MainWindow(demo_inventory())
+        assert window.windowTitle() == 'Wolf Linux | Instalador'
+        window.close()
+        print('[OK] Wolf Installer: importações Qt, widgets e inicialização da GUI.')
+        return 0
     try:
         inv = demo_inventory() if args.demonstracao else detect_inventory()
     except PreviewError as exc:

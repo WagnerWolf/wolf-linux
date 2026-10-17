@@ -117,7 +117,7 @@ assert 'self.md_diagnostics = QPlainTextEdit()' in ui
 assert 'self.md_diagnostics.setPlainText(' in ui
 assert 'Nenhum bloqueio de leitura ext4 detectado' in ui
 assert "shellcheck disable=SC2016" in (ROOT / 'install/wolf-install.sh').read_text()
-assert (ROOT / 'VERSION').read_text().strip() in ('2.0.0-alpha45', '2.0.0-alpha46', '2.0.0-alpha47', '2.0.0-alpha48', '2.0.0-alpha49', '2.0.0-alpha50', '2.0.0-alpha51', '2.0.0-alpha52', '2.0.0-alpha53', '2.0.0-alpha54', '2.0.0-alpha55', '2.0.0-alpha56', '2.0.0-alpha57', '2.0.0-alpha58', '2.0.0-alpha59', '2.0.0', '2.1.0-rc1', '2.1.0')
+assert (ROOT / 'VERSION').read_text().strip() in ('2.0.0-alpha45', '2.0.0-alpha46', '2.0.0-alpha47', '2.0.0-alpha48', '2.0.0-alpha49', '2.0.0-alpha50', '2.0.0-alpha51', '2.0.0-alpha52', '2.0.0-alpha53', '2.0.0-alpha54', '2.0.0-alpha55', '2.0.0-alpha56', '2.0.0-alpha57', '2.0.0-alpha58', '2.0.0-alpha59', '2.0.0', '2.1.0-rc1', '2.1.0', '2.1.1-rc1', '2.1.1-rc2', '2.1.1', '2.1.2-rc1', '2.1.2')
 
 print('[OK] alpha45: flags needs_recovery/orphan_present identificadas, sem mount ou fsck')
 print('[OK] alpha45: erro de montagem ro,noload explícito; inventário e GUI recebem diagnóstico')

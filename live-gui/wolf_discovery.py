@@ -235,7 +235,7 @@ def build_plan(snapshot: dict, *, root: str, esp: str | None, home: str | None,
         from wolf_plan import STACKS, PRESETS
     except ImportError as exc:
         raise DiscoveryError('Contrato de perfis ausente') from exc
-    if preset not in ('minimal', 'test', 'full', 'custom'):
+    if preset not in ('minimal', 'basic', 'test', 'full', 'custom'):
         raise DiscoveryError('Perfil inválido')
     if len(stacks) != len(set(stacks)) or any(stack not in STACKS for stack in stacks):
         raise DiscoveryError('Lista de stacks inválida')

@@ -59,7 +59,7 @@ ln -sfn ../wolf-loadkeys.service "$AIROOT/etc/systemd/system/multi-user.target.w
 cat > "$AIROOT/etc/os-release" <<'OSR'
 NAME="Wolf Linux Live"
 VERSION="2.1"
-VERSION_ID="2.1.0"
+VERSION_ID="2.1.2"
 PRETTY_NAME="Wolf Linux 2.1 Live"
 ID=wolf-linux
 ID_LIKE=arch
@@ -137,6 +137,7 @@ echo "============================================================"
 echo "Instalador: wolf-install"
 echo "Full .....: wolf-install --full"
 echo "Test .....: wolf-install --test"
+echo "Basic ....: wolf-install --basic"
 echo "Minimal ..: wolf-install --minimal"
 echo "Stacks ...: wolf-install --list-stacks"
 echo "SSH .......: wolf-enable-ssh-live  (alias: wolf-ssh)"

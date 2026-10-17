@@ -6,9 +6,18 @@ set -Eeuo pipefail
 (( $# == 2 )) || exit 2
 volume="$1"; username="$2"
 [[ "$username" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || { echo 'Usuário inválido.' >&2; exit 2; }
-[[ "$volume" =~ ^/dev/(vd[a-z]+[0-9]+|sd[a-z]+[0-9]+|nvme[0-9]+n[0-9]+p[0-9]+|mmcblk[0-9]+p[0-9]+)$ ]] || { echo 'Partição inválida.' >&2; exit 2; }
-[[ -b "$volume" && ! -L "$volume" ]] || { echo 'Dispositivo inexistente ou symlink.' >&2; exit 2; }
-[[ "$(lsblk -dnro TYPE "$volume" | tr -d '[:space:]')" == part ]] || { echo 'Exige partição comum.' >&2; exit 2; }
+[[ "$volume" =~ ^/dev/(vd[a-z]+[0-9]+|sd[a-z]+[0-9]+|nvme[0-9]+n[0-9]+p[0-9]+|mmcblk[0-9]+p[0-9]+|dm-[0-9]+|mapper/[a-zA-Z0-9_.+-]+)$ ]] || { echo 'Dispositivo inválido.' >&2; exit 2; }
+[[ -b "$volume" ]] || { echo 'Dispositivo não está ativo. Ative o volume lógico antes da prévia.' >&2; exit 2; }
+kind="$(lsblk -dnro TYPE "$volume" | tr -d '[:space:]')"
+[[ "$kind" == part || "$kind" == lvm ]] || { echo 'Selecione uma partição ou volume LVM.' >&2; exit 2; }
+if [[ "$kind" == lvm ]]; then
+    # /dev/mapper é um alias normal de device-mapper, mas links arbitrários
+    # são rejeitados. O link deve resolver para /dev/dm-N real.
+    target="$(readlink -f -- "$volume")"
+    [[ "$target" =~ ^/dev/dm-[0-9]+$ ]] || { echo 'Alias de LVM inválido.' >&2; exit 2; }
+else
+    [[ ! -L "$volume" ]] || { echo 'Symlink de partição recusado.' >&2; exit 2; }
+fi
 [[ "$(lsblk -dnro FSTYPE "$volume" | tr -d '[:space:]')" == ext4 ]] || { echo 'Exige volume ext4.' >&2; exit 2; }
 if findmnt -rn --source "$volume" >/dev/null; then
     echo 'Volume montado: desmonte antes da prévia.' >&2; exit 2

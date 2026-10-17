@@ -7,7 +7,7 @@ src = (root / 'live-gui/preview/app.py').read_text()
 qt = (root / 'tests/wolf_test_alpha52_ui.py').read_text()
 ast.parse(src)
 ast.parse(qt)
-assert "self.preset_combo.addItem('Escolha Minimal, Test ou Full...', None)" in src
+assert "self.preset_combo.addItem('Escolha Minimal, Basic, Test ou Full...', None)" in src
 assert 'self.preset_combo.currentData() is None' in src
 assert "self.assertFalse(w.continue_button.isEnabled())" in qt
 assert "w.preset_combo.setCurrentIndex(w.preset_combo.findData('minimal'))" in qt

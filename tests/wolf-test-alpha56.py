@@ -58,7 +58,7 @@ class Alpha56(unittest.TestCase):
         app=(ROOT/'live-gui/preview/app.py').read_text()
         stager=(ROOT/'tests/wolf-stage-live-desktop.sh').read_text()
         ast.parse(app)
-        self.assertIn("self.preset_combo.addItem('Escolha Minimal, Test ou Full...', None)",app)
+        self.assertIn("self.preset_combo.addItem('Escolha Minimal, Basic, Test ou Full...', None)",app)
         self.assertIn('QTimer.singleShot(0, self.apply_keyboard)',app)
         self.assertIn('self.preset_combo.currentData() is None',app)
         self.assertIn('self._gparted.finished.connect',app)
@@ -70,6 +70,6 @@ class Alpha56(unittest.TestCase):
         self.assertIn('GUI_VM_CLICK_CONFIRMED',bash)
         subprocess.run(['bash','-n',str(ROOT/'install/wolf-install.sh')],check=True)
         subprocess.run(['bash','-n',str(ROOT/'live-gui/wolf-home-preview-live')],check=True)
-        self.assertIn((ROOT/'VERSION').read_text().strip(), ('2.0.0-alpha56', '2.0.0-alpha57', '2.0.0-alpha58', '2.0.0-alpha59', '2.0.0', '2.1.0-rc1', '2.1.0'))
+        self.assertIn((ROOT/'VERSION').read_text().strip(), ('2.0.0-alpha56', '2.0.0-alpha57', '2.0.0-alpha58', '2.0.0-alpha59', '2.0.0', '2.1.0-rc1', '2.1.0', '2.1.1-rc1', '2.1.1-rc2', '2.1.1', '2.1.2-rc1', '2.1.2'))
 
 if __name__=='__main__':unittest.main(verbosity=2)

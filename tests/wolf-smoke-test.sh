@@ -69,7 +69,7 @@ fi
 ok 'KDE/Wayland é a única baseline ativa'
 
 printf '\n>> Validando stacks opcionais...\n'
-for token in 'daily' 'gaming' 'development' 'android' 'containers' 'extras' '--preset full' '--preset test' '--preset minimal'; do
+for token in 'daily' 'gaming' 'development' 'android' 'containers' 'extras' '--preset full' '--preset test' '--preset basic' '--preset minimal'; do
     grep -Fq -- "$token" "$INSTALLER" || err "Stack/preset ausente: $token"
 done
 grep -Fq 'heroic-games-launcher-bin' "$PACKAGES" || err 'Heroic ausente'
@@ -92,6 +92,8 @@ if grep -Fq 'stage "64-stacks-oficiais"' "$INSTALLER" || grep -Fq 'stage "66-sta
     err 'Fluxo antigo de stacks em lote ainda está ativo'
 fi
 ok 'Arch/Chaotic são priorizados; AUR é fallback por pacote'
+# Teste real de coleta e resolução com comandos simulados e ERR trap herdado.
+python3 "$PROJECT/tests/wolf-test-aur-stdout-2.1.2.py" || err 'Regressão: mensagens do ERR trap contaminaram a lista AUR'
 
 printf '\n>> Validando SSH de diagnóstico na VM live...\n'
 grep -Fq 'wolf-enable-ssh-live' "$CUSTOMIZER" || err 'Comando SSH live não é transportado para a ISO'

@@ -71,6 +71,7 @@ install -Dm0755 "$SOURCE/wolf-live-cleanup-vm" "$AIROOT/usr/local/bin/wolf-live-
 install -Dm0755 "$SOURCE/wolf-live-network" "$AIROOT/usr/local/bin/wolf-live-network"
 install -Dm0644 "$SOURCE/main.py" "$AIROOT/usr/local/share/wolf-linux-live/gui/main.py"
 install -Dm0644 "$SOURCE/terminal_engine.py" "$AIROOT/usr/local/share/wolf-linux-live/gui/terminal_engine.py"
+install -Dm0644 "$SOURCE/terminal_display.py" "$AIROOT/usr/local/share/wolf-linux-live/gui/terminal_display.py"
 install -Dm0644 "$SOURCE/wolf_plan.py" "$AIROOT/usr/local/share/wolf-linux-live/gui/wolf_plan.py"
 install -Dm0644 "$SOURCE/wolf_plan.py" "$AIROOT/root/wolf-linux/live-gui/wolf_plan.py"
 install -Dm0644 "$SOURCE/wolf-live-user.service" "$AIROOT/etc/systemd/system/wolf-live-user.service"

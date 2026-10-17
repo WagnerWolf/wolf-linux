@@ -131,7 +131,7 @@ assert "'LIMPAR'" in bash
 assert 'HOME_CLEAN_LIST_FILE' in bash and 'PHYSICAL_PLAN_SHA256' in bash
 assert 'revalidate_gui_physical_target\n        mkfs.ext4 -F "$ROOT_DEVICE"' in bash
 assert 'stage "22-limpar-home" clean_preserved_home_dotfiles' in bash
-assert (ROOT/'VERSION').read_text().strip() in ('2.0.0-alpha50','2.0.0-alpha51', '2.0.0-alpha52', '2.0.0-alpha53', '2.0.0-alpha54', '2.0.0-alpha55', '2.0.0-alpha56', '2.0.0-alpha57', '2.0.0-alpha58', '2.0.0-alpha59', '2.0.0', '2.1.0-rc1', '2.1.0')
+assert (ROOT/'VERSION').read_text().strip() in ('2.0.0-alpha50','2.0.0-alpha51', '2.0.0-alpha52', '2.0.0-alpha53', '2.0.0-alpha54', '2.0.0-alpha55', '2.0.0-alpha56', '2.0.0-alpha57', '2.0.0-alpha58', '2.0.0-alpha59', '2.0.0', '2.1.0-rc1', '2.1.0', '2.1.1-rc1', '2.1.1-rc2', '2.1.1', '2.1.2-rc1', '2.1.2')
 print('[OK] alpha50: checkbox único e prévia integral, backup optativo')
 print('[OK] alpha50: diretórios aninhados (.local/Steam), links, visíveis e credenciais')
 print('[OK] alpha50/51: backup, manifesto e bloqueios de alterações/submontagens')

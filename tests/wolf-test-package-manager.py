@@ -16,7 +16,7 @@ assert 'Exec=/usr/local/bin/wolf-package-manager --tray' in installer
 assert 'exec /usr/bin/python3 /usr/local/lib/wolf-linux/package-manager/main.py' in installer
 assert 'if ( ensure_yay ); then' in installer
 assert (source/'wolfpkg/askpass.sh').is_file()
-for name in ('app.py','backend.py','search_service.py','worker.py','terminal.py'):
+for name in ('app.py','backend.py','search_service.py','worker.py','terminal.py','terminal_display.py'):
     ast.parse((source/'wolfpkg'/name).read_text())
 assert '--tray' in (source/'wolfpkg/app.py').read_text()
 assert 'yay' in (source/'wolfpkg/backend.py').read_text()

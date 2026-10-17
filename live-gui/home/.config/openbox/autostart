@@ -2,7 +2,9 @@
 # Só inicia os aplicativos do desktop Live; nenhuma operação de disco automática.
 feh --no-fehbg --bg-fill /usr/share/backgrounds/wolf-linux/wallpaper.png &
 xsetroot -cursor_name left_ptr &
-/usr/local/bin/wolf-live-installer &
+# Salvar erros do instalador; caso o Qt falhe, não desaparecer em silêncio.
+mkdir -p "$HOME/.local/state/wolf-linux"
+/usr/local/bin/wolf-live-installer >> "$HOME/.local/state/wolf-linux/live-installer.log" 2>&1 &
 
 # NetworkManager controla Ethernet e Wi-Fi; bandeja simples para seleção gráfica.
 lxqt-policykit-agent &

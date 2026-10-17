@@ -116,5 +116,18 @@ for expected in \
     fi
 done
 printf '[OK] Wolf Live GUI confirmado dentro do squashfs final.\n'
+# Teste funcional no filesystem que foi realmente incorporado à ISO.
+# Qt é inicializado offscreen; usa APENAS inventário fictício e não toca nos discos.
+command -v arch-chroot >/dev/null 2>&1 || {
+    echo '[ERRO] Pós-build: arch-chroot indisponível para validar GUI da Live.' >&2
+    exit 1
+}
+if ! sudo arch-chroot "$WORK/x86_64/airootfs" \
+    /usr/bin/env QT_QPA_PLATFORM=offscreen \
+    /usr/local/bin/wolf-live-installer --self-test; then
+    echo '[ERRO] Pós-build: Wolf Installer GUI não inicializa dentro da Live.' >&2
+    exit 1
+fi
+printf '[OK] Inicialização real do Wolf Installer validada no airootfs final.\n'
 echo "ISOs encontradas:"
 find "$OUT" -maxdepth 1 -type f -name '*.iso' -printf '  %p\n'

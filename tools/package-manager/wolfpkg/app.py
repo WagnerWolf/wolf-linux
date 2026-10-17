@@ -10,7 +10,7 @@ from pathlib import Path
 from time import monotonic
 
 from PySide6.QtCore import Qt, QTimer, QThread, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QFont
+from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QFont, QTextCursor
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QListWidget,
@@ -22,11 +22,12 @@ from .backend import (Preferences, Package, STATE_DIR, upgrade_commands, install
                       installation_batch_commands, lock_inspection, diagnostic_report,
                       missing_dependencies, space_snapshot)
 from .terminal import TerminalRunner
+from .terminal_display import TerminalLines
 from .worker import CheckWorker, SearchWorker
 from .search_service import invalidate_search_cache
 
 ASSETS = Path(__file__).resolve().parent / 'assets'
-VERSION = '0.3.1'
+VERSION = '0.3.3'
 STYLE = '''
 QWidget {background:#121a25;color:#e8eff7;font-size:13px;}
 QFrame#sidebar {background:#172231;border-right:1px solid #304058;}
@@ -102,6 +103,7 @@ class Manager(QMainWindow):
         self._lock_warning_shown = False
         self.runner = TerminalRunner(self)
         self._pending_terminal = []
+        self._terminal_lines = TerminalLines()
         self.runner.output.connect(self.queue_terminal)
         self.runner.finished.connect(self.finished_command)
         self._log_path = None
@@ -226,6 +228,7 @@ class Manager(QMainWindow):
         v.addWidget(info('Saída em tempo real. Use o campo abaixo apenas para prompts excepcionais; o sudo usa uma janela de senha separada.'))
         self.console=QPlainTextEdit();self.console.setReadOnly(True)
         self.console.setMaximumBlockCount(8000)
+        self.console.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         font=QFont('monospace',10);font.setStyleHint(QFont.StyleHint.Monospace)
         self.console.setFont(font);v.addWidget(self.console,1)
         self.terminal_state=info('Nenhuma operação em andamento.')
@@ -249,7 +252,7 @@ class Manager(QMainWindow):
         self.btn_retry.setEnabled(False);self.btn_retry.clicked.connect(self.retry_failed)
         diag=QPushButton('Diagnóstico');diag.clicked.connect(self.show_diagnostics)
         lock_button=QPushButton('Analisar db.lck');lock_button.clicked.connect(self.show_lock_diagnostics)
-        clear=QPushButton('Limpar visualização');clear.clicked.connect(self.console.clear)
+        clear=QPushButton('Limpar visualização');clear.clicked.connect(self.clear_terminal_view)
         buttons.addWidget(self.btn_retry);buttons.addWidget(diag);buttons.addWidget(lock_button);buttons.addWidget(clear);buttons.addStretch()
         v.addLayout(buttons)
         return page
@@ -351,15 +354,20 @@ class Manager(QMainWindow):
             for col,value in enumerate((p.source,p.name,p.installed,p.available)):
                 self.table.setItem(row,col,QTableWidgetItem(value))
         counts={s:len(result.get(s,[])) for s in ('Repositório','AUR')}
-        self.repo_count.setText('Repositórios: '+(str(counts['Repositório']) if 'Repositório' not in errors else 'Erro'))
-        self.aur_count.setText('AUR: '+(str(counts['AUR']) if 'AUR' not in errors else 'Erro'))
+        self.repo_count.setText('Repositórios: '+(
+            'Erro' if 'Repositório' in errors else str(counts['Repositório']) if 'Repositório' in result else '—'))
+        self.aur_count.setText('AUR: '+(
+            'Erro' if 'AUR' in errors else str(counts['AUR']) if 'AUR' in result else '—'))
         now=datetime.now().strftime('%d/%m/%Y %H:%M')
         total=len(self.updates)
-        self.sidebar_status.setText(f'Última consulta: {now}\nAtualizações: {total}')
+        self.sidebar_status.setText(
+            f'Última consulta: {now}\n' + (f'Encontradas: {total} (consulta parcial)' if errors else f'Atualizações: {total}'))
         self._set_actions_enabled(True)
         if errors:
-            self.summary.setText('Consulta parcial: '+' | '.join(f'{k}: {v}' for k,v in errors.items()))
+            self.summary.setText('Consulta incompleta: '+' | '.join(f'{k}: {v}' for k,v in errors.items()))
             self.tray.setIcon(tray_icon('error'))
+            if 'Transação' in errors:
+                QTimer.singleShot(60_000, self.check_updates)
         else:
             self.summary.setText(f'{total} atualização(ões) encontrada(s) — {now}')
             self.tray.setIcon(tray_icon('updates' if total else 'ok'))
@@ -582,17 +590,34 @@ class Manager(QMainWindow):
             self._pending_terminal.clear()
             self.append_terminal(text)
 
-    def append_terminal(self,value):
-        cur=self.console.textCursor()
-        cur.movePosition(cur.MoveOperation.End)
-        cur.insertText(value)
-        self.console.setTextCursor(cur)
-        self.console.ensureCursorVisible()
+    def append_terminal(self, value):
+        # Keep pacman redraws on the current line instead of appending a block
+        # for every carriage return. QTextCursor edits only the mutable row.
+        done, pending, changed = self._terminal_lines.feed(value)
+        if changed:
+            bar = self.console.verticalScrollBar()
+            follow = bar.value() >= bar.maximum() - 2
+            cur = self.console.textCursor()
+            cur.movePosition(QTextCursor.MoveOperation.End)
+            cur.movePosition(QTextCursor.MoveOperation.StartOfBlock,
+                             QTextCursor.MoveMode.KeepAnchor)
+            cur.insertText('\n'.join([*done, pending]))
+            if follow:
+                self.console.setTextCursor(cur)
+                self.console.ensureCursorVisible()
+        # Store the received stream for investigation; display normalization
+        # must never interfere with the underlying command or its exit status.
         if self._log_path:
             try:
-                with open(self._log_path,'a',encoding='utf-8') as f:
+                with open(self._log_path, 'a', encoding='utf-8') as f:
                     f.write(value)
-            except OSError:pass
+            except OSError:
+                pass
+
+    def clear_terminal_view(self):
+        self.flush_terminal()
+        self.console.clear()
+        self._terminal_lines.reset()
 
     def send_terminal_input(self):
         value=self.terminal_input.text()

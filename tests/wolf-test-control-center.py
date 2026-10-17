@@ -4,6 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import sys
 import os
+from unittest.mock import patch
 
 SOURCE = Path(__file__).resolve().parents[1] / "tools" / "control-center"
 sys.path.insert(0, str(SOURCE))
@@ -23,34 +24,47 @@ def main() -> None:
             raise AssertionError("Bad helper name must be denied")
         home = root / "home"
         home.mkdir()
-        assert backend.notifier_status(home, root / "missing") == "Wolf Package Manager não instalado"
-        notifier = root / "wolf-package-manager"
-        notifier.write_text("#!/bin/sh\n", encoding="utf-8")
-        notifier.chmod(0o755)
-        assert backend.notifier_status(home, notifier) == "Autostart ainda não configurado"
-        result = backend.enable_notifier(home, notifier)
-        assert result == home / ".config/autostart/wolf-package-manager.desktop"
-        assert "Hidden=false" in result.read_text(encoding="utf-8")
-        assert "OnlyShowIn=KDE;" in result.read_text(encoding="utf-8")
-        # Idempotency and backup for prior user configuration
-        backend.enable_notifier(home, notifier)
-        assert not result.with_suffix(result.suffix + ".wolf-backup").exists()
-        result.write_text("[Desktop Entry]\nExec=custom\n", encoding="utf-8")
-        backend.enable_notifier(home, notifier)
-        assert "Exec=custom" in result.with_suffix(result.suffix + ".wolf-backup").read_text(encoding="utf-8")
-        plugin = root / "autosuggestions.zsh"
-        plugin.write_text("# plugin\n", encoding="utf-8")
-        (home / ".zshrc").write_text('source /somewhere/zsh-autosuggestions.zsh\n', encoding="utf-8")
-        assert "instalado e carregamento" in backend.autosuggestions_status(home, plugin)
-        disabled = backend.disable_notifier(home, notifier)
-        assert "Hidden=true" in disabled.read_text(encoding="utf-8")
-        assert "desativado" in backend.notifier_status(home, notifier)
-        backend.enable_notifier(home, notifier)
-        assert "Hidden=false" in disabled.read_text(encoding="utf-8")
-        assert "configurado" in backend.notifier_status(home, notifier)
-        assert "ausente" in backend.autosuggestions_status(home, root / "non-existent")
-        rc, out = backend.command_output(["/bin/echo", "Wolf OK"])
-        assert rc == 0 and out == "Wolf OK"
+        # Os testes não podem depender de /etc/xdg/autostart do host:
+        # uma máquina Wolf já instalada possui autostart global ativo.
+        system_autostart = root / "etc" / "xdg" / "autostart"
+        system_autostart.mkdir(parents=True)
+        with patch.object(backend, "SYSTEM_AUTOSTART_DIR", system_autostart):
+            assert backend.notifier_status(home, root / "missing") == "Wolf Package Manager não instalado"
+            notifier = root / "wolf-package-manager"
+            notifier.write_text("#!/bin/sh\n", encoding="utf-8")
+            notifier.chmod(0o755)
+            assert backend.notifier_status(home, notifier) == "Autostart ainda não configurado"
+            # Instalado globalmente: UI deve informar o autostart mesmo sem arquivo local.
+            global_entry = system_autostart / backend.AUTOSTART_NAME
+            global_entry.write_text(backend.AUTOSTART_TEXT, encoding="utf-8")
+            assert backend.notifier_status(home, notifier) == "Autostart global configurado"
+            global_entry.unlink()
+            assert backend.notifier_status(home, notifier) == "Autostart ainda não configurado"
+            result = backend.enable_notifier(home, notifier)
+            assert result == home / ".config/autostart/wolf-package-manager.desktop"
+            assert "Hidden=false" in result.read_text(encoding="utf-8")
+            assert "OnlyShowIn=KDE;" in result.read_text(encoding="utf-8")
+            # Idempotency and backup for prior user configuration
+            backend.enable_notifier(home, notifier)
+            assert not result.with_suffix(result.suffix + ".wolf-backup").exists()
+            result.write_text("[Desktop Entry]\nExec=custom\n", encoding="utf-8")
+            backend.enable_notifier(home, notifier)
+            assert "Exec=custom" in result.with_suffix(result.suffix + ".wolf-backup").read_text(encoding="utf-8")
+            plugin = root / "autosuggestions.zsh"
+            plugin.write_text("# plugin\n", encoding="utf-8")
+            (home / ".zshrc").write_text('source /somewhere/zsh-autosuggestions.zsh\n', encoding="utf-8")
+            assert "instalado e carregamento" in backend.autosuggestions_status(home, plugin)
+            disabled = backend.disable_notifier(home, notifier)
+            assert "Hidden=true" in disabled.read_text(encoding="utf-8")
+            assert "desativado" in backend.notifier_status(home, notifier)
+            global_entry.write_text(backend.AUTOSTART_TEXT, encoding="utf-8")
+            assert "desativado" in backend.notifier_status(home, notifier), "Desativação individual deve prevalecer sobre autostart global"
+            backend.enable_notifier(home, notifier)
+            assert "Hidden=false" in disabled.read_text(encoding="utf-8")
+            assert "configurado" in backend.notifier_status(home, notifier)
+            assert "ausente" in backend.autosuggestions_status(home, root / "non-existent")
+            rc, out = backend.command_output(["/bin/echo", "Wolf OK"])
+            assert rc == 0 and out == "Wolf OK"
     print("[OK] Control Center backend 0.2.0: helpers allowlist, Package Manager enable/disable, backup e Zsh")
 
 
