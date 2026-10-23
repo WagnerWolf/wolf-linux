@@ -51,10 +51,10 @@ refuses(lambda: wp.vm_execution_fields(doc,disks=[dict(disk,partitions=[dict(par
 
 # Executar APENAS a decisão de estágios em shell isolado, simulando a função stage.
 source=(ROOT/'install/wolf-install.sh').read_text()
-a=source.index('    if (( ${#SELECTED_STACKS[@]} == 0 )); then',source.index('# Minimal não seleciona'))
+a=source.index('    stage "63-chaotic-aur" configure_chaotic_aur',source.index('# Todos os perfis tentam Chaotic-AUR/CachyOS'))
 b=source.index('    stage "67-servicos"',a)
 branch=source[a:b]
-for stacklist, expect in [('',0),('SELECTED_STACKS[daily]=1',3)]:
+for stacklist, expect in [('',2),('SELECTED_STACKS[daily]=1',4)]:
     shell='''set -Eeuo pipefail
 declare -A SELECTED_STACKS=()
 ok(){ echo SKIP; }
@@ -63,7 +63,7 @@ stage(){ echo STAGE:$1; }
     result=subprocess.run(['bash','-c',shell],capture_output=True,text=True,timeout=5)
     assert result.returncode==0, result.stderr
     assert result.stdout.count('STAGE:')==expect, result.stdout
-    if expect==0: assert 'SKIP' in result.stdout
+    if expect==2: assert 'Minimal: kernels' in branch and 'SKIP' in result.stdout
 
 # Exercitar desmontagem assistida com COMANDOS FALSOS e sem disco de bloco real.
 cleanup=(ROOT/'live-gui/wolf-live-cleanup-vm').read_text()

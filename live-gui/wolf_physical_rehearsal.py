@@ -22,20 +22,22 @@ STAGE_LABELS = {
     '22-limpar-home': 'Se o usuário selecionar entradas ocultas, validaria lista e backup opcional antes da exclusão; /home LVM preservada.',
     '25-repositorios-live': 'Prepararia os repositórios da Live para o pacstrap (sem alterar discos neste ensaio).',
     '27-validar-pacotes': 'Validaria disponibilidade das listas de pacotes e grupos (não consultada/executada aqui).',
-    '30-pacstrap': 'Instalaria os pacotes base, KDE Plasma/Wayland, kernel linux-zen e dependências em /mnt via pacstrap -K (NÃO TESTADO aqui).',
+    '30-pacstrap': 'Instalaria os pacotes base, KDE Plasma/Wayland, kernel linux-lts de recuperação e dependências em /mnt via pacstrap -K (NÃO TESTADO aqui).',
     '40-fstab': 'Geraria /mnt/etc/fstab por UUID, raiz {root}, ESP {esp}, /home {home}, com genfstab -U.',
     '50-multilib': 'Habilitaria multilib no sistema alvo.',
     '55-completar-pacotes-base': 'Completaria pacotes base e componentes do sistema no chroot.',
     '60-sistema-base': 'Configuraria locale pt_BR, fuso America/Santarem, teclado e hostname.',
     '61-identidade-wolf': 'Aplicaria a identidade visual do Wolf Linux no alvo.',
     '62-usuario-sudo': 'Criaria/configuraria a conta {username}, sudo e UID/GID da /home preservada; testaria escrita real.',
-    '63-chaotic-aur': 'Configuraria Chaotic-AUR no alvo quando existirem stacks opcionais.',
+    '63-chaotic-aur': 'Configuraria Chaotic-AUR no alvo para todos os perfis, inclusive Minimal.',
+    '63a-kernel-cachyos': 'Instalaria linux-cachyos e headers obrigatoriamente pelo Chaotic-AUR, mantendo linux-lts como reserva.',
     '63b-vulkan': 'Instalaria antecipadamente o provedor Vulkan específico da GPU detectada apenas quando a stack Gaming estiver selecionada.',
     '64-resolver-stacks': 'Instalaria stacks na ordem Arch oficial -> Chaotic-AUR -> AUR fallback.',
     '67-servicos': 'Ativaria serviços do sistema (sem iniciar serviços do alvo neste ensaio).',
     '68-android-flutter': 'Instalaria Android/Flutter apenas se selecionados; caso contrário a rotina ignora a stack.',
     '69-video': 'Selecionaria e instalaria o driver de vídeo de acordo com a GPU detectada.',
     '69b-validar-video': 'Validaria os componentes gráficos do alvo após instalação.',
+    '69b2-validar-nvidia-dkms': 'Em NVIDIA moderna, validaria módulos nvidia-open-dkms para CachyOS e LTS.',
     '69c-branding-boot': 'Aplicaria branding Wolf e geraria initramfs quando necessário.',
     '69c2-painel-sem-discover': 'Aplicaria layout do painel Plasma sem Discover.',
     '69c3-preferencias-kde': 'Aplicaria preferências KDE do perfil selecionado.',
@@ -120,7 +122,7 @@ def report(doc: dict, stages: list[str], *, mounts: bool = False) -> str:
         'ROTEIRO DO BASH REAL — CADA ETAPA ABAIXO É APENAS DESCRITA:',
     ]
     for stage in stages:
-        if stage in ('63-chaotic-aur', '64-resolver-stacks') and not doc['software']['stacks']:
+        if stage == '64-resolver-stacks' and not doc['software']['stacks']:
             lines.append(f'[NÃO APLICÁVEL] {stage}: Minimal não solicita stacks opcionais.')
             continue
         if stage == '63b-vulkan' and 'gaming' not in doc['software']['stacks']:

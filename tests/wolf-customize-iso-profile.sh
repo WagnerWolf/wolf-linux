@@ -59,7 +59,7 @@ ln -sfn ../wolf-loadkeys.service "$AIROOT/etc/systemd/system/multi-user.target.w
 cat > "$AIROOT/etc/os-release" <<'OSR'
 NAME="Wolf Linux Live"
 VERSION="2.1"
-VERSION_ID="2.1.2"
+VERSION_ID="2.1.3"
 PRETTY_NAME="Wolf Linux 2.1 Live"
 ID=wolf-linux
 ID_LIKE=arch

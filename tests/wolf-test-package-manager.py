@@ -16,9 +16,11 @@ assert 'Exec=/usr/local/bin/wolf-package-manager --tray' in installer
 assert 'exec /usr/bin/python3 /usr/local/lib/wolf-linux/package-manager/main.py' in installer
 assert 'if ( ensure_yay ); then' in installer
 assert (source/'wolfpkg/askpass.sh').is_file()
-for name in ('app.py','backend.py','search_service.py','worker.py','terminal.py','terminal_display.py'):
+for name in ('app.py','backend.py','search_service.py','worker.py','terminal.py','terminal_display.py','tray_policy.py'):
     ast.parse((source/'wolfpkg'/name).read_text())
 assert '--tray' in (source/'wolfpkg/app.py').read_text()
+assert 'Atualizar sistema' in (source/'wolfpkg/app.py').read_text()
+assert '0.3.4' in (source/'wolfpkg/__init__.py').read_text()
 assert 'yay' in (source/'wolfpkg/backend.py').read_text()
 assert 'octopi' not in (root/'tools/control-center/main.py').read_text().lower()
 assert 'octopi' not in (root/'tools/control-center/backend.py').read_text().lower()

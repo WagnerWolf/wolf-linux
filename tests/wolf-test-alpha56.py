@@ -7,6 +7,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+import re
 from unittest.mock import patch
 ROOT = Path(__file__).resolve().parent.parent
 sys.path[:0] = [str(ROOT/'live-gui'), str(ROOT/'live-gui/preview')]
@@ -70,6 +71,6 @@ class Alpha56(unittest.TestCase):
         self.assertIn('GUI_VM_CLICK_CONFIRMED',bash)
         subprocess.run(['bash','-n',str(ROOT/'install/wolf-install.sh')],check=True)
         subprocess.run(['bash','-n',str(ROOT/'live-gui/wolf-home-preview-live')],check=True)
-        self.assertIn((ROOT/'VERSION').read_text().strip(), ('2.0.0-alpha56', '2.0.0-alpha57', '2.0.0-alpha58', '2.0.0-alpha59', '2.0.0', '2.1.0-rc1', '2.1.0', '2.1.1-rc1', '2.1.1-rc2', '2.1.1', '2.1.2-rc1', '2.1.2'))
+        self.assertTrue((ROOT/'VERSION').read_text().strip() in ('2.0.0-alpha56', '2.0.0-alpha57', '2.0.0-alpha58', '2.0.0-alpha59', '2.0.0', '2.1.0-rc1', '2.1.0', '2.1.1-rc1', '2.1.1-rc2', '2.1.1', '2.1.2-rc1', '2.1.2', '2.1.3-rc1', '2.1.3-rc3') or re.fullmatch(r'2\.1\.3(?:-rc[1-9]\d*)?', (ROOT/'VERSION').read_text().strip()))
 
 if __name__=='__main__':unittest.main(verbosity=2)

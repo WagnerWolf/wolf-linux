@@ -25,9 +25,10 @@ from .terminal import TerminalRunner
 from .terminal_display import TerminalLines
 from .worker import CheckWorker, SearchWorker
 from .search_service import invalidate_search_cache
+from .tray_policy import tray_upgrade_state
 
 ASSETS = Path(__file__).resolve().parent / 'assets'
-VERSION = '0.3.3'
+VERSION = '0.3.4'
 STYLE = '''
 QWidget {background:#121a25;color:#e8eff7;font-size:13px;}
 QFrame#sidebar {background:#172231;border-right:1px solid #304058;}
@@ -89,6 +90,7 @@ class Manager(QMainWindow):
         super().__init__()
         self.prefs = Preferences.load()
         self.updates = []
+        self._updates_valid = False  # apenas verificações completas habilitam o atalho
         self.search_results = []
         self.checker = None
         self.searcher = None
@@ -302,12 +304,29 @@ class Manager(QMainWindow):
         menu.addAction('Abrir',self.show_window)
         menu.addAction('Pesquisar',lambda: self.open_page(1))
         menu.addAction('Verificar atualizações',self.check_updates)
+        self.tray_upgrade_action = menu.addAction('Atualizar sistema')
+        self.tray_upgrade_action.triggered.connect(self.upgrade_from_tray)
+        self._sync_tray_upgrade_action()
         menu.addSeparator();menu.addAction('Sair',self.quit_app)
         self.tray.setContextMenu(menu)
         self.tray.activated.connect(lambda reason: self.show_window() if reason in (
             QSystemTrayIcon.ActivationReason.Trigger,QSystemTrayIcon.ActivationReason.DoubleClick) else None)
         self.tray.setToolTip('Wolf Package Manager — verificando…')
         self.tray.show()
+
+    def _sync_tray_upgrade_action(self):
+        """Disponibilidade no tray reflete somente uma checagem completa e atual."""
+        state = tray_upgrade_state(len(self.updates), self._updates_valid, self._busy())
+        self.tray_upgrade_action.setText(state.label)
+        self.tray_upgrade_action.setEnabled(state.enabled)
+        self.tray_upgrade_action.setToolTip(state.tooltip)
+
+    def upgrade_from_tray(self):
+        """Abre a janela antes do diálogo, importante no KDE/Wayland."""
+        if not self.tray_upgrade_action.isEnabled():
+            return
+        self.open_page(0)
+        self.start_upgrade()  # fluxo existente: confirmação, locks, pacman -Syu, yay
 
     def show_window(self):
         self.show();self.raise_();self.activateWindow()
@@ -327,6 +346,7 @@ class Manager(QMainWindow):
         self.btn_upgrade.setEnabled(enable)
         self.btn_search.setEnabled(enable)
         self.btn_install.setEnabled(enable and bool(self._marked_packages()))
+        self._sync_tray_upgrade_action()
 
     def save_prefs(self):
         self.prefs.interval_minutes=self.interval.value()
@@ -339,15 +359,19 @@ class Manager(QMainWindow):
 
     def check_updates(self):
         if self._busy():return
+        self._updates_valid = False
         self.tray.setIcon(tray_icon('busy'))
         self.summary.setText('Verificando repositórios e AUR…')
         self._set_actions_enabled(False)
         self.checker=CheckWorker(self)
         self.checker.done.connect(self.checked)
+        self.checker.finished.connect(self._sync_tray_upgrade_action)
         self.checker.start()
+        self._sync_tray_upgrade_action()
 
     def checked(self,result,errors):
         self.errors=errors
+        self._updates_valid = not bool(errors)
         self.updates=[x for source in ('Repositório','AUR') for x in result.get(source,[])]
         self.table.setRowCount(len(self.updates))
         for row,p in enumerate(self.updates):
@@ -379,6 +403,7 @@ class Manager(QMainWindow):
                     QSystemTrayIcon.MessageIcon.Information,7000)
             self._last_announced=ids
         self.tray.setToolTip(f'Wolf Package Manager — {total} atualização(ões)'+(' (parcial)' if errors else ''))
+        self._sync_tray_upgrade_action()
 
     def search_packages(self):
         if self._busy():return
@@ -392,7 +417,9 @@ class Manager(QMainWindow):
         self.searcher=SearchWorker(query,self.search_scope.currentText(),self)
         self.searcher.progress.connect(self.search_progress)
         self.searcher.done.connect(self.searched)
+        self.searcher.finished.connect(self._sync_tray_upgrade_action)
         self.searcher.start()
+        self._sync_tray_upgrade_action()
 
     def search_progress(self, source, completed, total, cached):
         suffix = ' (cache)' if cached else ''
@@ -495,6 +522,8 @@ class Manager(QMainWindow):
             self.open_page(2)
             self.append_terminal('\n[LOCK] '+explanation+'\n')
             return
+        self._updates_valid = False  # qualquer transação invalida a consulta anterior
+        self._sync_tray_upgrade_action()
         self.running_plan=tuple(commands)
         self.plan_label=label
         self.failed_stage=-1

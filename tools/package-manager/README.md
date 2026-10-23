@@ -1,4 +1,4 @@
-# Wolf Package Manager 0.3.3
+# Wolf Package Manager 0.3.4
 
 Protótipo de atualização do **Wolf Linux**, em PySide6, com pacman + yay, verificação periódica e bandeja KDE.
 
@@ -63,3 +63,10 @@ Os crashes de `baloo_file_extractor` devem ser investigados separadamente: nos l
 ## Terminal de progresso (0.3.3)
 
 As atualizações da barra do pacman feitas via CR são redesenhadas na linha atual, sem duplicar blocos. A apresentação não modifica a saída capturada nem os comandos. O widget Qt não quebra automaticamente linhas longas; é possível navegar horizontalmente. UTF-8 e sequências ANSI são decodificados incrementalmente.
+
+## Atalho no menu da bandeja (0.3.4)
+
+- Menu de contexto do ícone: **Atualizar sistema (N)** quando uma verificação completa encontrar N atualizações. Sem atualizações, durante consulta/transação ou com resultado parcial, a ação fica desabilitada.
+- Ao clicar, abre a página de Atualizações e executa o mesmo fluxo da interface principal, com confirmação gráfica, inspeção de `db.lck`, `pacman -Syu` e somente depois `yay -Sua --aur` (com sudo askpass). Não inicia alterações sem confirmação.
+- Durante operações ou verificações a ação fica indisponível. Uma nova consulta depois de instalar ou atualizar renova o número exibido.
+- A indicação reflete a última verificação bem-sucedida; podem surgir novas atualizações depois dela.

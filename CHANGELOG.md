@@ -1,3 +1,41 @@
+### 23/10/2026 — Correção do smoke test da versão estável (reempacotamento)
+
+- O teste de promoção estável reconhece os dois layouts: DevKit distribuído, com `gerar-iso-2.1.3.sh` e `branding-assets`; e projeto preparado, com `tests/wolf-build-iso.sh` e `assets`.
+- Evita `FileNotFoundError` ao executar o smoke test a partir de `~/wolf-linux`; mantém a verificação efetiva do fallback Powerlevel10k.
+- Sem alterações no kernel, particionamento, GRUB, perfis de aplicativos, Package Manager ou lógica de instalação já validada na RC5.
+
+## Wolf Linux 2.1.3 — 23/10/2026 (versão estável)
+
+- Promovida a base 2.1.3-rc5 após confirmação de instalação validada pelo mantenedor.
+- Preservado o fluxo CachyOS principal + LTS reserva, fallback seguro Chaotic-AUR, Powerlevel10k opcional e Wolf Package Manager 0.3.4 (atalho no tray).
+- Revisados `VERSION`, instalador, `os-release` da Live e do destino, preparador, script de build e documentação. Sem alterações funcionais no particionamento ou na instalação da RC5.
+
+## Wolf Linux 2.1.3-rc5 — 23/10/2026 (fallback Powerlevel10k após Chaotic-AUR indisponível)
+
+- Powerlevel10k é opcional: sem acesso ao Chaotic/AUR, sua ausência não aborta a instalação.
+- Perfil Zsh detecta o tema e aplica prompt simples quando ausente; preserva plugins instalados.
+- Dependência opcional pendente registrada no log do Wolf Linux.
+- Mantém Chaotic/CachyOS -> LTS fallback da RC3, e Package Manager 0.3.4 da RC2.
+
+## Wolf Linux 2.1.3-rc2 — 23/10/2026 (candidata após validação da rc1)
+
+- Wolf Package Manager 0.3.4: adiciona ação «Atualizar sistema (N)» ao menu de contexto da bandeja KDE, disponibilizada após consulta completa com atualizações.
+- O atalho reutiliza o fluxo de confirmação, verificação db.lck, pacman -Syu e yay AUR sem elevar privilégios antecipadamente.
+- Ação desabilitada em consulta parcial, com zero atualizações ou durante operação em andamento. Testes estáticos/unitários não destrutivos adicionados.
+- Mantidos o kernel linux-cachyos principal, linux-lts reserva, GRUB, NVIDIA DKMS e proteções de armazenamento validados na rc1.
+- UI da bandeja e ISO ainda aguardam validação prática no Arch/Wayland.
+
+## Wolf Linux 2.1.3-rc1 — 22/10/2026 (código; ISO ainda pendente de build/VM)
+
+- Substitui linux-zen por linux-cachyos (Chaotic-AUR) como principal e
+  linux-lts oficial como reserva obrigatória em todos os perfis.
+- Configuração Chaotic-AUR obrigatória também em Minimal; o pacstrap inicial
+  preserva a possibilidade de instalar LTS antes do Chaotic.
+- NVIDIA open DKMS para ambas as árvores de módulos, com validação fail-closed.
+- GRUB_DEFAULT=0 + GRUB_TOP_LEVEL CachyOS, mantendo os dois initramfs.
+- Testes de regressão e ensaio físico atualizados para os novos estágios.
+- Sem alterações nas regras de EFI, /home LVM, dotfiles, Baloo ou UI KDE.
+
 ## Wolf Linux 2.1.2 — release (16/10/2026)
 
 - Promovida a 2.1.2-rc1 SmokeFix2 após validação da instalação Basic em VM relatada pelo usuário; nenhuma mudança de armazenamento/GRUB/EFI.

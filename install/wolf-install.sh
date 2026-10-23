@@ -7,7 +7,7 @@ fi
 
 set -Eeuo pipefail
 
-WOLF_VERSION="2.1.2"
+WOLF_VERSION="2.1.3"
 DRY_RUN=0
 PLAN_ONLY=0
 RESET_STATE=0
@@ -1294,7 +1294,7 @@ show_plan() {
     printf 'Teclado ...........: br (%s)\n' "$XKB_VARIANT"
     printf 'Desktop ...........: %s\n' "$DESKTOP"
     printf 'Display manager ...: SDDM\n'
-    printf 'Kernel ............: linux-zen\n'
+    printf 'Kernels ...........: linux-cachyos (preferencial) + linux-lts (reserva segura)\n'
     printf 'Áudio .............: PipeWire + WirePlumber\n'
     printf 'Hostname ..........: %s\n' "$HOSTNAME_VALUE"
     printf 'Usuário ...........: %s\n' "$USERNAME_VALUE"
@@ -1985,7 +1985,7 @@ configure_wolf_identity() {
 NAME="Wolf Linux"
 PRETTY_NAME="Wolf Linux 2.1"
 VERSION="2.1"
-VERSION_ID="2.1.2"
+VERSION_ID="2.1.3"
 LOGO="wolf-linux"
 VENDOR_NAME="Wolf Linux"
 ID=arch
@@ -2335,192 +2335,215 @@ complete_base_packages() {
     ok "Perfil KDE/base completo."
 }
 
+# A falha de um repositório externo nunca deve impedir a criação de um
+# sistema inicializável com linux-lts, já instalado pelo pacstrap oficial.
+# Não desativar verificações de assinatura ou usar SigLevel=Never.
+chaotic_defer_to_lts() {
+    local reason="$1"
+    warn "$reason"
+    warn 'Chaotic-AUR/CachyOS adiados: concluiremos com linux-lts (oficial) como padrão.'
+    mkdir -p /mnt/etc/wolf-linux /mnt/var/log
+    printf 'Chaotic-AUR/CachyOS pendentes: %s\n' "$reason" > /mnt/etc/wolf-linux/cachyos-pending.txt
+    printf 'Chaotic-AUR/CachyOS pendentes: %s\n' "$reason" >> "$STATE_DIR/optional-failures.log"
+    cp "$STATE_DIR/optional-failures.log" /mnt/var/log/wolf-optional-failures.log || true
+    # Se a seção foi adicionada, mas não sincroniza, retiramos SOMENTE ela:
+    # o pacman precisa continuar funcionando para KDE, drivers e GRUB.
+    if [[ -e /mnt/etc/pacman.conf ]]; then
+        python3 - /mnt/etc/pacman.conf <<'PY_CHAOTIC_REPO'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+lines = p.read_text().splitlines(keepends=True)
+out, skipping = [], False
+for line in lines:
+    if line.strip() == '[chaotic-aur]':
+        skipping = True
+        continue
+    if skipping and line.strip().startswith('['):
+        skipping = False
+    if not skipping:
+        out.append(line)
+if out != lines:
+    p.write_text(''.join(out))
+PY_CHAOTIC_REPO
+    fi
+    CHAOTIC_READY=no
+    CACHYOS_DEFERRED=yes
+}
+
+chaotic_retry_or_defer() {
+    local reason="$1" decision=""
+    warn "$reason"
+    echo '  [1] Tentar novamente (sem reiniciar a instalação)'
+    echo '  [2] Continuar com linux-lts; instalar CachyOS posteriormente'
+    while true; do
+        if ! read -r -p 'Escolha [1/2]: ' decision; then
+            decision=2
+        fi
+        case "$decision" in
+            1) sleep 3; return 0 ;;
+            2) chaotic_defer_to_lts "$reason"; return 1 ;;
+            *) echo 'Escolha 1 ou 2.' ;;
+        esac
+    done
+}
+
+chaotic_import_bootstrap_key() {
+    # Chave primaria publicada pela documentacao oficial do Chaotic-AUR.
+    # Não aceitar chaves extras que não estejam documentadas como bootstrap.
+    local key=3056513887B78AEB
+    local -a servers=(keyserver.ubuntu.com hkp://keyserver.ubuntu.com:80)
+    local server cache_host=/mnt/var/cache/wolf-linux/chaotic
+    local keyfile="$cache_host/primary-key.asc"
+    local fpr=""
+    mkdir -p "$cache_host"
+    if arch-chroot /mnt pacman-key --list-keys "$key" >/dev/null 2>&1; then
+        info 'Chave primária já presente no keyring; verificando assinatura local.'
+    else
+        for server in "${servers[@]}"; do
+            info "Buscando chave Chaotic-AUR $key em $server ..."
+            if timeout 55 arch-chroot /mnt pacman-key --recv-key "$key" --keyserver "$server"; then
+                break
+            fi
+            warn "Servidor de chaves indisponível: $server"
+        done
+    fi
+    if ! arch-chroot /mnt pacman-key --list-keys "$key" >/dev/null 2>&1; then
+        # Transporte HTTPS evita depender exclusivamente do protocolo HKP.
+        # Verificar o identificador da chave antes de importar; nunca usar
+        # pacman --nosignature, SigLevel=Never ou keyring não confiável.
+        info 'Tentando importar a mesma chave oficial por HTTPS...'
+        if curl -fLsS --connect-timeout 12 --max-time 45 --retry 2 \
+            'https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x3056513887B78AEB' -o "$keyfile"; then
+            fpr="$(gpg --show-keys --with-colons "$keyfile" 2>/dev/null | awk -F: '$1=="fpr" {print toupper($10); exit}' || true)"
+            if [[ "$fpr" == *"$key" ]] && arch-chroot /mnt pacman-key --add /var/cache/wolf-linux/chaotic/primary-key.asc; then
+                info "Chave $key importada via HTTPS, fingerprint final: $key."
+            else
+                warn 'Resposta HTTPS não contém a chave oficial esperada; importação recusada.'
+            fi
+        else
+            warn 'Download HTTPS da chave primária também indisponível.'
+        fi
+    fi
+    if arch-chroot /mnt pacman-key --list-keys "$key" >/dev/null 2>&1 \
+        && arch-chroot /mnt pacman-key --lsign-key "$key"; then
+        ok 'Chave bootstrap Chaotic-AUR importada e assinada localmente.'
+        return 0
+    fi
+    return 1
+}
+
 download_chaotic_bootstrap_file() {
-    local url="$1"
-    local output="$2"
-    local label="$3"
-
+    local url="$1" output="$2" label="$3"
     rm -f "$output"
-
-    if ! curl \
-        -fL \
-        --connect-timeout 15 \
-        --max-time 120 \
-        --retry 2 \
-        --retry-delay 3 \
-        --retry-all-errors \
-        "$url" \
-        -o "$output"; then
-
+    if ! curl -fL --connect-timeout 15 --max-time 120 \
+        --retry 2 --retry-delay 3 --retry-all-errors "$url" -o "$output"; then
         warn "Falha HTTP/rede ao baixar $label."
         rm -f "$output"
         return 1
     fi
-
-    # O CDN pode responder HTTP 200 com texto como "mirror unhealthy".
-    # Um pacote pacman válido deve ser um tar que bsdtar consiga listar.
+    # HTTP 200 pode conter texto de erro em vez de pacote de pacman.
     if ! bsdtar -tf "$output" >/dev/null 2>&1; then
+        warn "Mirror respondeu com um arquivo inválido para $label:"
+        head -c 300 "$output" 2>/dev/null || true
         echo
-        echo "Resposta recebida do mirror para $label:"
-        echo "------------------------------------------------------------"
-        head -c 500 "$output" 2>/dev/null || true
-        echo
-        echo "------------------------------------------------------------"
         rm -f "$output"
         return 1
     fi
-
     ok "$label validado."
-    return 0
 }
 
 download_chaotic_bootstrap_with_retry() {
-    local cache_host="/mnt/var/cache/wolf-linux/chaotic"
-    local cache_chroot="/var/cache/wolf-linux/chaotic"
-
-    local keyring_url="https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-keyring.pkg.tar.zst"
-    local mirrorlist_url="https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-mirrorlist.pkg.tar.zst"
-
+    local cache_host=/mnt/var/cache/wolf-linux/chaotic
+    local cache_chroot=/var/cache/wolf-linux/chaotic
     local keyring_host="$cache_host/chaotic-keyring.pkg.tar.zst"
     local mirrorlist_host="$cache_host/chaotic-mirrorlist.pkg.tar.zst"
-
-    local answer=""
-
     mkdir -p "$cache_host"
-
     while true; do
-        echo
-        info "Validando disponibilidade do bootstrap Chaotic-AUR..."
-
+        info 'Baixando bootstrap do Chaotic-AUR...'
         if download_chaotic_bootstrap_file \
-                "$keyring_url" \
-                "$keyring_host" \
-                "chaotic-keyring" \
-           && download_chaotic_bootstrap_file \
-                "$mirrorlist_url" \
-                "$mirrorlist_host" \
-                "chaotic-mirrorlist"; then
-
+            'https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-keyring.pkg.tar.zst' \
+            "$keyring_host" chaotic-keyring \
+            && download_chaotic_bootstrap_file \
+            'https://cdn-mirror.chaotic.cx/chaotic-aur/chaotic-mirrorlist.pkg.tar.zst' \
+            "$mirrorlist_host" chaotic-mirrorlist; then
             CHAOTIC_KEYRING_PACKAGE="$cache_chroot/chaotic-keyring.pkg.tar.zst"
             CHAOTIC_MIRRORLIST_PACKAGE="$cache_chroot/chaotic-mirrorlist.pkg.tar.zst"
             return 0
         fi
-
-        echo
-        warn "O mirror bootstrap do Chaotic-AUR está indisponível ou respondeu conteúdo inválido."
-        echo "Isso costuma ser temporário e NÃO exige reiniciar a instalação."
-
-        read -r -p "Tentar novamente agora? [S/n]: " answer
-
-        if [[ -z "$answer" || "$answer" =~ ^[sS]$ ]]; then
-            echo "Aguardando 10 segundos antes de tentar novamente..."
-            sleep 10
-            continue
-        fi
-
-        die "Chaotic-AUR indisponível. A instalação pode ser retomada depois nesta mesma etapa."
+        chaotic_retry_or_defer 'Falha no download ou validação do bootstrap Chaotic-AUR.' || return 1
     done
 }
 
 configure_chaotic_aur() {
-    info "Configurando Chaotic-AUR..."
-
+    info 'Configurando Chaotic-AUR...'
     if arch-chroot /mnt pacman -Q chaotic-keyring chaotic-mirrorlist >/dev/null 2>&1 \
        && grep -q '^\[chaotic-aur\]' /mnt/etc/pacman.conf; then
-        info "Chaotic-AUR já configurado; apenas sincronizando."
-
-        while true; do
-            if arch-chroot /mnt pacman -Syy --noconfirm \
-               && arch-chroot /mnt pacman -Sl chaotic-aur >/dev/null 2>&1; then
-                ok "Chaotic-AUR sincronizado."
-                return 0
-            fi
-
-            echo
-            warn "Falha ao sincronizar o Chaotic-AUR."
-            local sync_answer=""
-            read -r -p "Tentar sincronizar novamente? [S/n]: " sync_answer
-
-            if [[ -z "$sync_answer" || "$sync_answer" =~ ^[sS]$ ]]; then
-                sleep 10
-                continue
-            fi
-
-            die "Não foi possível sincronizar o Chaotic-AUR."
+        info 'Chaotic-AUR já configurado; apenas sincronizando.'
+    else
+        while ! chaotic_import_bootstrap_key; do
+            chaotic_retry_or_defer 'Falha ao importar/assinar chave primária do Chaotic-AUR.' || return 0
         done
-    fi
-
-    local -a bootstrap_keys=(
-        3056513887B78AEB
-        FBA220DFC880C036
-    )
-
-    local imported=0
-    local key
-
-    for key in "${bootstrap_keys[@]}"; do
-        if arch-chroot /mnt pacman-key --recv-key "$key" \
-            --keyserver keyserver.ubuntu.com >/dev/null 2>&1; then
-
-            arch-chroot /mnt pacman-key --lsign-key "$key"
-            imported=1
-        fi
-    done
-
-    (( imported == 1 )) ||
-        die "Não foi possível importar uma chave de bootstrap do Chaotic-AUR."
-
-    download_chaotic_bootstrap_with_retry
-
-    while true; do
-        if arch-chroot /mnt pacman -U --noconfirm \
-            "$CHAOTIC_KEYRING_PACKAGE" \
-            "$CHAOTIC_MIRRORLIST_PACKAGE"; then
-            break
-        fi
-
-        echo
-        warn "Os arquivos foram baixados, mas pacman -U falhou."
-        local install_answer=""
-        read -r -p "Baixar novamente e tentar outra vez? [S/n]: " install_answer
-
-        if [[ -z "$install_answer" || "$install_answer" =~ ^[sS]$ ]]; then
-            download_chaotic_bootstrap_with_retry
-            continue
-        fi
-
-        die "Falha ao instalar chaotic-keyring/chaotic-mirrorlist."
-    done
-
-    if ! grep -q '^\[chaotic-aur\]' /mnt/etc/pacman.conf; then
-        cat >> /mnt/etc/pacman.conf <<'EOF'
+        download_chaotic_bootstrap_with_retry || return 0
+        while ! arch-chroot /mnt pacman -U --noconfirm \
+            "$CHAOTIC_KEYRING_PACKAGE" "$CHAOTIC_MIRRORLIST_PACKAGE"; do
+            chaotic_retry_or_defer 'Falha na instalação do chaotic-keyring e/ou chaotic-mirrorlist.' || return 0
+            download_chaotic_bootstrap_with_retry || return 0
+        done
+        if ! grep -q '^\[chaotic-aur\]' /mnt/etc/pacman.conf; then
+            cat >> /mnt/etc/pacman.conf <<'EOF'
 
 [chaotic-aur]
 Include = /etc/pacman.d/chaotic-mirrorlist
 EOF
+        fi
     fi
-
     while true; do
         if arch-chroot /mnt pacman -Syy --noconfirm \
-           && arch-chroot /mnt pacman -Sl chaotic-aur >/dev/null 2>&1; then
+            && arch-chroot /mnt pacman -Sl chaotic-aur >/dev/null 2>&1; then
+            CHAOTIC_READY=yes
+            ok 'Chaotic-AUR configurado e sincronizado.'
+            return 0
+        fi
+        chaotic_retry_or_defer 'Chaotic-AUR não sincronizou; não é seguro instalar o kernel.' || return 0
+    done
+}
+
+# Chaotic-AUR deve estar ativo antes desta etapa. O pacstrap inicial usa
+# apenas linux-lts, pois linux-cachyos não existe nos repositórios oficiais.
+# Trata-se de etapa ESSENCIAL em Minimal, Basic, Test e Full, nunca opcional.
+install_cachyos_kernel() {
+    if [[ "${CHAOTIC_READY:-no}" != yes ]]; then
+        warn 'Chaotic-AUR não ficou disponível; CachyOS adiado e linux-lts preservado.'
+        return 0
+    fi
+    local pkg available=yes
+    while true; do
+        available=yes
+        for pkg in "${CACHYOS_KERNEL_PACKAGES[@]}"; do
+            if ! arch-chroot /mnt pacman -Si "chaotic-aur/$pkg" >/dev/null 2>&1; then
+                available=no
+                warn "Kernel/headers ausentes no Chaotic-AUR: $pkg."
+            fi
+        done
+        if [[ "$available" == yes ]]; then
             break
         fi
-
-        echo
-        warn "Chaotic-AUR configurado, mas o repositório ainda não respondeu corretamente."
-        local repo_answer=""
-        read -r -p "Tentar sincronizar novamente? [S/n]: " repo_answer
-
-        if [[ -z "$repo_answer" || "$repo_answer" =~ ^[sS]$ ]]; then
-            sleep 10
-            continue
-        fi
-
-        die "Chaotic-AUR configurado, mas indisponível no momento."
+        chaotic_retry_or_defer 'Kernel CachyOS ou headers indisponíveis no repositório.' || return 0
     done
-
-    arch-chroot /mnt pacman -Q chaotic-keyring chaotic-mirrorlist
-    ok "Chaotic-AUR configurado."
+    info 'Instalando kernel principal CachyOS + headers...'
+    while ! arch-chroot /mnt pacman -S --needed --noconfirm \
+        chaotic-aur/linux-cachyos chaotic-aur/linux-cachyos-headers; do
+        chaotic_retry_or_defer 'Falha na instalação do kernel CachyOS; LTS continua disponível.' || return 0
+    done
+    if ! arch-chroot /mnt pacman -Q linux-cachyos linux-cachyos-headers linux-lts linux-lts-headers >/dev/null \
+        || [[ ! -s /mnt/boot/vmlinuz-linux-cachyos ]] \
+        || [[ ! -f /mnt/etc/mkinitcpio.d/linux-cachyos.preset ]]; then
+        chaotic_defer_to_lts 'Kernel/headers CachyOS não passaram na validação pós-instalação.'
+        return 0
+    fi
+    CACHYOS_DEFERRED=no
+    rm -f /mnt/etc/wolf-linux/cachyos-pending.txt
+    ok 'CachyOS principal + LTS de recuperação instalados.'
 }
 
 collect_selected_official_packages() {
@@ -2865,8 +2888,19 @@ install_selected_stack_packages() {
         warn "Pacotes não encontrados nos repositórios configurados; usando AUR direto apenas como fallback:"
         printf '  - %s\n' "${aur_packages[@]}"
 
-        ensure_yay
+        local aur_helper_ready=yes
+        if ! (set -Eeuo pipefail; ensure_yay); then
+            aur_helper_ready=no
+            warn 'Falha na instalação do helper AUR: todos os aplicativos AUR opcionais ficam pendentes.'
+            for pkg in "${aur_packages[@]}"; do
+                optional_skipped["$pkg"]=1
+                printf 'Pacote AUR pendente (helper indisponível): %s\n' "$pkg" >> "$STATE_DIR/optional-failures.log"
+            done
+            mkdir -p /mnt/var/log
+            cp "$STATE_DIR/optional-failures.log" /mnt/var/log/wolf-optional-failures.log || true
+        fi
 
+        if [[ "$aur_helper_ready" == yes ]]; then
         cat > "$AUR_TEMP_SUDOERS" <<EOF
 $USERNAME_VALUE ALL=(root) NOPASSWD: /usr/bin/pacman
 EOF
@@ -2909,6 +2943,7 @@ EOF
         done
 
         rm -f "$AUR_TEMP_SUDOERS"
+        fi # helper AUR disponível
     else
         ok "Nenhum fallback AUR direto foi necessário."
     fi
@@ -3267,8 +3302,9 @@ install_oh_my_zsh_and_profile() {
             awk '/powerlevel10k\.zsh-theme$/ {print $2; exit}'
     )"
 
-    [[ -n "$p10k_theme" ]] ||
-        die "Não localizei powerlevel10k.zsh-theme no pacote instalado."
+    if [[ -z "$p10k_theme" ]]; then
+        warn "Powerlevel10k não foi instalado; o Zsh usará prompt simples até sua instalação."
+    fi
 
     fetch_wolf_asset "zsh/p10k.zsh" /mnt/etc/skel/.p10k.zsh
 
@@ -3438,8 +3474,13 @@ plugins=(
 
 source "\$ZSH/oh-my-zsh.sh"
 
-# Tema Powerlevel10k empacotado pelo Arch/Chaotic-AUR.
-source "$p10k_theme"
+# Tema opcional: fallback funciona mesmo sem Chaotic-AUR/AUR.
+if [[ -n "$p10k_theme" && -r "$p10k_theme" ]]; then
+    source "$p10k_theme"
+else
+    PROMPT='%F{white}%n@%m%f:%F{cyan}%~%f %# '
+    RPROMPT=''
+fi
 
 # Plugins distribuídos como pacotes do Arch.
 [[ -r /usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh ]] &&
@@ -3458,7 +3499,9 @@ export ANDROID_SDK_ROOT=/opt/android-sdk
 export CHROME_EXECUTABLE=/usr/bin/google-chrome-stable
 export PATH="/opt/flutter/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/cmdline-tools/latest/bin:\$PATH"
 
-[[ -f ~/.p10k.zsh ]] && source ~/.p10k.zsh
+if [[ -n "$p10k_theme" && -r "$p10k_theme" && -f ~/.p10k.zsh ]]; then
+    source ~/.p10k.zsh
+fi
 
 EOF
 
@@ -3521,8 +3564,14 @@ install_wolf_kde_personal_defaults() {
                 warn "Oh My Zsh nao foi baixado. Zsh e Powerlevel10k funcionam; instale OMZ posteriormente."
             fi
         fi
-        [[ -f /mnt/usr/share/zsh-theme-powerlevel10k/powerlevel10k.zsh-theme ]] || \
-            die "Powerlevel10k ausente apos resolver a stack daily."
+        # Powerlevel10k é tema opcional: se Chaotic/AUR falhar ou o usuário
+        # optar por pular, o sistema DEVE concluir com prompt Zsh simples.
+        if [[ ! -f /mnt/usr/share/zsh-theme-powerlevel10k/powerlevel10k.zsh-theme ]]; then
+            warn "Powerlevel10k indisponível; Zsh utilizará prompt de contingência."
+            install -d -m 0755 /mnt/var/log
+            printf '%s\n' 'zsh-theme-powerlevel10k pendente (repositório/AUR indisponível); instalar posteriormente' \
+                >> /mnt/var/log/wolf-optional-failures.log
+        fi
         [[ -f /mnt/usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh ]] || \
             die "zsh-autosuggestions ausente apos resolver a stack Daily."
         grep -Fq 'zsh-autosuggestions.zsh' "/mnt/home/$USERNAME_VALUE/.zshrc" || \
@@ -8991,6 +9040,39 @@ EOF
     ok "Perfil gráfico instalado: $GPU_PROFILE"
 }
 
+validate_nvidia_dkms_for_both_kernels() {
+    [[ "$GPU_PROFILE" == nvidia-modern ]] || return 0
+    local package kdir release
+    arch-chroot /mnt pacman -Q nvidia-open-dkms linux-lts-headers >/dev/null ||
+        die 'NVIDIA DKMS ou headers do LTS não instalados.'
+    local -a kernels=(linux-lts)
+    if [[ "${CACHYOS_DEFERRED:-no}" != yes ]] \
+        && arch-chroot /mnt pacman -Q linux-cachyos >/dev/null 2>&1; then
+        arch-chroot /mnt pacman -Q linux-cachyos-headers >/dev/null ||
+            die 'CachyOS presente sem headers: DKMS não pode ser validado.'
+        kernels+=(linux-cachyos)
+    fi
+    for package in "${kernels[@]}"; do
+        release=''
+        case "$package" in
+            linux-cachyos) kdir=(/mnt/usr/lib/modules/*-cachyos) ;;
+            linux-lts) kdir=(/mnt/usr/lib/modules/*-lts) ;;
+        esac
+        # A verificação é de módulos compilados para cada release, não só
+        # de pacote instalado nem de módulos do kernel Live.
+        for entry in "${kdir[@]}"; do
+            [[ -d "$entry" ]] || continue
+            release="${entry##*/}"
+            if arch-chroot /mnt modinfo -k "$release" -F vermagic nvidia 2>/dev/null | grep -Fq "$release"; then
+                ok "NVIDIA DKMS encontrado para $release."
+                break
+            fi
+            release=''
+        done
+        [[ -n "$release" ]] || die "NVIDIA DKMS ausente para $package: boot nesse kernel pode falhar."
+    done
+}
+
 validate_graphics_stack() {
     echo
     echo "Validando perfil gráfico: $GPU_PROFILE"
@@ -9109,6 +9191,8 @@ kernel_headers_package() {
     local rel
     rel="$(uname -r)"
     case "$rel" in
+        *-cachyos) echo "linux-cachyos-headers" ;;
+        *-cachyos-lts) echo "linux-cachyos-lts-headers" ;;
         *-zen*) echo "linux-zen-headers" ;;
         *-lts*) echo "linux-lts-headers" ;;
         *-hardened*) echo "linux-hardened-headers" ;;
@@ -10945,9 +11029,8 @@ configure_bootloader() {
         's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="loglevel=3 quiet splash"/' \
         /mnt/etc/default/grub
 
-    # Sempre deixe o menu visível por alguns segundos. O linux-lts é instalado
-    # em paralelo ao linux-zen e funciona como kernel independente de recuperação
-    # caso uma atualização do kernel principal seja interrompida.
+    # Sempre exibir GRUB: linux-lts é obrigatório e assume o boot quando
+    # Chaotic-AUR/CachyOS não pôde ser concluído.
     if grep -q '^GRUB_TIMEOUT_STYLE=' /mnt/etc/default/grub; then
         sed -i 's/^GRUB_TIMEOUT_STYLE=.*/GRUB_TIMEOUT_STYLE=menu/' /mnt/etc/default/grub
     else
@@ -10958,53 +11041,64 @@ configure_bootloader() {
     else
         printf 'GRUB_TIMEOUT=5\n' >> /mnt/etc/default/grub
     fi
-    if grep -q '^GRUB_TOP_LEVEL=' /mnt/etc/default/grub; then
-        sed -i 's|^GRUB_TOP_LEVEL=.*|GRUB_TOP_LEVEL="/boot/vmlinuz-linux-zen"|' /mnt/etc/default/grub
+    # Evitar GRUB_DEFAULT=saved ou índice antigo apontando o LTS.
+    if grep -q '^GRUB_DEFAULT=' /mnt/etc/default/grub; then
+        sed -i 's|^GRUB_DEFAULT=.*|GRUB_DEFAULT=0|' /mnt/etc/default/grub
     else
-        printf 'GRUB_TOP_LEVEL="/boot/vmlinuz-linux-zen"\n' >> /mnt/etc/default/grub
+        printf 'GRUB_DEFAULT=0\n' >> /mnt/etc/default/grub
     fi
+    local main_kernel="linux-lts"
+    if [[ "${CACHYOS_DEFERRED:-no}" != yes ]] \
+        && arch-chroot /mnt pacman -Q linux-cachyos >/dev/null 2>&1 \
+        && [[ -s /mnt/boot/vmlinuz-linux-cachyos && -s /mnt/boot/initramfs-linux-cachyos.img ]]; then
+        main_kernel=linux-cachyos
+    fi
+    if grep -q '^GRUB_TOP_LEVEL=' /mnt/etc/default/grub; then
+        sed -i "s|^GRUB_TOP_LEVEL=.*|GRUB_TOP_LEVEL=\"/boot/vmlinuz-$main_kernel\"|" /mnt/etc/default/grub
+    else
+        printf 'GRUB_TOP_LEVEL="/boot/vmlinuz-%s"\n' "$main_kernel" >> /mnt/etc/default/grub
+    fi
+    printf '%s\n' "$main_kernel" > /mnt/etc/wolf-linux/kernel-default
+    info "Kernel principal selecionado no GRUB: $main_kernel"
 
     arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg
 }
 
 validate_boot_installation() {
     echo
-    echo "Validando instalação de boot..."
-
-    local kernel="/mnt/boot/vmlinuz-linux-zen"
-    local initramfs="/mnt/boot/initramfs-linux-zen.img"
-    local recovery_kernel="/mnt/boot/vmlinuz-linux-lts"
-    local recovery_initramfs="/mnt/boot/initramfs-linux-lts.img"
-    local grub_cfg="/mnt/boot/grub/grub.cfg"
-
-    [[ -s "$kernel" ]] ||
-        die "Kernel linux-zen ausente ou vazio: /boot/vmlinuz-linux-zen"
-
-    [[ -s "$initramfs" ]] ||
-        die "Initramfs linux-zen ausente ou vazio: /boot/initramfs-linux-zen.img"
-
-    [[ -s "$recovery_kernel" ]] ||
-        die "Kernel de recuperação linux-lts ausente ou vazio."
-
-    [[ -s "$recovery_initramfs" ]] ||
-        die "Initramfs de recuperação linux-lts ausente ou vazio."
-
-    [[ -s "$grub_cfg" ]] ||
-        die "grub.cfg ausente ou vazio."
-
+    echo 'Validando instalação de boot...'
+    local main_kernel=linux-lts
+    local recovery_kernel=/mnt/boot/vmlinuz-linux-lts
+    local recovery_initramfs=/mnt/boot/initramfs-linux-lts.img
+    local grub_cfg=/mnt/boot/grub/grub.cfg
+    [[ -s /mnt/etc/wolf-linux/kernel-default ]] && main_kernel="$(< /mnt/etc/wolf-linux/kernel-default)"
+    [[ "$main_kernel" == linux-cachyos || "$main_kernel" == linux-lts ]] ||
+        die 'Kernel principal desconhecido registrado no sistema instalado.'
+    local kernel="/mnt/boot/vmlinuz-$main_kernel"
+    local initramfs="/mnt/boot/initramfs-$main_kernel.img"
+    [[ -s "$kernel" && -s "$initramfs" ]] ||
+        die "Kernel principal $main_kernel ou initramfs ausente/vazio."
+    [[ -s "$recovery_kernel" && -s "$recovery_initramfs" ]] ||
+        die 'Kernel e initramfs linux-lts obrigatórios ausentes.'
+    [[ -s "$grub_cfg" ]] || die 'grub.cfg ausente ou vazio.'
     arch-chroot /mnt grub-script-check /boot/grub/grub.cfg
-
-    grep -q 'vmlinuz-linux-zen' "$grub_cfg" ||
-        die "grub.cfg não contém uma entrada para vmlinuz-linux-zen."
-
-    grep -q 'initramfs-linux-zen.img' "$grub_cfg" ||
-        die "grub.cfg não referencia initramfs-linux-zen.img."
-
-    grep -q 'vmlinuz-linux-lts' "$grub_cfg" ||
-        die "grub.cfg não contém o kernel de recuperação linux-lts."
-
+    grep -Fxq 'GRUB_DEFAULT=0' /mnt/etc/default/grub ||
+        die 'GRUB_DEFAULT não aponta para a primeira entrada.'
+    grep -Fxq "GRUB_TOP_LEVEL=\"/boot/vmlinuz-$main_kernel\"" /mnt/etc/default/grub ||
+        die "GRUB_TOP_LEVEL não aponta para $main_kernel."
+    grep -q "vmlinuz-$main_kernel" "$grub_cfg" ||
+        die "grub.cfg não contém vmlinuz-$main_kernel."
+    grep -q "initramfs-$main_kernel.img" "$grub_cfg" ||
+        die "grub.cfg não contém initramfs-$main_kernel.img."
+    grep -q 'vmlinuz-linux-lts' "$grub_cfg" || die 'LTS ausente do GRUB.'
+    grep -q 'initramfs-linux-lts.img' "$grub_cfg" || die 'Initramfs LTS ausente do GRUB.'
+    if [[ "$main_kernel" == linux-cachyos ]]; then
+        grep -q 'vmlinuz-linux-cachyos' "$grub_cfg" || die 'CachyOS ausente do GRUB.'
+    else
+        warn 'Modo de recuperação de repositório: GRUB iniciará pelo LTS; CachyOS pendente.'
+    fi
     echo
-    echo "Arquivos de boot:"
+    echo 'Arquivos de boot:'
     ls -lh "$kernel" "$initramfs" "$grub_cfg"
 
     if [[ "$BOOT_MODE" == "UEFI" ]]; then
@@ -12093,7 +12187,12 @@ finalize_vm_install() {
     echo "Usuário ....: $USERNAME_VALUE"
     echo "GPU ........: $GPU_PROFILE"
     echo "Stacks .....: $(selected_stacks_text)"
-    echo "Kernel .....: linux-zen + linux-lts fallback"
+    if [[ -s /mnt/etc/wolf-linux/kernel-default ]]; then
+        echo "Kernel principal: $(< /mnt/etc/wolf-linux/kernel-default)"
+    else
+        echo 'Kernel principal: linux-lts (provisório)'
+    fi
+    echo 'Kernel reserva: linux-lts' 
     echo "Plasma ......: Branding/MultiMonitor one-shot no primeiro login"
     echo "Outros helpers: Gamepad e GRUB permanecem manuais"
     echo
@@ -12482,20 +12581,22 @@ main() {
     stage "60-sistema-base" configure_system_base
     stage "61-identidade-wolf" configure_wolf_identity
     stage "62-usuario-sudo" configure_user_sudo
-    # Minimal não seleciona nenhuma stack opcional: não inicializa Chaotic-AUR,
-    # yay ou resolução de pacotes AUR. As demais instalações preservam a
-    # prioridade Arch oficial -> Chaotic-AUR -> AUR fallback.
-    if (( ${#SELECTED_STACKS[@]} == 0 )); then
-        ok "Perfil sem stacks opcionais: etapas 63 Chaotic-AUR e 64 AUR ignoradas."
-    else
-        stage "63-chaotic-aur" configure_chaotic_aur
+    # Todos os perfis tentam Chaotic-AUR/CachyOS, mas indisponibilidade de
+    # chave/CDN/mirror não aborta a instalação: usar LTS e registrar pendência.
+    stage "63-chaotic-aur" configure_chaotic_aur
+    stage "63a-kernel-cachyos" install_cachyos_kernel
+    # Stacks opcionais permanecem independentes do kernel escolhido.
+    if (( ${#SELECTED_STACKS[@]} > 0 )); then
         stage "63b-vulkan" install_preferred_vulkan_provider
         stage "64-resolver-stacks" install_selected_stack_packages
+    else
+        ok 'Minimal: kernels avaliados; stacks opcionais ignoradas.'
     fi
     stage "67-servicos" configure_services
     stage "68-android-flutter" install_optional_flutter_sdk
     stage "69-video" install_gpu_profile
     stage "69b-validar-video" validate_graphics_stack
+    stage "69b2-validar-nvidia-dkms" validate_nvidia_dkms_for_both_kernels
     stage "69c-branding-boot" install_wolf_branding
     stage "69c2-painel-sem-discover" install_wolf_plasma_panel_defaults
     stage "69c3-preferencias-kde" install_wolf_kde_personal_defaults

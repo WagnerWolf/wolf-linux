@@ -1,3 +1,41 @@
+## Wolf Linux DevKit 2.1.3 — versão estável (CachyOS principal + LTS de reserva)
+
+- Base: 2.1.2 (Wolf Package Manager 0.3.4 com atalho no tray, Baloo offscreen,
+  instalação KDE/Wayland, Basic, Test, Full, segurança EFI/LVM multidisco).
+- Instalação: `linux-lts` + headers no `pacstrap` oficial; depois
+  Chaotic-AUR tentado em **todos os perfis**, inclusive Minimal,
+  seguido de `linux-cachyos` + headers pelo Chaotic-AUR. Se as chaves/CDN/mirrors falharem, há opção de continuar com LTS (seguro) e concluir CachyOS depois.
+- NVIDIA moderna: `nvidia-open-dkms` com validação de módulo para
+  **ambos** os kernels. Nunca instalar o módulo precompilado de um único kernel.
+- GRUB: `GRUB_DEFAULT=0` e `GRUB_TOP_LEVEL="/boot/vmlinuz-linux-cachyos"`;
+  LTS continua disponível nas opções avançadas, com timeout de 5 segundos.
+- `linux-zen` não é instalado nas novas instalações.
+
+### Gerar a ISO no Arch Linux
+
+O DevKit contém os arquivos **para construir** a imagem. A ISO Live mantém o
+kernel do perfil Archiso oficial para inicializar o instalador; o sistema
+**instalado** passa a usar CachyOS + LTS. Não misturar os dois bootloaders.
+
+Método mais simples, sem tocar em `~/wolf-linux` existente:
+
+```bash
+./gerar-iso-2.1.3.sh
+```
+
+Ou preparar e compilar em etapas:
+
+```bash
+./preparar_ambiente_wolf_linux.sh --project "$HOME/wolf-linux-2.1.3"
+cd "$HOME/wolf-linux-2.1.3"
+./tests/wolf-smoke-test.sh
+./tests/wolf-build-iso.sh
+```
+
+ISO gerada em `$HOME/wolf-linux-2.1.3/out/`, após validação do build.
+A RC5 teve instalação real validada pelo mantenedor; recomenda-se testar em VM UEFI e BIOS ao aplicar mudanças em novo hardware. Consulte
+`RELEASE-NOTES-2.1.3.md` para o resumo da versão estável.
+
 ## Wolf Linux DevKit 2.1.2 — Release
 
 Consulte RELEASE-NOTES-2.1.2.md. Inclui Wolf Package Manager 0.3.3 e correções da RC1 SmokeFix2.
@@ -72,7 +110,7 @@ Flutter e alguns pacotes de terceiros podem falhar por conexão, indisponibilida
 - Áudio: PipeWire.
 - Gerenciador de inicialização: GRUB (BIOS/UEFI conforme o computador).
 - Repositórios: Arch oficial → Chaotic-AUR → AUR direto somente quando necessário.
-- Gerenciador gráfico: Wolf Package Manager 0.3.3 (repositórios + yay/AUR; bandeja KDE, checagem de atualizações a cada 2 horas ajustável).
+- Gerenciador gráfico: Wolf Package Manager 0.3.4 (repositórios + yay/AUR; bandeja KDE, atalho de atualização no menu de contexto, checagem a cada 2 horas ajustável).
 - Utilitários: Wolf Control Center, comandos `wolf-helper`, Wolf Rescue na mídia Live.
 - Versão: arquivo `VERSION` no DevKit e identificação `Wolf Linux 2.1` no sistema instalado.
 

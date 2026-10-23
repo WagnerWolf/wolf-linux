@@ -95,6 +95,14 @@ ok 'Arch/Chaotic são priorizados; AUR é fallback por pacote'
 # Teste real de coleta e resolução com comandos simulados e ERR trap herdado.
 python3 "$PROJECT/tests/wolf-test-aur-stdout-2.1.2.py" || err 'Regressão: mensagens do ERR trap contaminaram a lista AUR'
 
+printf '\n>> Validando identidade da promoção estável 2.1.3...\n'
+python3 "$PROJECT/tests/wolf-test-stable-2.1.3.py" || err 'Regressão: versão estável e metadados da ISO inconsistentes'
+
+printf '\n>> Validando dois kernels, Chaotic e GRUB 2.1.3...\n'
+python3 "$PROJECT/tests/wolf-test-kernel-2.1.3.py" || err 'Regressão kernels CachyOS + LTS'
+printf '\n>> Validando fallback Zsh sem Powerlevel10k...\n'
+python3 "$PROJECT/tests/wolf-test-optional-zsh-fallback-2.1.3.py" || err 'Regressão: Powerlevel10k opcional interrompe instalação'
+
 printf '\n>> Validando SSH de diagnóstico na VM live...\n'
 grep -Fq 'wolf-enable-ssh-live' "$CUSTOMIZER" || err 'Comando SSH live não é transportado para a ISO'
 grep -Fq 'openssh' "$CUSTOMIZER" || err 'openssh ausente dos pacotes live'
