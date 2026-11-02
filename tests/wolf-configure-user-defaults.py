@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Wolf Linux alpha13: declarative, one-shot Plasma user profile for installed sysroot.
+"""Preferências compartilhadas Wolf LXQt: MIME, Konsole, Zsh e ação VS Code.
 
-Run from live installer after pacstrap; no background daemons or watchers.
-Create a self-removing per-user autostart for initial Plasma configuration.
+Usado no sistema alvo (sysroot) durante instalação. Não inicia watchers.
 """
 import argparse
+import json
 import os
 import pwd
 import shutil
@@ -13,7 +13,7 @@ from pathlib import Path
 
 
 def set_key(filename: Path, section: str, key: str, value: str) -> None:
-    """Upsert a KDE INI key without reformatting the rest of the file."""
+    """Atualiza uma chave INI sem reformatar as demais entradas."""
     filename.parent.mkdir(parents=True, exist_ok=True)
     lines = filename.read_text(encoding="utf-8").splitlines(keepends=True) if filename.exists() else []
     header = f"[{section}]"
@@ -39,7 +39,7 @@ def set_key(filename: Path, section: str, key: str, value: str) -> None:
 
 def apply_mime(config: Path, daily: bool) -> None:
     mime = {
-        "inode/directory": "org.kde.dolphin.desktop",
+        "inode/directory": "pcmanfm-qt.desktop",
         "application/pdf": "org.kde.okular.desktop",
         "text/plain": "org.kde.kate.desktop",
         "text/markdown": "org.kde.kate.desktop",
@@ -50,7 +50,7 @@ def apply_mime(config: Path, daily: bool) -> None:
         "text/xml": "org.kde.kate.desktop",
         "application/x-shellscript": "org.kde.kate.desktop",
         "text/x-python": "org.kde.kate.desktop",
-        # Gwenview no KDE baseline (inclui instalações Minimal).
+        # Gwenview incluído na base LXQt (inclusive Minimal).
         "image/png": "org.kde.gwenview.desktop",
         "image/jpeg": "org.kde.gwenview.desktop",
         "image/webp": "org.kde.gwenview.desktop",
@@ -104,6 +104,28 @@ def copy_profile(source: Path, target: Path) -> None:
     shutil.copyfile(source, target)
 
 
+def configure_vscode_keyring(home: Path) -> Path | None:
+    """Backend Secret Service, sem sobrescrever um argv.json JSONC do usuário."""
+    file = home / '.vscode' / 'argv.json'
+    if file.is_file():
+        try:
+            obj = json.loads(file.read_text(encoding='utf-8'))
+        except (UnicodeError, json.JSONDecodeError):
+            print(f'[AVISO] VS Code: argv.json com comentários ou inválido; preservado: {file}')
+            return None
+        if not isinstance(obj, dict):
+            print(f'[AVISO] VS Code: argv.json inesperado; preservado: {file}')
+            return None
+    else:
+        obj = {}
+    if obj.get('password-store') == 'gnome-libsecret':
+        return file
+    obj['password-store'] = 'gnome-libsecret'
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(json.dumps(obj, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+    return file
+
+
 def configure(root: Path, user: str, assets: Path, daily: bool, development: bool, extras: bool = False) -> None:
     if not root.is_dir():
         raise RuntimeError(f"Sysroot não encontrado: {root}")
@@ -115,14 +137,6 @@ def configure(root: Path, user: str, assets: Path, daily: bool, development: boo
     config = home / ".config"
     config.mkdir(parents=True, exist_ok=True)
 
-    kwinrc = config / "kwinrc"
-    set_key(kwinrc, "TabBox", "MultiScreenMode", "1")  # filter by screen under pointer
-    set_key(kwinrc, "Windows", "Placement", "UnderMouse")
-    set_key(kwinrc, "Windows", "ActiveMouseScreen", "true")
-    mouse = config / "kcminputrc"
-    set_key(mouse, "Libinput][Defaults", "PointerAccelerationProfile", "1")  # libinput flat
-    set_key(mouse, "Mouse", "XLbInptAccelProfileFlat", "true")
-    set_key(mouse, "Mouse", "X11LibInputXAccelProfileFlat", "true")
     apply_mime(config / "mimeapps.list", daily)
 
     konsole = home / ".local" / "share" / "konsole"
@@ -144,24 +158,10 @@ def configure(root: Path, user: str, assets: Path, daily: bool, development: boo
         tty_config = config / "fastfetch" / "config-tty.jsonc"
         tty_config.write_text('''{\n  "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",\n  "logo": {"type": "file-raw", "source": "/usr/share/wolf-linux/fastfetch/wolf-linux-ascii.txt"},\n  "display": {"separator": " : "},\n  "modules": ["title", "separator", "os", "host", "kernel", "uptime", "packages", "shell", "cpu", "gpu", "memory", "disk", "localip"]\n}\n''', encoding="utf-8")
 
-    # User-specific first login, never a global/system-wide login action.
-    autostart = config / "autostart" / "wolf-first-login-plasma.desktop"
-    autostart.parent.mkdir(parents=True, exist_ok=True)
-    autostart.write_text("""[Desktop Entry]
-Type=Application
-Name=Wolf Linux — Configuração inicial do Plasma
-Comment=Aplica uma única vez o Branding e o MultiMonitor
-Exec=/usr/local/bin/wolf-first-login-plasma
-TryExec=/usr/local/bin/wolf-first-login-plasma
-OnlyShowIn=KDE;
-Terminal=false
-X-KDE-autostart-phase=2
-""", encoding="utf-8")
-
     if development:
-        service_dir = home / ".local" / "share" / "kio" / "servicemenus"
-        copy_profile(assets / "kde" / "wolf-open-vscode.desktop", service_dir / "wolf-open-vscode.desktop")
-        (service_dir / "wolf-open-vscode.desktop").chmod(0o755)
+        action_dir = home / ".local" / "share" / "file-manager" / "actions"
+        copy_profile(assets / "pcmanfm-qt" / "wolf-open-vscode.desktop", action_dir / "wolf-open-vscode.desktop")
+        vscode_argv = configure_vscode_keyring(home)
 
     # Set ownership of files we create, not of arbitrary preexisting home content.
     if os.geteuid() == 0:
@@ -175,13 +175,15 @@ X-KDE-autostart-phase=2
                     break
         if uid is None:
             raise RuntimeError(f"Não encontrei {user} em {passwd_file}; não posso definir permissões")
-        targets = [kwinrc, mouse, config / "mimeapps.list", config / "konsolerc", autostart,
+        targets = [config / "mimeapps.list", config / "konsolerc",
                    konsole / "WolfLinux.colorscheme", konsole / "Wolf Linux.profile"]
         if daily:
             targets += [home / ".zshrc", home / ".p10k.zsh",
                         config / "fastfetch" / "config.jsonc", config / "fastfetch" / "config-tty.jsonc"]
         if development:
-            targets.append(home / ".local" / "share" / "kio" / "servicemenus" / "wolf-open-vscode.desktop")
+            targets.append(home / ".local" / "share" / "file-manager" / "actions" / "wolf-open-vscode.desktop")
+            if vscode_argv is not None:
+                targets.append(vscode_argv)
         for p in targets:
             os.chown(p, uid, gid)
             parent = p.parent
@@ -201,7 +203,7 @@ def main() -> None:
     parser.add_argument("--extras", action="store_true")
     args = parser.parse_args()
     configure(args.root, args.user, args.assets, args.daily, args.development, args.extras)
-    print(f"[OK] Preferências Plasma aplicadas a {args.user}: KWin, mouse, MIME, Konsole, Zsh={args.daily}, VSCode={args.development}")
+    print(f"[OK] Preferências LXQt para {args.user}: MIME, Konsole, Zsh={args.daily}, VSCode={args.development}")
 
 
 if __name__ == "__main__":

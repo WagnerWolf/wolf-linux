@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+"""Wolf Linux · Dispositivos removíveis (LXQt/X11).
+
+Indicador Qt em português, sem automontagem. Montar/desmontar e desligar
+unidades USB usando UDisks2/udisksctl; nunca executa mkfs nem chama root.
+"""
+from __future__ import annotations
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+
+def scan_disks():
+    cp = subprocess.run(['lsblk', '--json', '--paths', '-o',
+                         'NAME,PATH,TYPE,TRAN,SIZE,LABEL,MODEL,MOUNTPOINTS'],
+                        capture_output=True, text=True, timeout=9, check=True)
+    disks = json.loads(cp.stdout).get('blockdevices', [])
+    out = []
+    for disk in disks:
+        if disk.get('type') != 'disk' or str(disk.get('tran') or '').lower() != 'usb':
+            continue
+        parts = []
+        for p in disk.get('children') or []:
+            if p.get('type') != 'part' or p.get('children'):
+                continue
+            name = str(p.get('path') or p.get('name') or '')
+            if not name.startswith('/dev/') or not Path(name).name.replace('_','').replace('-','').isalnum():
+                continue
+            mounts = [str(x) for x in (p.get('mountpoints') or []) if x]
+            # Nunca operar se houver qualquer ponto de montagem do sistema.
+            safe = all(x.startswith('/run/media/') or x.startswith('/media/') for x in mounts)
+            parts.append({'device':name, 'label':str(p.get('label') or Path(name).name),
+                          'size':str(p.get('size') or ''), 'mounts':mounts, 'safe':safe})
+        if parts:
+            out.append({'device':str(disk.get('path') or disk.get('name') or ''),
+                        'model':str(disk.get('model') or 'Unidade USB').strip(),
+                        'size':str(disk.get('size') or ''), 'parts':parts})
+    return out
+
+
+def removable(disk):
+    """Uma unidade só pode ser removida se nenhum volume for do sistema."""
+    return disk['device'].startswith('/dev/') and all(p['safe'] for p in disk['parts'])
+
+
+def run_udisk(action, device):
+    if action == 'mount':
+        cmd = ['udisksctl','mount','-b',device]
+    elif action == 'unmount':
+        cmd = ['udisksctl','unmount','-b',device]
+    elif action == 'power-off':
+        cmd = ['udisksctl','power-off','-b',device]
+    else:
+        raise ValueError('Ação desconhecida')
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=70, check=False)
+
+
+def main():
+    from PySide6.QtWidgets import (QApplication, QMenu, QSystemTrayIcon,
+                                  QMessageBox)
+    from PySide6.QtGui import QIcon
+    from PySide6.QtCore import QTimer
+    app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
+    if not QSystemTrayIcon.isSystemTrayAvailable():
+        print('[AVISO] A bandeja de sistema não está disponível.', file=sys.stderr)
+        return 1
+    icon = QIcon.fromTheme('drive-removable-media')
+    if icon.isNull():
+        icon = QIcon.fromTheme('drive-harddisk')
+    tray = QSystemTrayIcon(icon)
+    tray.setToolTip('Wolf Linux · Dispositivos removíveis')
+
+    def feedback(title, body, error=False):
+        if error:
+            QMessageBox.warning(None, title, body)
+        else:
+            tray.showMessage(title, body, QSystemTrayIcon.MessageIcon.Information, 3500)
+
+    def perform(action, device, diskdev):
+        try:
+            disks = scan_disks()
+            disk = next((d for d in disks if d['device'] == diskdev), None)
+            if not disk or not removable(disk):
+                raise RuntimeError('Unidade indisponível ou com montagem protegida.')
+            if action in ('mount','unmount'):
+                part = next((x for x in disk['parts'] if x['device'] == device), None)
+                if not part or not part['safe']:
+                    raise RuntimeError('Partição não autorizada.')
+            if action == 'power-off':
+                if QMessageBox.question(None, 'Remover com segurança',
+                    f'Desmontar os volumes e desligar {disk["model"]} ({diskdev})?') != QMessageBox.StandardButton.Yes:
+                    return
+                for part in disk['parts']:
+                    if part['mounts']:
+                        cp = run_udisk('unmount', part['device'])
+                        if cp.returncode:
+                            raise RuntimeError(cp.stderr.strip() or cp.stdout.strip())
+                # Revalidar após desmontar, antes de desligar.
+                fresh = next((d for d in scan_disks() if d['device'] == diskdev), None)
+                if not fresh or not removable(fresh) or any(p['mounts'] for p in fresh['parts']):
+                    raise RuntimeError('A unidade permanece montada; remoção cancelada.')
+            cp = run_udisk(action, device)
+            if cp.returncode:
+                raise RuntimeError(cp.stderr.strip() or cp.stdout.strip())
+            feedback('Wolf Linux', 'Operação concluída com segurança.')
+        except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
+            feedback('Falha no dispositivo USB', str(exc), True)
+        finally:
+            refresh()
+
+    def refresh():
+        menu = QMenu()
+        try:
+            disks = scan_disks()
+            if not disks:
+                item = menu.addAction('Nenhuma unidade USB conectada')
+                item.setEnabled(False)
+            for disk in disks:
+                sub = menu.addMenu(f'{disk["model"]} · {disk["size"]}')
+                if not removable(disk):
+                    action = sub.addAction('Unidade protegida ou em uso pelo sistema')
+                    action.setEnabled(False)
+                    continue
+                for part in disk['parts']:
+                    name = f'{part["label"]} · {part["size"]}'
+                    partmenu = sub.addMenu(name)
+                    if part['mounts']:
+                        mount = part['mounts'][0]
+                        ac = partmenu.addAction('Abrir no PCManFM-Qt')
+                        ac.triggered.connect(lambda checked=False, path=mount:
+                            subprocess.Popen(['pcmanfm-qt', path], start_new_session=True))
+                        ac = partmenu.addAction('Desmontar')
+                        ac.triggered.connect(lambda checked=False, p=part['device'], d=disk['device']:
+                            perform('unmount', p, d))
+                    else:
+                        ac = partmenu.addAction('Montar')
+                        ac.triggered.connect(lambda checked=False, p=part['device'], d=disk['device']:
+                            perform('mount', p, d))
+                sub.addSeparator()
+                action = sub.addAction('Remover unidade com segurança')
+                action.triggered.connect(lambda checked=False, d=disk['device']:
+                    perform('power-off', d, d))
+        except (OSError, subprocess.SubprocessError, ValueError, json.JSONDecodeError) as exc:
+            ac = menu.addAction('Não foi possível consultar dispositivos')
+            ac.setEnabled(False)
+            print('[AVISO] Dispositivos:', exc, file=sys.stderr)
+        menu.addSeparator()
+        ac = menu.addAction('Formatar unidade USB…')
+        ac.triggered.connect(lambda checked=False: subprocess.Popen(
+            ['/usr/local/bin/wolf-format-removable', '--browse'], start_new_session=True))
+        menu.addAction('Atualizar lista', refresh)
+        menu.addAction('Sair do indicador', app.quit)
+        old = tray.contextMenu()
+        tray.setContextMenu(menu)
+        if old is not None:
+            old.deleteLater()
+
+    tray.activated.connect(lambda reason: refresh() if reason == QSystemTrayIcon.ActivationReason.Trigger else None)
+    refresh()
+    tray.show()
+    return app.exec()
+
+if __name__ == '__main__':
+    sys.exit(main())

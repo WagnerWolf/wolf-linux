@@ -1,3 +1,41 @@
+## 2.2.0 — Consolidação da integração USB (2026-11-02)
+
+- Menu USB exclusivo do dispositivo, formato --device e migração da ação antiga de pastas.
+- Painéis Fix5, tema Qt Fusion e GTK e indicador USB pt_BR consolidados.
+- Central Wolf e Package Manager: auditoria, aviso pós atualização e bloqueio de ISO sem biblioteca customizada.
+- Compilação `libfm-qt 2.4.0-4.1` validada em hardware pelo usuário; nova ISO pendente.
+
+## 2.2.0 Fix6 — Correções LXQt em validação
+
+- Fix5/QSettings integrado aos painéis do Wolf Control Center.
+- Bandeja Wolf de dispositivos USB com textos pt_BR, substituindo menu inglês do Udiskie.
+- Formatador USB integrado ao contexto de pastas montadas no PCManFM-Qt, menu e bandeja.
+- Wolf-dark restaurável e configuração Breeze-Dark para GTK/XSETTINGS.
+- Smoke test ampliado com simulações seguras e regressões LVM.
+
+## 2.2.0 — Fix3 experimental (pendente de validação física)
+- Reparação forçada de painéis com diagnóstico XRandR / Qt; sem watcher.
+- União recursiva e não destrutiva dos diretórios XDG em português, com status explícito para colisões.
+- Tema Wolf-dark com integração Breeze-Dark para GTK/Blueman.
+- Formatador próprio USB: seleção de sistema de arquivos, confirmação dupla e chamada ao UDisks2; preservada ferramenta GNOME Disks avançada.
+- Inicialização do Udiskie com preferência pt_BR, condicionada à tradução instalada.
+
+## 02/11/2026 — Consolidação de release 2.2.0 / Wolf Package Manager 0.3.7
+
+- Promovida a prévia 0.3.7 após confirmação do usuário em VM: biblioteca USB `2.4.0-4.1`, `IgnorePkg`, comando `wolf-libfm-guard` e auditoria de integrações.
+- Identificador de versão da interface e do módulo Python atualizado de `0.3.7-vm-preview` para `0.3.7`; mantida a identidade Wolf Linux `2.2.0`.
+- Sem mudanças no instalador de disco, kernels, boot, perfis e lógica de proteção validada.
+- O pacote binário personalizado continua externo e obrigatório para gerar a ISO; sem recompilação automática ou transações em hooks.
+- A ISO consolidada e a reinstalação em hardware físico não foram executadas neste ambiente.
+
+## Wolf Linux 2.2.0 — 01/11/2026 (release LXQt/X11 homologada em VM)
+
+- Promovida a RC1 Patch 6 após validação de instalação e uso em máquina virtual pelo mantenedor.
+- Sem alterações funcionais no instalador, particionamento, gerenciamento de monitores, rede, aplicativos ou pacotes da RC1 Patch 6.
+- Atualizados `VERSION`, `os-release` da Live e do sistema instalado, cabeçalhos, gerador ISO, testes e notas da versão.
+- PCManFM-Qt padrão; painel/tray e locais corrigidos; kernel Arch oficial `linux` principal + `linux-lts` reserva.
+- Instalação física desta versão ainda pendente de homologação.
+
 ### 23/10/2026 — Correção do smoke test da versão estável (reempacotamento)
 
 - O teste de promoção estável reconhece os dois layouts: DevKit distribuído, com `gerar-iso-2.1.3.sh` e `branding-assets`; e projeto preparado, com `tests/wolf-build-iso.sh` e `assets`.
@@ -118,3 +156,16 @@ Histórico detalhado: `docs/historico-alphas/CHANGELOG-alpha59.md` e os arquivos
 - Corrigida visualização incremental do terminal PTY do instalador gráfico: retornos de cursor sobrescrevem apenas a linha ativa, sem repetir quadros de progresso do pacman.
 - Mantidos o log de instalação, entrada interativa, proteções de disco e comportamento do executor da 2.1.1-rc1.
 - Acrescentados testes de fragmentação de saída, CRLF, progresso e staging da Live.
+
+### 2.2.0 Fix7 — NTFS / GTK XSETTINGS (experimental)
+- Formatador USB Wolf: NTFS disponível com `ntfs-3g`/UDisks2 e rótulos NTFS validados.
+- `wolf-gtk-xsettings`: inicia XSETTINGS com o arquivo Wolf explicitamente, sem depender da precedência de `~/.xsettingsd`.
+- Control Center / Wolf-dark: agora recarrega o daemon Wolf, inicia o daemon quando ausente, identifica conflitos e expõe diagnóstico do tema efetivamente publicado.
+- Fix7 preparado para testes físicos; base 2.2.0 estável preservada.
+
+## Experimental · Integrações Wolf Preview 4 (libfm-qt)
+- O Fusion validado no LXQt foi mantido.
+- Adicionado preparador de PKGBUILD experimental para libfm-qt **exatamente** 2.4.0-4, com `pkgrel=4.1` e patch do menu de dispositivos.
+- Verificação obrigatória da tag Git 2.4.0, arquivo fonte limpo, `git apply --check`, formato da receita oficial, checksum SHA512 e destino novo.
+- Nenhuma compilação ou instalação automática; pacote, ABI e integração gráfica ainda NÃO validados.
+- Regressão automatizada da preparação usando fonte/repositório Git simulados e receita simulada.

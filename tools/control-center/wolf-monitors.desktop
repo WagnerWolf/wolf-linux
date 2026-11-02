@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Monitores (Wolf Linux)
+GenericName=Configuração de monitores
+Comment=Organize monitores LXQt/X11 com confirmação e reversão segura
+Exec=/usr/local/bin/wolf-control-center --monitors
+TryExec=/usr/local/bin/wolf-monitors
+Icon=preferences-desktop-display
+Terminal=false
+StartupNotify=true
+Categories=Settings;DesktopSettings;Qt;LXQt;HardwareSettings;
+OnlyShowIn=LXQt;

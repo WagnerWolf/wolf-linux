@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Non-destructive Chrome incident diagnostics; run after a crash.
+set -u
+printf '=== Wolf Chrome diagnostics ===\n'
+date -Is
+printf '\nSession: %s / %s\n' "${XDG_CURRENT_DESKTOP:-unknown}" "${XDG_SESSION_TYPE:-unknown}"
+printf 'Kernel: '; uname -r
+printf 'Chrome version: '; (google-chrome-stable --version || google-chrome --version || true) 2>&1
+printf '\nDisplay / GPU packages:\n'
+pacman -Q google-chrome nvidia-open-dkms nvidia-utils mesa libva 2>/dev/null || true
+printf '\nRecent Chrome crashes (journal, current boot):\n'
+journalctl --user -b --no-pager --since '-24 hours' 2>/dev/null | grep -Ei 'chrome|chromium|zygote|gpu.process|segfault|trap|crash' | tail -80 || true
+printf '\nCoredumps (metadata only):\n'
+coredumpctl --no-pager --since '-24 hours' list 2>/dev/null | grep -Ei 'chrome|chromium|TIME|PID' | tail -35 || true
+printf '\nChrome Crashpad local reports (names only):\n'
+find "${XDG_CONFIG_HOME:-$HOME/.config}/google-chrome/Crash Reports" -maxdepth 3 -type f -printf '%TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null | tail -30 || true
+printf '\nNo settings modified. Review output before sharing; paths/usernames may be present.\n'

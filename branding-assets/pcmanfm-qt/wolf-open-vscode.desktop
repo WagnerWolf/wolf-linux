@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Action
+Name=Abrir pasta no Visual Studio Code
+Icon=visual-studio-code
+Profiles=wolf-vscode;
+
+[X-Action-Profile wolf-vscode]
+Name=Abrir pasta no Visual Studio Code
+MimeTypes=inode/directory;
+SelectionCount==1
+Exec=wolf-open-vscode-monitor %f

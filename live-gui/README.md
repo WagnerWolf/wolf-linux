@@ -1,6 +1,6 @@
 # Wolf Installer — interface Live 2.0
 
-O instalador principal usa Python/PySide6 na sessão Live (Openbox/Xorg). O sistema instalado usa KDE Plasma/Wayland.
+O instalador principal usa Python/PySide6 na sessão Live (Openbox/Xorg). O sistema instalado usa LXQt/Openbox X11.
 
 Fluxo: layout do teclado → escolha explícita do tipo de instalação → configuração e perfil → revisão das partições/operações → duas confirmações por clique → terminal PTY integrado → conclusão.
 

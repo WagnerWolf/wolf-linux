@@ -1,6 +1,6 @@
-# Wolf Package Manager 0.3.4
+# Wolf Package Manager 0.3.7
 
-Protótipo de atualização do **Wolf Linux**, em PySide6, com pacman + yay, verificação periódica e bandeja KDE.
+Gerenciador de pacotes do **Wolf Linux**, em PySide6, com pacman + yay, verificação periódica, bandeja e seção Integrações Wolf no LXQt.
 
 ## Instalação (usuário comum)
 
@@ -70,3 +70,32 @@ As atualizações da barra do pacman feitas via CR são redesenhadas na linha at
 - Ao clicar, abre a página de Atualizações e executa o mesmo fluxo da interface principal, com confirmação gráfica, inspeção de `db.lck`, `pacman -Syu` e somente depois `yay -Sua --aur` (com sudo askpass). Não inicia alterações sem confirmação.
 - Durante operações ou verificações a ação fica indisponível. Uma nova consulta depois de instalar ou atualizar renova o número exibido.
 - A indicação reflete a última verificação bem-sucedida; podem surgir novas atualizações depois dela.
+
+
+## Verificação pós-atualização (0.3.5)
+
+Depois de uma etapa `pacman -Syu`, o programa executa em segundo plano uma **conferência somente leitura** antes de passar ao `yay`. Também confere novamente depois da etapa AUR na atualização completa. O botão **Verificar boot/DKMS**, na página Terminal, permite executar a mesma conferência manualmente após atualizações feitas por outro programa.
+
+A rotina identifica kernels instalados, compara os artefatos em `/usr/lib/modules` e `/boot`, lê os destinos literais nos presets de `mkinitcpio`, consulta `dkms status` para os módulos NVIDIA em cada kernel e verifica a consistência do banco com `pacman -Dk`.
+
+- Se faltar kernel, initramfs/preset ou NVIDIA DKMS, mostra um alerta e **não considera o plano seguro para continuar ao AUR**. Não executa reparos nem remove/atualiza pacotes por conta própria.
+- Falhas não críticas de leitura e verificações não aplicáveis são descritas como **ressalvas**, não como garantia de estabilidade.
+- A verificação funciona em *thread* Qt para não bloquear a interface; mostra detalhes no terminal e registra no log da operação.
+- A checagem de `mkinitcpio` cobre presets padrão (`default_image` ou `default_uki` com caminho literal). Boot por dracut, rEFInd, UKI ou layouts personalizados podem exigir verificação manual. O diagnóstico é uma camada de proteção, não substitui testes de inicialização.
+- O código de retorno de `pacman` continua determinando o sucesso da transação. Um retorno 0 **não prova** que todos os hooks geraram artefatos válidos; por isso verificamos os arquivos após a transação.
+
+O instalador do Wolf Linux DevKit 2.1.3 **não foi alterado** nesta atualização independente do Package Manager.
+
+## Nome correto nas notificações do KDE (0.3.5 Preview 2)
+
+- A aplicação registra explicitamente o nome e o nome de exibição **Wolf Package Manager** no Qt, em vez de herdar `main.py`.
+- A propriedade Qt `desktopFileName` aponta para `wolf-package-manager.desktop`, criada por `install-local.sh`, e o ícone global é associado ao aplicativo.
+- As mudanças não alteram consultas, instalações, atualizações, Pacman, yay ou a verificação boot/DKMS.
+- Para testar no KDE/Wayland, encerre a instância antiga pelo menu da bandeja antes de executar a nova prévia. Uma instância já aberta não é substituída pelo novo comando, por causa do bloqueio de instância única.
+- O resultado visual de uma notificação deve ser conferido no Plasma real; a prévia apenas passou pelos testes de código.
+
+
+**Wolf Package Manager 0.3.6:** inclui Integrações Wolf somente leitura; nenhuma biblioteca é recompilada automaticamente.
+
+### Proteção de integrações (0.3.7 — validada em VM)
+A `libfm-qt` Wolf é preservada com `IgnorePkg`, após a sua instalação validada. O gerente bloqueia atualização se essa proteção estiver ausente e oferece plano supervisionado em **Integrações Wolf**. Atualizar os demais pacotes não prova que novos pacotes sejam compatíveis com a ABI antiga; nunca forçar dependências. A verificação via `pacman-conf` e a auditoria permanecem somente leitura.

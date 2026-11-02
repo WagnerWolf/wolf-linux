@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Gerenciador XSETTINGS da sessão Wolf LXQt/X11.
+# O caminho explícito evita que ~/.xsettingsd desatualizado tenha precedência.
+set -Eeuo pipefail
+[[ -n "${DISPLAY:-}" ]] || { echo '[WOLF] Sem DISPLAY X11; xsettingsd não iniciado.' >&2; exit 1; }
+config="${XDG_CONFIG_HOME:-$HOME/.config}/xsettingsd/xsettingsd.conf"
+[[ -f "$config" ]] || { echo "[WOLF] Configuração GTK ausente: $config" >&2; exit 1; }
+exec xsettingsd -c "$config"

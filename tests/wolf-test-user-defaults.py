@@ -33,10 +33,11 @@ def main() -> None:
         (root / "usr/bin").mkdir(parents=True)
         (home / ".config" / "kwinrc").write_text("[Windows]\nMyOwnValue=yes\n", encoding="utf-8")
         configure(root, "wolf", PROJECT / "assets", True, True, True)
-        check_expected(home, ".config/kwinrc", ["MultiScreenMode=1", "Placement=UnderMouse", "ActiveMouseScreen=true", "MyOwnValue=yes"])
-        check_expected(home, ".config/kcminputrc", ["[Libinput][Defaults]", "PointerAccelerationProfile=1"])
+        check_expected(home, ".config/kwinrc", ["MyOwnValue=yes"])
+        assert "MultiScreenMode" not in (home / ".config/kwinrc").read_text(), "KWin não deve ser configurado no LXQt"
+        assert not (home / ".config/kcminputrc").exists(), "Não gerar preferências KDE de mouse no LXQt"
         check_expected(home, ".config/mimeapps.list", [
-            "inode/directory=org.kde.dolphin.desktop;",
+            "inode/directory=pcmanfm-qt.desktop;",
             "video/mp4=io.github.mpc_qt.mpc-qt.desktop;",
             "audio/mpeg=audacious.desktop;",
             "text/plain=org.kde.kate.desktop;",
@@ -51,10 +52,9 @@ def main() -> None:
             "io.github.mpc_qt.mpc-qt.desktop;",
         ])
         check_expected(home, ".local/share/konsole/Wolf Linux.profile", ["MesloLGS Nerd Font", "HistorySize=10000", "TerminalColumns=120", "TerminalRows=30"])
-        check_expected(home, ".config/autostart/wolf-first-login-plasma.desktop", [
-            "Exec=/usr/local/bin/wolf-first-login-plasma", "OnlyShowIn=KDE;",
-        ])
-        check_expected(home, ".local/share/kio/servicemenus/wolf-open-vscode.desktop", ["MimeType=inode/directory", "Exec=code -- %f"])
+        assert not (home / ".config/autostart/wolf-first-login-plasma.desktop").exists(), "Autostart Plasma inesperado no LXQt"
+        check_expected(home, ".local/share/file-manager/actions/wolf-open-vscode.desktop", ["MimeTypes=inode/directory", "Exec=wolf-open-vscode-monitor %f"])
+        check_expected(home, ".vscode/argv.json", ['"password-store": "gnome-libsecret"'])
         check_expected(home, ".zshrc", ["powerlevel10k.zsh-theme", "oh-my-zsh.sh"])
         assert not (home / ".config/autostart/octopi-notifier.desktop").exists(), "Octopi não deve ser configurado"
         check_expected(home, ".zshrc", ["zsh-autosuggestions.zsh", "ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE"])
@@ -64,14 +64,15 @@ def main() -> None:
         before = (home / ".config/kwinrc").read_text(encoding="utf-8")
         configure(root, "wolf", PROJECT / "assets", True, True, True)
         after = (home / ".config/kwinrc").read_text(encoding="utf-8")
-        assert before == after and after.count("MultiScreenMode=1") == 1, "KWin não é idempotente"
+        assert before == after, "O perfil LXQt não deve modificar configurações KWin antigas"
     print("[OK] Perfil Full: preferências, MIME, Zsh/Konsole, VSCode e idempotência")
     with TemporaryDirectory() as tmp:
         root = Path(tmp)
         home = fake_root(root)
         configure(root, "wolf", PROJECT / "assets", False, False)
         assert not (home / ".zshrc").exists(), "Minimal instalou Zsh"
-        assert not (home / ".local/share/kio/servicemenus/wolf-open-vscode.desktop").exists(), "Minimal instalou VSCode"
+        assert not (home / ".local/share/file-manager/actions/wolf-open-vscode.desktop").exists(), "Minimal instalou VSCode"
+        assert not (home / ".vscode/argv.json").exists(), "Minimal criou configurações VS Code"
         assert "video/mp4" not in (home / ".config/mimeapps.list").read_text(encoding="utf-8"), "Minimal configurou MPC-QT"
         check_expected(home, ".config/mimeapps.list", [
             "image/png=org.kde.gwenview.desktop;",

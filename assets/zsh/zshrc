@@ -65,8 +65,15 @@ plugins=(
 
 [[ -r "$ZSH/oh-my-zsh.sh" ]] && source "$ZSH/oh-my-zsh.sh"
 
-# Tema Powerlevel10k empacotado pelo Arch/Chaotic-AUR.
-source "/usr/share/zsh-theme-powerlevel10k/powerlevel10k.zsh-theme"
+# Powerlevel10k é opcional; Chaotic/AUR pode estar indisponível na instalação.
+if [[ -r /usr/share/zsh-theme-powerlevel10k/powerlevel10k.zsh-theme ]]; then
+    source /usr/share/zsh-theme-powerlevel10k/powerlevel10k.zsh-theme
+    [[ -f ~/.p10k.zsh ]] && source ~/.p10k.zsh
+else
+    # Prompt legível no Konsole, sem depender de pacotes externos.
+    PROMPT='%F{white}%n@%m%f:%F{cyan}%~%f %# '
+    RPROMPT=''
+fi
 
 # Plugins distribuídos como pacotes do Arch.
 ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE="fg=250"
@@ -86,7 +93,7 @@ export ANDROID_SDK_ROOT=/opt/android-sdk
 export CHROME_EXECUTABLE=/usr/bin/google-chrome-stable
 export PATH="/opt/flutter/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/cmdline-tools/latest/bin:$PATH"
 
-[[ -f ~/.p10k.zsh ]] && source ~/.p10k.zsh
+# Configuração .p10k.zsh carregada somente quando o tema estiver disponível.
 
 
 # Wolf Linux: cor validada em Konsole escuro (prevalece sobre temas/plugins).

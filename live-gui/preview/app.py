@@ -119,7 +119,7 @@ def make_combo() -> QComboBox:
 # São os mesmos atalhos utilizados na sessão Live quando disponíveis.
 UTILITIES = (
     ('terminal', 'Terminal', (('qterminal',), ('konsole',), ('xfce4-terminal',))),
-    ('files', 'Arquivos e dispositivos', (('pcmanfm-qt',), ('dolphin',), ('thunar',))),
+    ('files', 'Arquivos e dispositivos', (('pcmanfm-qt',), ('thunar',))),
     ('browser', 'Chromium', (('wolf-live-browser',), ('chromium',))),
     ('bluetooth', 'Bluetooth', (('blueman-manager',),)),
     ('rescue', 'Wolf Rescue', (('wolf-live-rescue',),)),
@@ -357,7 +357,7 @@ class MainWindow(QMainWindow):
         nav.addWidget(text_label('Escolha quais programas instalar. A revisão ficará bloqueada até selecionar um perfil.', name='info'))
         self.preset_combo = make_combo()
         self.preset_combo.addItem('Escolha Minimal, Basic, Test ou Full...', None)
-        self.preset_combo.addItem('Minimal — KDE essencial', 'minimal')
+        self.preset_combo.addItem('Minimal — LXQt essencial', 'minimal')
         self.preset_combo.addItem('Basic — escritório, navegador e multimídia', 'basic')
         self.preset_combo.addItem('Test — apps principais', 'test')
         self.preset_combo.addItem('Full — todas as stacks', 'full')
@@ -1045,7 +1045,7 @@ class MainWindow(QMainWindow):
         elif self.mode == 'reuse':
             root = self.inventory.get(self.reuse_root.currentData() or '')
             root_gib = root.size / (1024 ** 3) if root else None
-        parts = ('Base KDE 25–35 GiB · Daily +8–15 · Gaming +10–25 · '
+        parts = ('Base LXQt 25–35 GiB · Daily +8–15 · Gaming +10–25 · '
                  'Development +5–12 · Android/Flutter +20–40 · Containers +3–10 · Extras +2–8 GiB')
         headline = f'{preset.title()}: estimativa de {low}–{high} GiB em / (valores indicativos, não limites garantidos).'
         if root_gib is not None:

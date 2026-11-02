@@ -51,7 +51,7 @@ refuses(lambda: wp.vm_execution_fields(doc,disks=[dict(disk,partitions=[dict(par
 
 # Executar APENAS a decisão de estágios em shell isolado, simulando a função stage.
 source=(ROOT/'install/wolf-install.sh').read_text()
-a=source.index('    stage "63-chaotic-aur" configure_chaotic_aur',source.index('# Todos os perfis tentam Chaotic-AUR/CachyOS'))
+a=source.index('    stage "63-chaotic-aur" configure_chaotic_aur',source.index('# Chaotic-AUR é OPCIONAL para pacotes terceiros.'))
 b=source.index('    stage "67-servicos"',a)
 branch=source[a:b]
 for stacklist, expect in [('',2),('SELECTED_STACKS[daily]=1',4)]:

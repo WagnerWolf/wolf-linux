@@ -1,3 +1,32 @@
+## 0.3.7 (2/11/2026)
+- Auditoria da libfm-qt Wolf antes de qualquer transação (inclusive instalação).
+- Proteção em pacman.conf via IgnorePkg, instalada após a biblioteca Wolf, com backup e reversão.
+- Mensagem preventiva para novas versões, com opção de atualizar os demais pacotes.
+- Assistente de planejamento (não compila, não autoriza novas bibliotecas automaticamente).
+- Hook pós-atualização continua somente registrando alterações; atualizações de ABI exigem revisão.
+
+## 0.3.6 — Integrações Wolf (auditável, não destrutivo)
+
+- Aba Integrações Wolf; detecção conservadora de libfm-qt Wolf e utilitário USB --device.
+- Hook ALPM apenas avisa sobre revisões; atualização do pacote permanece sob controle do usuário.
+- Controle de kernels/NVIDIA preservado de 0.3.5.
+
+# Wolf Package Manager 0.3.5 (Preview 2 — identidade das notificações, 27/10/2026)
+
+- Corrige o cabeçalho `main.py` nas notificações KDE/Plasma do monitor de atualizações.
+- Define applicationName e applicationDisplayName do Qt como `Wolf Package Manager` e desktopFileName como `wolf-package-manager`.
+- Define ícone padrão do QApplication e alinha o __version__ do módulo à versão do aplicativo.
+- Sem mudanças na instalação/atualização de pacotes ou nas verificações pós-atualização.
+
+# Wolf Package Manager 0.3.5 (prévia para validação)
+
+- Adicionada verificação pós-atualização somente leitura após `pacman -Syu`, antes de iniciar AUR, e novamente após etapa AUR.
+- Verifica vmlinuz, initramfs/preset de mkinitcpio, módulos NVIDIA DKMS para cada kernel e `pacman -Dk`.
+- Alerta e interrompe o plano de atualização ao detectar inconsistência crítica, sem executar reparos automaticamente.
+- Botão manual «Verificar boot/DKMS»; execução em thread para não bloquear o KDE.
+- Preservados o atalho na bandeja, os controles de confirmação, os logs e o fluxo de atualização da 0.3.4.
+- Testes simulando a falha real: kernel instalado, mas ausente em /boot, initramfs faltando e NVIDIA DKMS ausente.
+
 # Wolf Package Manager 0.3.4 (23/10/2026)
 
 - Ação «Atualizar sistema (N)» no menu de contexto da bandeja, habilitada exclusivamente após consulta completa com atualizações.

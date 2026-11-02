@@ -1,0 +1,295 @@
+#!/usr/bin/env python3
+"""Wolf Linux: formatador de partições USB com GUI e UDisks2.
+
+--browse lista partições USB (inclusive sem montagem).
+--device /dev/sdX1 abre a partição selecionada no menu de dispositivos do PCManFM-Qt.
+--format /run/media/USER/LABEL permanece disponível por compatibilidade CLI, não no menu das pastas.
+--check PASTA apenas valida sem alterar nada.
+
+Jamais formata discos inteiros, dispositivos internos ou partições de sistema.
+A operação real exige duas confirmações e autorização do serviço UDisks2.
+"""
+from __future__ import annotations
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import stat
+import subprocess
+import sys
+
+class UnsafeTarget(ValueError):
+    pass
+
+
+def _query(argv):
+    try:
+        result = subprocess.run(argv, check=True, text=True, capture_output=True, timeout=12)
+        return json.loads(result.stdout)
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+        raise UnsafeTarget(f'Falha ao consultar discos: {exc}') from exc
+
+
+def _under_media(path):
+    path = Path(path)
+    return (path.is_absolute() and '..' not in path.parts and
+            any(path.is_relative_to(root) and len(path.parts) >= len(root.parts)+2
+                for root in (Path('/run/media'), Path('/media'))))
+
+
+def _walk(node):
+    yield node
+    for child in node.get('children') or []:
+        yield from _walk(child)
+
+
+def _node_name(n):
+    return os.path.realpath(n.get('path') or n.get('name') or '')
+
+
+def _mountpoints(node):
+    return [p for p in (node.get('mountpoints') or []) if p]
+
+
+def _eligible_partitions(blocks):
+    """Só partições de discos USB; recusa montagens fora de /run/media e /media."""
+    for disk in blocks:
+        if disk.get('type') != 'disk':
+            continue
+        if str(disk.get('tran') or '').lower() != 'usb':
+            continue
+        if any(not isinstance(m, str) or not _under_media(m)
+               for node in _walk(disk) for m in _mountpoints(node)):
+            continue
+        for part in disk.get('children') or []:
+            if part.get('type') != 'part' or part.get('children'):
+                continue
+            path = _node_name(part)
+            if not re.fullmatch(r'/dev/[a-zA-Z0-9_+.-]+', path) or path == '/dev/':
+                continue
+            yield {
+                'device': path,
+                'size': str(part.get('size') or '?'),
+                'label': str(part.get('label') or ''),
+                'uuid': str(part.get('uuid') or ''),
+                'majmin': str(part.get('maj:min') or ''),
+                'mountpoints': _mountpoints(part),
+                'model': str(disk.get('model') or '').strip(),
+            }
+
+
+def _lsblk():
+    return (_query(['lsblk','--json','--paths','-o',
+                    'NAME,PATH,TYPE,TRAN,RM,SIZE,LABEL,UUID,MAJ:MIN,MODEL,MOUNTPOINTS'])
+            .get('blockdevices') or [])
+
+
+def _find_candidate(path):
+    target = os.path.realpath(path)
+    for entry in _eligible_partitions(_lsblk()):
+        if entry['device'] == target:
+            try:
+                if not stat.S_ISBLK(os.stat(target).st_mode):
+                    raise UnsafeTarget('Alvo não é um dispositivo de bloco.')
+            except OSError as exc:
+                raise UnsafeTarget(f'Dispositivo indisponível: {exc}') from exc
+            return entry
+    raise UnsafeTarget('Esta unidade não é uma partição USB elegível ou está em uso pelo sistema.')
+
+
+def _validate_lsblk(blocks, selected):
+    target = os.path.realpath(selected)
+    for entry in _eligible_partitions(blocks):
+        if entry['device'] == target:
+            return target
+    raise UnsafeTarget('Partição interna, em uso ou não reconhecida como USB.')
+
+
+def resolve_device(folder):
+    try:
+        path = Path(folder).resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise UnsafeTarget('Pasta não encontrada.') from exc
+    if not path.is_dir() or not _under_media(path):
+        raise UnsafeTarget('Selecione a raiz da mídia montada em /run/media ou /media.')
+    mounts = _query(['findmnt','--json','--target',str(path),'-o','SOURCE,TARGET'])
+    fs = mounts.get('filesystems') or []
+    if len(fs) != 1:
+        raise UnsafeTarget('Montagem ambígua.')
+    source = (fs[0].get('source') or '').split('[',1)[0]
+    if os.path.realpath(fs[0].get('target') or '') != str(path):
+        raise UnsafeTarget('Selecione a raiz da unidade USB, não uma subpasta.')
+    if not source.startswith('/dev/'):
+        raise UnsafeTarget('Não é uma partição de bloco.')
+    return _find_candidate(source)['device']
+
+
+def _object_path(device):
+    """Codificação de nome de bloco UDisks2; não usa caminho arbitrário de D-Bus."""
+    if not device.startswith('/dev/'):
+        raise UnsafeTarget('Caminho de dispositivo inválido.')
+    basename = device[5:]
+    if '/' in basename or not basename:
+        raise UnsafeTarget('Nome de dispositivo inválido.')
+    escaped = ''.join(ch if ch.isascii() and ch.isalnum() else f'_{ord(ch):02x}'
+                      for ch in basename)
+    return '/org/freedesktop/UDisks2/block_devices/' + escaped
+
+
+def _check_label(label, fstype):
+    # Limites conservadores para portabilidade Windows/Unix.
+    if not label or any(ord(c)<32 or c in '/\\' for c in label):
+        raise UnsafeTarget('Informe um rótulo sem barras ou caracteres de controle.')
+    limits = {'vfat':11, 'exfat':15, 'ext4':16, 'ntfs':32}
+    if fstype == 'ntfs' and any(ch in ':*?"<>|' for ch in label):
+        raise UnsafeTarget('O rótulo NTFS contém caracteres proibidos pelo Windows.')
+    if fstype not in limits or (len(label.encode('utf-16-le')) // 2 if fstype == 'ntfs' else len(label)) > limits[fstype]:
+        raise UnsafeTarget('Rótulo muito longo para o sistema de arquivos escolhido.')
+
+
+def format_partition(selected, fstype, label, *, run=subprocess.run):
+    """Executa somente após confirmação externa explícita pela interface."""
+    _check_label(label, fstype)
+    current = _find_candidate(selected['device'])
+    if ((selected.get('majmin') and selected['majmin'] != current['majmin']) or
+            (selected.get('uuid') and selected['uuid'] != current['uuid'])):
+        raise UnsafeTarget('A identidade da unidade mudou. Reabra o formatador.')
+    missing = {'vfat':'mkfs.vfat', 'exfat':'mkfs.exfat', 'ext4':'mkfs.ext4', 'ntfs':'mkfs.ntfs'}[fstype]
+    if not shutil.which(missing):
+        raise UnsafeTarget(f'Instale o utilitário {missing} para este formato.')
+    if not shutil.which('busctl') or not shutil.which('udisksctl'):
+        raise UnsafeTarget('UDisks2/busctl ausente no sistema.')
+    if current['mountpoints']:
+        # Não usar umount/mkfs diretos; UDisks2 controla autorização e desmontagem.
+        result = run(['udisksctl','unmount','-b',current['device']],
+                     capture_output=True, text=True, timeout=90)
+        if result.returncode:
+            raise UnsafeTarget('Não foi possível desmontar a unidade: '+(result.stderr or result.stdout).strip())
+    current = _find_candidate(selected['device'])
+    if current['mountpoints']:
+        raise UnsafeTarget('A unidade continua montada; não será formatada.')
+    cmd = ['busctl','--system','call','org.freedesktop.UDisks2',
+           _object_path(current['device']), 'org.freedesktop.UDisks2.Block',
+           'Format','sa{sv}',fstype,'1','label','s',label]
+    result = run(cmd, capture_output=True, text=True, timeout=300)
+    if result.returncode:
+        raise UnsafeTarget('UDisks2 recusou a formatação: '+(result.stderr or result.stdout).strip())
+    return True
+
+
+def gui(initial=None):
+    from PySide6.QtWidgets import (QApplication, QDialog, QVBoxLayout, QLabel,
+        QComboBox, QLineEdit, QPushButton, QMessageBox, QInputDialog)
+    app = QApplication.instance() or QApplication([])
+    dialog = QDialog()
+    dialog.setWindowTitle('Wolf Linux — Formatar unidade USB')
+    dialog.resize(490,235)
+    layout = QVBoxLayout(dialog)
+    layout.addWidget(QLabel('Selecione a partição USB que deseja formatar. Todos os arquivos nela serão perdidos.'))
+    choices = list(_eligible_partitions(_lsblk()))
+    if not choices:
+        QMessageBox.information(dialog, 'Wolf Linux', 'Nenhuma partição USB segura encontrada.')
+        return 1
+    selector = QComboBox()
+    for item in choices:
+        selector.addItem(f"{item['device']} — {item['size']} — {item['label'] or item['model'] or 'USB'}", item)
+    layout.addWidget(selector)
+    if initial:
+        indices = [i for i, item in enumerate(choices) if item['device'] == initial]
+        if not indices:
+            raise UnsafeTarget('A partição selecionada já não está disponível.')
+        selector.setCurrentIndex(indices[0]); selector.setEnabled(False)
+    layout.addWidget(QLabel('Sistema de arquivos:'))
+    formats = QComboBox()
+    for label, fmt in [('exFAT (Windows / Linux, arquivos grandes)', 'exfat'),
+                       ('NTFS (Windows / arquivos grandes)', 'ntfs'),
+                       ('FAT32 (compatibilidade ampla)', 'vfat'),
+                       ('ext4 (Linux)', 'ext4')]:
+        formats.addItem(label, fmt)
+    layout.addWidget(formats)
+    layout.addWidget(QLabel('Nome da unidade (rótulo):'))
+    name = QLineEdit('WOLF_USB')
+    name.setMaxLength(32)
+    formats.currentIndexChanged.connect(lambda _idx: name.setMaxLength(
+        {'vfat':11, 'exfat':15, 'ntfs':32, 'ext4':16}[formats.currentData()]))
+    layout.addWidget(name)
+    apply_btn = QPushButton('Formatar esta partição USB…')
+    layout.addWidget(apply_btn)
+
+    def perform():
+        selected=selector.currentData()
+        fstype=formats.currentData()
+        label=name.text().strip()
+        try:
+            _check_label(label, fstype)
+            current=_find_candidate(selected['device'])
+            if current['device'] != selected['device']:
+                raise UnsafeTarget('Unidade alterada.')
+        except UnsafeTarget as exc:
+            QMessageBox.warning(dialog, 'Formatação não permitida', str(exc)); return
+        msg=(f"Dispositivo: {current['device']} ({current['size']})\n"
+             f"Sistema: {formats.currentText()}\n\n"
+             'ATENÇÃO: todos os dados da partição selecionada serão apagados.\n'
+             'Esta ação não poderá ser desfeita.')
+        if QMessageBox.question(dialog, 'Confirmação de formatação', msg,
+                                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                 QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+            return
+        typed, ok = QInputDialog.getText(dialog, 'Confirmação final',
+                     f"Digite FORMATAR para autorizar {current['device']}:")
+        if not ok or typed != 'FORMATAR':
+            return
+        apply_btn.setEnabled(False)
+        app.processEvents()
+        try:
+            format_partition(selected, fstype, label)
+            QMessageBox.information(dialog, 'Wolf Linux', 'Formatação concluída pelo UDisks2.')
+            dialog.accept()
+        except (UnsafeTarget, OSError, subprocess.TimeoutExpired) as exc:
+            QMessageBox.critical(dialog, 'Falha de formatação', str(exc))
+        finally:
+            apply_btn.setEnabled(True)
+    apply_btn.clicked.connect(perform)
+    return dialog.exec()
+
+
+def _show_error(msg):
+    try:
+        from PySide6.QtWidgets import QApplication, QMessageBox
+        app = QApplication.instance() or QApplication([])
+        QMessageBox.critical(None, 'Wolf Linux — mídia USB', msg)
+    except Exception:
+        print('[ERRO] ' + msg, file=sys.stderr)
+
+
+def main(argv=None):
+    p=argparse.ArgumentParser(description=__doc__)
+    group=p.add_mutually_exclusive_group(required=True)
+    group.add_argument('--check', action='store_true')
+    group.add_argument('--format', action='store_true')
+    group.add_argument('--browse', action='store_true')
+    group.add_argument('--device', metavar='DEV', help='Partição recebida do menu de dispositivos, validada por lsblk')
+    p.add_argument('folder', nargs='?')
+    args=p.parse_args(argv)
+    try:
+        if args.browse:
+            return gui()
+        if args.device:
+            # Dispositivo passado pelo menu: rejeita partições que não sejam USB.
+            candidate = _find_candidate(args.device)
+            return gui(initial=candidate['device'])
+        if not args.folder:
+            p.error('Informe o ponto de montagem selecionado.')
+        dev=resolve_device(args.folder)
+        if args.check:
+            print(dev); return 0
+        return gui(initial=dev)
+    except (UnsafeTarget, OSError) as exc:
+        if args.check: print('[RECUSADO] '+str(exc), file=sys.stderr)
+        else: _show_error(str(exc))
+        return 1
+
+if __name__ == '__main__':
+    sys.exit(main())

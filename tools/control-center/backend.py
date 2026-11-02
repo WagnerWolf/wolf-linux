@@ -7,7 +7,7 @@ import os
 import shutil
 import subprocess
 
-VERSION = "0.2.0"
+VERSION = "0.3.0-preview4"
 HELPERS_DIR = Path("/usr/local/lib/wolf-linux/helpers")
 HELPER_NAMES = {
     "monitor": "experimental/wolf-plasma-multimonitor-0.3.sh",
@@ -21,14 +21,13 @@ SYSTEM_AUTOSTART_DIR = Path("/etc/xdg/autostart")
 AUTOSTART_TEXT = """[Desktop Entry]
 Type=Application
 Name=Wolf Package Manager (Monitor)
-Comment=Monitor de atualizações no tray do KDE
+Comment=Monitor de atualizações na bandeja do desktop
 Exec=/usr/local/bin/wolf-package-manager --tray
 TryExec=/usr/local/bin/wolf-package-manager
 Icon=wolf-package-manager
 Terminal=false
-OnlyShowIn=KDE;
+OnlyShowIn=KDE;LXQt;
 Hidden=false
-X-KDE-autostart-phase=2
 X-Wolf-Control-Center=true
 """
 
@@ -146,6 +145,16 @@ def autosuggestions_runtime_status() -> str:
         return "Não foi possível testar uma nova sessão Zsh"
 
 
+def desktop_kind(env: dict[str, str] | None = None) -> str:
+    values = env if env is not None else os.environ
+    desktops = values.get("XDG_CURRENT_DESKTOP", "").upper().split(":")
+    if "LXQT" in desktops:
+        return "lxqt-x11" if values.get("XDG_SESSION_TYPE", "").lower() == "x11" else "lxqt-other"
+    if "KDE" in desktops or "PLASMA" in desktops:
+        return "plasma"
+    return "other"
+
+
 def status_text() -> str:
     lines = ["Wolf Control Center", f"Versão: {VERSION}",
              f"Sessão: {os.environ.get('XDG_SESSION_TYPE', '?')} | Desktop: {os.environ.get('XDG_CURRENT_DESKTOP', '?')}"]
@@ -155,8 +164,17 @@ def status_text() -> str:
     lines.append("Pacotes: " + notifier_status())
     lines.append("Zsh: " + autosuggestions_status())
     lines.append("Zsh runtime: " + autosuggestions_runtime_status())
-    marker = Path.home() / ".local/state/wolf-linux/first-login-plasma/completed"
-    lines.append("Configuração inicial do Plasma: " + ("concluída" if marker.is_file() else "não marcada como concluída"))
+    current = desktop_kind()
+    lines.append("Integração: " + {"lxqt-x11": "LXQt / Openbox (X11)", "lxqt-other": "LXQt (não X11)", "plasma": "Plasma", "other": "sessão não reconhecida"}[current])
+    if current.startswith("lxqt"):
+        try:
+            from lxqt_support import diagnostic_text
+            lines.append(diagnostic_text())
+        except (OSError, ImportError) as exc:
+            lines.append(f"Diagnóstico LXQt indisponível: {exc}")
+    elif current == "plasma":
+        marker = Path.home() / ".local/state/wolf-linux/first-login-plasma/completed"
+        lines.append("Configuração inicial do Plasma: " + ("concluída" if marker.is_file() else "não marcada como concluída"))
     return "\n".join(lines)
 
 

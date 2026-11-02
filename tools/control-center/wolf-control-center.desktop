@@ -2,7 +2,7 @@
 Type=Application
 Name=Wolf Control Center
 GenericName=Configurações Wolf Linux
-Comment=Configure painéis, gamepads, GRUB e inicialização de aplicativos
+Comment=Configure LXQt, painéis, gamepads, GRUB e aplicativos
 Exec=wolf-control-center
 Icon=wolf-linux-kickoff
 Categories=Settings;System;

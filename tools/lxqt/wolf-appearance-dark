@@ -1,0 +1,235 @@
+#!/usr/bin/env python3
+"""Reaplica Wolf-dark + estilo Fusion no Qt e Breeze-Dark em GTK."""
+from __future__ import annotations
+import argparse
+import configparser
+from datetime import datetime
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import runpy
+import signal
+import time
+import os
+
+HOME = Path.home()
+FILES = (HOME/'.config/lxqt/lxqt.conf', HOME/'.config/gtk-3.0/settings.ini',
+         HOME/'.config/gtk-4.0/settings.ini', HOME/'.config/xsettingsd/xsettingsd.conf')
+
+
+def _modify(file, section, pairs, backup):
+    if file.is_symlink():
+        raise RuntimeError(f'Arquivo é link simbólico: {file}')
+    cp=configparser.RawConfigParser(interpolation=None)
+    cp.optionxform=str
+    if file.is_file():
+        cp.read(file,encoding='utf-8')
+        copy=backup/file.relative_to(HOME)
+        copy.parent.mkdir(parents=True,exist_ok=True)
+        if not copy.exists():
+            shutil.copy2(file,copy)
+    if not cp.has_section(section): cp.add_section(section)
+    for k,v in pairs.items(): cp.set(section,k,v)
+    file.parent.mkdir(parents=True,exist_ok=True)
+    tmp=file.with_name(file.name+'.wolf-temp')
+    with tmp.open('w',encoding='utf-8') as out: cp.write(out,space_around_delimiters=False)
+    tmp.replace(file)
+
+
+def _owned_xsettings():
+    """Processos xsettingsd do usuário; nunca interferir com outro usuário."""
+    found=[]
+    proc=Path('/proc')
+    if not proc.is_dir():
+        return found
+    for entry in proc.iterdir():
+        if not entry.name.isdecimal():
+            continue
+        try:
+            if entry.stat().st_uid != os.getuid():
+                continue
+            raw=(entry/'cmdline').read_bytes().split(b'\0')
+            argv=[x.decode('utf-8','replace') for x in raw if x]
+            if argv and Path(argv[0]).name == 'xsettingsd':
+                found.append((int(entry.name),argv))
+        except (OSError,PermissionError):
+            pass
+    return found
+
+
+def _xsettings_snapshot():
+    command=shutil.which('dump_xsettings')
+    if not command or not os.environ.get('DISPLAY'):
+        return None
+    try:
+        result=subprocess.run([command],capture_output=True,text=True,timeout=3)
+        if result.returncode == 0:
+            return result.stdout
+    except (OSError,subprocess.TimeoutExpired):
+        pass
+    return None
+
+
+def _refresh_xsettings(config):
+    """Recarrega o daemon Wolf em execução ou inicia um, sem tomar outro XSETTINGS."""
+    if not os.environ.get('DISPLAY'):
+        print('[AVISO] Sem DISPLAY X11: tema salvo, serviço será iniciado no próximo login.')
+        return
+    running=_owned_xsettings()
+    ours=[]
+    others=[]
+    for pid,argv in running:
+        # Só controla o daemon que aponta EXPLICITAMENTE para a configuração Wolf.
+        if str(config) in argv or '--config='+str(config) in argv:
+            ours.append(pid)
+        else:
+            others.append((pid,argv))
+    if others:
+        print('[AVISO] Outro xsettingsd está ativo; não será interrompido: '+
+              '; '.join(str(pid)+' '+ ' '.join(argv) for pid,argv in others))
+        print('[AÇÃO] Feche Configurações de aparência LXQt, encerre a sessão e entre novamente.')
+        return
+    if ours:
+        for pid in ours:
+            try: os.kill(pid,signal.SIGHUP)
+            except (OSError,ProcessLookupError) as exc:
+                print(f'[AVISO] Falha ao recarregar xsettingsd {pid}: {exc}')
+    else:
+        helper=Path('/usr/local/bin/wolf-gtk-xsettings')
+        command=[str(helper)] if helper.is_file() else [shutil.which('xsettingsd') or '', '-c', str(config)]
+        if not command[0] or not shutil.which('xsettingsd'):
+            print('[AVISO] xsettingsd ausente; instale-o para tema GTK/X11.')
+            return
+        try:
+            process=subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL,start_new_session=True)
+            time.sleep(0.25)
+            if process.poll() is not None:
+                print('[AVISO] xsettingsd encerrou ao iniciar (talvez outro gerenciador XSETTINGS esteja ativo).')
+                return
+            print(f'[OK] xsettingsd iniciado para a sessão (PID {process.pid}).')
+        except OSError as exc:
+            print('[AVISO] Não foi possível iniciar xsettingsd: '+str(exc))
+            return
+    snapshot=_xsettings_snapshot()
+    if snapshot is not None:
+        lines=[x.strip() for x in snapshot.splitlines() if x.lstrip().startswith('Net/ThemeName')]
+        if any('Breeze-Dark' in line for line in lines):
+            print('[OK] XSETTINGS publicou Breeze-Dark.')
+        else:
+            print('[AVISO] XSETTINGS não publicou Breeze-Dark; valor: '+str(lines))
+    else:
+        print('[INFO] dump_xsettings indisponível; verifique o tema abrindo um aplicativo GTK novo.')
+
+
+def apply():
+    gtk_theme=Path('/usr/share/themes/Breeze-Dark/gtk-3.0/gtk.css')
+    if not gtk_theme.is_file():
+        raise RuntimeError('Breeze-Dark GTK ausente. Execute: sudo pacman -Syu --needed breeze-gtk')
+    theme=HOME/'.local/share/lxqt/themes/wolf-dark/lxqt-panel.qss'
+    source = Path('/usr/local/lib/wolf-linux/lxqt/configurar.py')
+    if not source.is_file():
+        raise RuntimeError('Fonte de tema Wolf-dark ausente: '+str(source))
+    # Constantes originais do perfil Wolf; não executar o configurador nem
+    # reconfigurar os demais itens do desktop.
+    colors = runpy.run_path(str(source))
+    stylesheet = { 'lxqt-panel.qss':colors['THEME_QSS'],
+                   'lxqt-runner.qss':colors['RUNNER_QSS'],
+                   'lxqt-notificationd.qss':colors['NOTIFICATION_QSS'] }
+    menu_icon = source.with_name('wolf-lxqt-menu.svg')
+    if menu_icon.is_file():
+        stylesheet['mainmenu.svg'] = menu_icon.read_text(encoding='utf-8')
+    backup=HOME/'wolf-backups/lxqt-theme'/datetime.now().strftime('%Y%m%d-%H%M%S-%f')
+    backup.mkdir(parents=True,exist_ok=False)
+    # Recriar CSS original (corrige temas perdidos/modificados pelo gerenciador).
+    theme.parent.mkdir(parents=True, exist_ok=True)
+    for name, content in stylesheet.items():
+        target = theme.parent/name
+        if target.is_symlink():
+            raise RuntimeError('Tema é link simbólico: '+str(target))
+        if target.is_file():
+            old = backup/'theme'/name
+            old.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copy2(target,old)
+        target.write_text(content, encoding='utf-8')
+    _modify(FILES[0],'General',{'theme':'wolf-dark','icon_theme':'Papirus-Dark',
+                                'palette_override':'true', 'icon_follow_color_scheme':'true'},backup)
+    _modify(FILES[0],'Palette',colors['PALETTE'],backup)
+    _modify(FILES[0],'Qt',{'style':'Fusion'},backup)
+    # Preferência de estilo Qt da sessão LXQt: mantém o plugin da sessão para ícones,
+    # fontes e diálogos, e evita o conflito entre Breeze e paleta Wolf.
+    _modify(HOME/'.config/lxqt/session.conf','Environment',{'QT_STYLE_OVERRIDE':'Fusion'},backup)
+    for file in FILES[1:3]:
+        _modify(file,'Settings',{'gtk-theme-name':'Breeze-Dark',
+                                 'gtk-icon-theme-name':'Papirus-Dark',
+                                 'gtk-application-prefer-dark-theme':'true'},backup)
+    # GTK2/3 recebem também o tema por XSETTINGS no X11.
+    xsettings = FILES[3]
+    if xsettings.is_symlink():
+        raise RuntimeError('Configuração XSETTINGS é link simbólico.')
+    if xsettings.is_file():
+        old = backup/'.config/xsettingsd/xsettingsd.conf'
+        old.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(xsettings, old)
+    xsettings.parent.mkdir(parents=True, exist_ok=True)
+    # Editar apenas as chaves Wolf, conservando DPI/fontes do usuário.
+    entries = { 'Net/ThemeName':'"Breeze-Dark"',
+                'Net/IconThemeName':'"Papirus-Dark"',
+                'Gtk/CursorThemeName':'"breeze_cursors"' }
+    text = xsettings.read_text(encoding='utf-8') if xsettings.is_file() else ''
+    lines = [line for line in text.splitlines() if not any(
+        line.strip().startswith(k+' ') or line.strip().startswith(k+'\t') for k in entries)]
+    lines += [f'{key} {value}' for key,value in entries.items()]
+    xsettings.write_text('\n'.join(lines)+'\n', encoding='utf-8')
+    # GSettings complementa os arquivos GTK (Blueman, entre outros). Se o schema
+    # não existir, o arquivo GTK continua sendo a fonte de configuração.
+    if shutil.which('gsettings'):
+        for key,value in [('gtk-theme','Breeze-Dark'),('icon-theme','Papirus-Dark'),
+                          ('color-scheme','prefer-dark')]:
+            cmd=['gsettings','set','org.gnome.desktop.interface',key,value]
+            result=subprocess.run(cmd,capture_output=True,text=True,check=False)
+            if result.returncode:
+                print(f'[AVISO] gsettings {key}: {result.stderr.strip()}')
+    _refresh_xsettings(xsettings)
+    print(f'[OK] Wolf-dark (Qt Fusion) + Breeze-Dark (GTK) configurados; backup: {backup}')
+    if not shutil.which('xsettingsd'):
+        print('[AVISO] xsettingsd ausente; GTK/X11 pode continuar usando o tema claro.')
+    print('[INFO] Feche e reabra aplicativos GTK (como Blueman).')
+    print('[INFO] Para o painel e Qt, encerre e entre novamente na sessão LXQt.')
+
+
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--apply',action='store_true')
+    parser.add_argument('--check',action='store_true')
+    args=parser.parse_args()
+    if args.check or not args.apply:
+        for file in FILES:
+            print(f'{file}: {"presente" if file.is_file() else "ausente"}')
+        qt_settings=HOME/'.config/lxqt/lxqt.conf'
+        session_settings=HOME/'.config/lxqt/session.conf'
+        for file,section,key in ((qt_settings,'Qt','style'),(session_settings,'Environment','QT_STYLE_OVERRIDE')):
+            cp=configparser.RawConfigParser(interpolation=None)
+            cp.optionxform=str
+            if file.is_file():
+                try: cp.read(file, encoding='utf-8')
+                except configparser.Error: pass
+            print(f'{file.name} [{section}] {key}: {cp.get(section,key,fallback="(ausente)")}')
+        print('Wolf-dark: '+('presente' if (HOME/'.local/share/lxqt/themes/wolf-dark/lxqt-panel.qss').is_file() else 'ausente'))
+        print('Breeze-Dark GTK: '+('presente' if Path('/usr/share/themes/Breeze-Dark/gtk-3.0/gtk.css').is_file() else 'ausente'))
+        print('xsettingsd: '+('disponível' if shutil.which('xsettingsd') else 'não instalado'))
+        print('XSETTINGS: '+('configurado' if FILES[3].is_file() else 'ausente'))
+        print('Daemon XSETTINGS do usuário: '+repr(_owned_xsettings()))
+        snapshot=_xsettings_snapshot()
+        if snapshot is not None:
+            print('Tema efetivo XSETTINGS: '+str([line.strip() for line in snapshot.splitlines() if line.strip().startswith('Net/ThemeName')]))
+        if shutil.which('gsettings'):
+            value=subprocess.run(['gsettings','get','org.gnome.desktop.interface','gtk-theme'],capture_output=True,text=True)
+            print('Tema GSettings: '+(value.stdout.strip() if value.returncode == 0 else 'indisponível'))
+        return
+    try: apply()
+    except (OSError, RuntimeError, configparser.Error) as exc:
+        parser.exit(1,f'[ERRO] {exc}\n')
+
+if __name__=='__main__': main()

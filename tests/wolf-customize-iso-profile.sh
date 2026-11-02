@@ -20,7 +20,7 @@ DEVKIT_VERSION="$(< "$VERSION_FILE")"
 [[ -d "$PROJECT/tools" ]] || { echo "[ERRO] Diretório tools ausente."; exit 1; }
 
 echo "======================================================"
-echo "   WOLF LINUX 2.1 - CUSTOMIZAÇÃO ISO KDE BASELINE"
+echo "   WOLF LINUX 2.2 - CUSTOMIZAÇÃO ISO LXQT/X11"
 echo "======================================================"
 
 mkdir -p \
@@ -58,12 +58,12 @@ ln -sfn ../wolf-loadkeys.service "$AIROOT/etc/systemd/system/multi-user.target.w
 
 cat > "$AIROOT/etc/os-release" <<'OSR'
 NAME="Wolf Linux Live"
-VERSION="2.1"
-VERSION_ID="2.1.3"
-PRETTY_NAME="Wolf Linux 2.1 Live"
+VERSION="2.2"
+VERSION_ID="2.2.0"
+PRETTY_NAME="Wolf Linux 2.2 Live"
 ID=wolf-linux
 ID_LIKE=arch
-VARIANT="Wolf Linux 2.1 Live Graphical Installer"
+VARIANT="Wolf Linux 2.2 Live Graphical Installer"
 VARIANT_ID=wolf-linux-live
 BUILD_ID=rolling
 ANSI_COLOR="1;37"
@@ -76,13 +76,18 @@ Wolf Linux Live — abra Wolf Installer para iniciar a instalacao grafica.
 O instalador CLI continua disponivel com sudo wolf-install --help.
 MOTD
 printf '%s\n' wolf-live > "$AIROOT/etc/hostname"
-printf 'Wolf Linux %s KDE/Wayland Clean Baseline\n' "$DEVKIT_VERSION" > "$AIROOT/etc/wolf-linux-live-build"
+printf 'Wolf Linux %s LXQt/X11 Clean Baseline\n' "$DEVKIT_VERSION" > "$AIROOT/etc/wolf-linux-live-build"
 cp -f "$VERSION_FILE" "$AIROOT/root/wolf-linux/VERSION"
 
 cp -f "$PROJECT/install/wolf-install.sh" "$AIROOT/root/wolf-linux/install/wolf-install.sh"
 cp -f "$PROJECT/package-profiles/packages.conf" "$AIROOT/root/wolf-linux/package-profiles/packages.conf"
 rm -rf "$AIROOT/root/wolf-linux/tools"
 cp -a "$PROJECT/tools" "$AIROOT/root/wolf-linux/tools"
+USB_PKG="$PROJECT/release-packages/libfm-qt-2.4.0-4.1-x86_64.pkg.tar.zst"
+[[ -f "$USB_PKG" ]] || { echo '[ERRO] Pacote libfm-qt Wolf não foi copiado ao projeto.' >&2; exit 1; }
+bash "$PROJECT/tools/wolf-integration-monitor/validar-pacote-usb.sh" "$USB_PKG"
+mkdir -p "$AIROOT/root/wolf-linux/release-packages"
+install -m 0644 "$USB_PKG" "$AIROOT/root/wolf-linux/release-packages/"
 find "$AIROOT/root/wolf-linux/tools" -type f -name '*.sh' -exec chmod 755 {} +
 
 rm -rf "$AIROOT/root/wolf-linux/assets"
@@ -160,7 +165,7 @@ for k,v in {
     'iso_name':'"wolf-linux"',
     'iso_label':'"WOLFLINUX_$(date +%Y%m)"',
     'iso_publisher':'"Wolf Linux"',
-    'iso_application':'"Wolf Linux 2.1 Graphical Live Installer"',
+    'iso_application':'"Wolf Linux 2.2 Graphical Live Installer"',
 }.items():
     pat=rf'^{re.escape(k)}=.*$'; line=f'{k}={v}'
     t=re.sub(pat,line,t,flags=re.M) if re.search(pat,t,flags=re.M) else t+'\n'+line+'\n'
@@ -203,4 +208,4 @@ WOLF_PROJECT="$PROJECT" WOLF_ISO_PROFILE="$PROFILE" "$PROJECT/tests/wolf-stage-l
 [[ -L "$AIROOT/usr/local/bin/wolf-ssh" ]] || { echo "[ERRO] Alias wolf-ssh ausente no airootfs." >&2; exit 1; }
 grep -Fxq openssh "$PACKAGES_FILE" || { echo "[ERRO] openssh ausente de packages.x86_64." >&2; exit 1; }
 
-echo "[OK] Perfil ISO Wolf Live GUI 2.0 e identidade do boot; backend KDE/Wayland preservado."
+echo "[OK] Perfil ISO Wolf Live GUI 2.0 e identidade do boot; backend de instalação preservado; perfil instalado LXQt/X11."

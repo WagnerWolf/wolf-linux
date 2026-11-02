@@ -7,7 +7,7 @@ fi
 
 set -Eeuo pipefail
 
-WOLF_VERSION="2.1.3"
+WOLF_VERSION="2.2.0"
 DRY_RUN=0
 PLAN_ONLY=0
 RESET_STATE=0
@@ -103,7 +103,7 @@ XKB_VARIANT="abnt2"
 CINNAMON_LAYOUT="br"
 MATE_LAYOUT="br\tabnt2"
 
-DESKTOP="plasma"
+DESKTOP="lxqt"
 STACK_PRESET=""
 STACKS_ARG=""
 LIST_STACKS=0
@@ -145,7 +145,7 @@ cleanup_temporary_privileges() {
 trap cleanup_temporary_privileges EXIT
 
 usage() {
-    printf 'Wolf Linux Installer %s - KDE Plasma / Wayland baseline\n\n' "$WOLF_VERSION"
+    printf 'Wolf Linux Installer %s - LXQt / X11 baseline\n\n' "$WOLF_VERSION"
     cat <<'EOF'
 Uso:
   ./wolf-install.sh [opções]
@@ -173,8 +173,8 @@ Seleção de software:
   --preset full         Todas as stacks opcionais (padrão do Wagner).
   --preset test         VM/teste: daily + gaming + development + extras.
                         Não instala Android/Flutter nem containers.
-  --preset minimal      Somente sistema + KDE Plasma/Wayland.
-  --preset basic        KDE + LibreOffice, Chrome, áudio/vídeo e PDF.
+  --preset minimal      Somente sistema + Wolf LXQt/X11.
+  --preset basic        LXQt + LibreOffice, Chrome, áudio/vídeo e PDF.
   --preset custom       Abre seleção interativa das stacks.
   --stacks LISTA        Seleção explícita, separada por vírgulas.
                         Ex.: daily,gaming,development
@@ -705,8 +705,8 @@ check_network() {
 }
 
 choose_desktop() {
-    DESKTOP="plasma"
-    ok "Desktop fixo desta baseline: KDE Plasma / Wayland"
+    DESKTOP="lxqt"
+    ok "Desktop fixo: Wolf LXQt / X11 (Openbox)"
 }
 
 list_stacks() {
@@ -770,7 +770,7 @@ choose_stacks_interactive() {
     echo "Seleção de software opcional:"
     echo "  1) Full    - todas as stacks [padrão]"
     echo "  2) Test    - sem Android/Flutter e containers"
-    echo "  3) Minimal - somente KDE/base"
+    echo "  3) Minimal - somente LXQt/base"
     echo "  4) Basic   - escritório, navegador e multimídia"
     echo "  5) Custom  - escolher stack por stack"
     echo
@@ -1294,7 +1294,7 @@ show_plan() {
     printf 'Teclado ...........: br (%s)\n' "$XKB_VARIANT"
     printf 'Desktop ...........: %s\n' "$DESKTOP"
     printf 'Display manager ...: SDDM\n'
-    printf 'Kernels ...........: linux-cachyos (preferencial) + linux-lts (reserva segura)\n'
+    printf 'Kernels ...........: linux (Arch oficial) + linux-lts (reserva segura)\n'
     printf 'Áudio .............: PipeWire + WirePlumber\n'
     printf 'Hostname ..........: %s\n' "$HOSTNAME_VALUE"
     printf 'Usuário ...........: %s\n' "$USERNAME_VALUE"
@@ -1789,7 +1789,7 @@ PYCLEAN
 
 packages_for_desktop() {
     printf '%s
-' "${KDE_PACKAGES[@]}" "${KDE_PORTAL_PACKAGES[@]}"
+' "${LXQT_PACKAGES[@]}" "${LXQT_PORTAL_PACKAGES[@]}"
 }
 
 enable_multilib_in_file() {
@@ -1983,9 +1983,9 @@ configure_wolf_identity() {
 
     cat > /mnt/etc/os-release <<'EOF'
 NAME="Wolf Linux"
-PRETTY_NAME="Wolf Linux 2.1"
-VERSION="2.1"
-VERSION_ID="2.1.3"
+PRETTY_NAME="Wolf Linux 2.2"
+VERSION="2.2"
+VERSION_ID="2.2.0"
 LOGO="wolf-linux"
 VENDOR_NAME="Wolf Linux"
 ID=arch
@@ -2035,8 +2035,11 @@ EOF
         printf 'GRUB_DISABLE_BOOTNEXT=true\n' >> /mnt/etc/default/grub
     fi
 
-    grep -q '^PRETTY_NAME="Wolf Linux 2.1"$' /mnt/etc/os-release ||
-        die "Falha ao gravar identidade Wolf Linux em /etc/os-release."
+    # Validar os campos efetivamente gravados; evitar comparação com release antigo.
+    grep -Fxq 'PRETTY_NAME="Wolf Linux 2.2"' /mnt/etc/os-release &&
+    grep -Fxq "VERSION_ID=\"${WOLF_VERSION}\"" /mnt/etc/os-release &&
+    grep -Fxq 'ID=arch' /mnt/etc/os-release ||
+        die "Falha ao validar identidade Wolf Linux em /etc/os-release."
 
     ok "Sistema identificado como Wolf Linux (compatibilidade ID=arch)."
 }
@@ -2270,25 +2273,9 @@ enable_one_service() {
     esac
 }
 
-install_baloo_qt_offscreen() {
-    # Baloo indexer/extractor does not need a graphical display.  This
-    # override applies ONLY to kde-baloo.service and processes it spawns;
-    # the rest of Plasma/Qt stays on the user's Wayland platform.
-    # Avoid writing into users' /home or into the Live running system.
-    local dropin_dir="/mnt/etc/systemd/user/kde-baloo.service.d"
-    install -d -m 0755 "$dropin_dir"
-    cat > "$dropin_dir/override.conf" <<'WOLF_BALOO_QT_OFFSCREEN'
-[Service]
-Environment=QT_QPA_PLATFORM=offscreen
-WOLF_BALOO_QT_OFFSCREEN
-    chmod 0644 "$dropin_dir/override.conf"
-    ok 'Baloo: extrator Qt configurado em modo offscreen (apenas kde-baloo.service).'
-}
-
 configure_services() {
-    # Installed system only: on first user login systemd --user reads this
-    # global drop-in. Never override QT_QPA_PLATFORM for the KDE session.
-    install_baloo_qt_offscreen
+    # Apenas serviços usados pelo LXQt e pelas stacks selecionadas.
+    # Baloo/KDE não fazem parte do perfil ativo.
     local -a services=(NetworkManager.service bluetooth.service sddm.service)
     stack_selected daily && services+=(cups.service)
     stack_selected containers && services+=(docker.service)
@@ -2320,7 +2307,7 @@ configure_multilib() {
 complete_base_packages() {
     local -a packages
     mapfile -t packages < <(collect_base_packages)
-    info "Conferindo/completando perfil KDE/base..."
+    info "Conferindo/completando perfil LXQt/base..."
     arch-chroot /mnt pacman -S --needed --noconfirm "${packages[@]}"
 
     local -a expected_units=(
@@ -2332,22 +2319,22 @@ complete_base_packages() {
     for unit_path in "${expected_units[@]}"; do
         [[ -e "$unit_path" ]] || die "Unit esperada ausente: $unit_path"
     done
-    ok "Perfil KDE/base completo."
+    ok "Perfil LXQt/base completo."
 }
 
-# A falha de um repositório externo nunca deve impedir a criação de um
-# sistema inicializável com linux-lts, já instalado pelo pacstrap oficial.
-# Não desativar verificações de assinatura ou usar SigLevel=Never.
-chaotic_defer_to_lts() {
+# Falha no Chaotic-AUR é tratada apenas como indisponibilidade de pacotes
+# adicionais: NUNCA muda o kernel principal, que é linux, nem a reserva LTS.
+# Não desativar verificações de assinatura nem relaxar SigLevel.
+chaotic_skip_unavailable_repo() {
     local reason="$1"
     warn "$reason"
-    warn 'Chaotic-AUR/CachyOS adiados: concluiremos com linux-lts (oficial) como padrão.'
-    mkdir -p /mnt/etc/wolf-linux /mnt/var/log
-    printf 'Chaotic-AUR/CachyOS pendentes: %s\n' "$reason" > /mnt/etc/wolf-linux/cachyos-pending.txt
-    printf 'Chaotic-AUR/CachyOS pendentes: %s\n' "$reason" >> "$STATE_DIR/optional-failures.log"
+    warn 'Chaotic-AUR indisponível: kernel linux continua principal; linux-lts permanece reserva.'
+    mkdir -p /mnt/etc/wolf-linux /mnt/var/log "$STATE_DIR"
+    printf 'Chaotic-AUR indisponível: %s\n' "$reason" > /mnt/etc/wolf-linux/chaotic-aur-pending.txt
+    printf 'Chaotic-AUR indisponível: %s\n' "$reason" >> "$STATE_DIR/optional-failures.log"
     cp "$STATE_DIR/optional-failures.log" /mnt/var/log/wolf-optional-failures.log || true
-    # Se a seção foi adicionada, mas não sincroniza, retiramos SOMENTE ela:
-    # o pacman precisa continuar funcionando para KDE, drivers e GRUB.
+    # Se o repositório externo foi adicionado mas não sincroniza, retirar
+    # SOMENTE a seção [chaotic-aur], preservando os repositórios oficiais.
     if [[ -e /mnt/etc/pacman.conf ]]; then
         python3 - /mnt/etc/pacman.conf <<'PY_CHAOTIC_REPO'
 import pathlib, sys
@@ -2367,21 +2354,20 @@ if out != lines:
 PY_CHAOTIC_REPO
     fi
     CHAOTIC_READY=no
-    CACHYOS_DEFERRED=yes
 }
 
-chaotic_retry_or_defer() {
+chaotic_retry_or_skip() {
     local reason="$1" decision=""
     warn "$reason"
-    echo '  [1] Tentar novamente (sem reiniciar a instalação)'
-    echo '  [2] Continuar com linux-lts; instalar CachyOS posteriormente'
+    echo '  [1] Tentar configurar o Chaotic-AUR novamente'
+    echo '  [2] Continuar SEM Chaotic-AUR (usar Arch oficial e AUR quando necessário)'
     while true; do
         if ! read -r -p 'Escolha [1/2]: ' decision; then
             decision=2
         fi
         case "$decision" in
             1) sleep 3; return 0 ;;
-            2) chaotic_defer_to_lts "$reason"; return 1 ;;
+            2) chaotic_skip_unavailable_repo "$reason"; return 1 ;;
             *) echo 'Escolha 1 ou 2.' ;;
         esac
     done
@@ -2470,7 +2456,7 @@ download_chaotic_bootstrap_with_retry() {
             CHAOTIC_MIRRORLIST_PACKAGE="$cache_chroot/chaotic-mirrorlist.pkg.tar.zst"
             return 0
         fi
-        chaotic_retry_or_defer 'Falha no download ou validação do bootstrap Chaotic-AUR.' || return 1
+        chaotic_retry_or_skip 'Falha no download ou validação do bootstrap Chaotic-AUR.' || return 1
     done
 }
 
@@ -2481,12 +2467,12 @@ configure_chaotic_aur() {
         info 'Chaotic-AUR já configurado; apenas sincronizando.'
     else
         while ! chaotic_import_bootstrap_key; do
-            chaotic_retry_or_defer 'Falha ao importar/assinar chave primária do Chaotic-AUR.' || return 0
+            chaotic_retry_or_skip 'Falha ao importar/assinar chave primária do Chaotic-AUR.' || return 0
         done
         download_chaotic_bootstrap_with_retry || return 0
         while ! arch-chroot /mnt pacman -U --noconfirm \
             "$CHAOTIC_KEYRING_PACKAGE" "$CHAOTIC_MIRRORLIST_PACKAGE"; do
-            chaotic_retry_or_defer 'Falha na instalação do chaotic-keyring e/ou chaotic-mirrorlist.' || return 0
+            chaotic_retry_or_skip 'Falha na instalação do chaotic-keyring e/ou chaotic-mirrorlist.' || return 0
             download_chaotic_bootstrap_with_retry || return 0
         done
         if ! grep -q '^\[chaotic-aur\]' /mnt/etc/pacman.conf; then
@@ -2504,46 +2490,18 @@ EOF
             ok 'Chaotic-AUR configurado e sincronizado.'
             return 0
         fi
-        chaotic_retry_or_defer 'Chaotic-AUR não sincronizou; não é seguro instalar o kernel.' || return 0
+        chaotic_retry_or_skip 'Chaotic-AUR não sincronizou; não é possível usá-lo para pacotes opcionais.' || return 0
     done
 }
 
-# Chaotic-AUR deve estar ativo antes desta etapa. O pacstrap inicial usa
-# apenas linux-lts, pois linux-cachyos não existe nos repositórios oficiais.
-# Trata-se de etapa ESSENCIAL em Minimal, Basic, Test e Full, nunca opcional.
-install_cachyos_kernel() {
-    if [[ "${CHAOTIC_READY:-no}" != yes ]]; then
-        warn 'Chaotic-AUR não ficou disponível; CachyOS adiado e linux-lts preservado.'
-        return 0
-    fi
-    local pkg available=yes
-    while true; do
-        available=yes
-        for pkg in "${CACHYOS_KERNEL_PACKAGES[@]}"; do
-            if ! arch-chroot /mnt pacman -Si "chaotic-aur/$pkg" >/dev/null 2>&1; then
-                available=no
-                warn "Kernel/headers ausentes no Chaotic-AUR: $pkg."
-            fi
-        done
-        if [[ "$available" == yes ]]; then
-            break
-        fi
-        chaotic_retry_or_defer 'Kernel CachyOS ou headers indisponíveis no repositório.' || return 0
-    done
-    info 'Instalando kernel principal CachyOS + headers...'
-    while ! arch-chroot /mnt pacman -S --needed --noconfirm \
-        chaotic-aur/linux-cachyos chaotic-aur/linux-cachyos-headers; do
-        chaotic_retry_or_defer 'Falha na instalação do kernel CachyOS; LTS continua disponível.' || return 0
-    done
-    if ! arch-chroot /mnt pacman -Q linux-cachyos linux-cachyos-headers linux-lts linux-lts-headers >/dev/null \
-        || [[ ! -s /mnt/boot/vmlinuz-linux-cachyos ]] \
-        || [[ ! -f /mnt/etc/mkinitcpio.d/linux-cachyos.preset ]]; then
-        chaotic_defer_to_lts 'Kernel/headers CachyOS não passaram na validação pós-instalação.'
-        return 0
-    fi
-    CACHYOS_DEFERRED=no
-    rm -f /mnt/etc/wolf-linux/cachyos-pending.txt
-    ok 'CachyOS principal + LTS de recuperação instalados.'
+validate_official_arch_kernel() {
+    arch-chroot /mnt pacman -Q linux linux-headers linux-lts linux-lts-headers >/dev/null ||
+        die 'Kernels oficiais Arch e LTS com headers não foram instalados.'
+    [[ -s /mnt/boot/vmlinuz-linux && -s /mnt/boot/vmlinuz-linux-lts ]] ||
+        die 'vmlinuz dos kernels oficiais ausente.'
+    [[ -f /mnt/etc/mkinitcpio.d/linux.preset && -f /mnt/etc/mkinitcpio.d/linux-lts.preset ]] ||
+        die 'Presets mkinitcpio ausentes.'
+    ok 'Kernel linux (Arch) principal e linux-lts reserva, ambos com headers e presets.'
 }
 
 collect_selected_official_packages() {
@@ -3536,18 +3494,18 @@ EOF
     ok "Zsh/Oh My Zsh/Powerlevel10k configurados."
 }
 
-install_wolf_kde_personal_defaults() {
-    info "Instalando as preferencias KDE/Wayland do usuario principal (one-shot)..."
+install_wolf_shared_personal_defaults() {
+    info "Instalando as preferências compartilhadas do LXQt (MIME, Konsole e Zsh)..."
     local defaults_script="/root/wolf-linux/tests/wolf-configure-user-defaults.py"
     local asset_dir="${WOLF_ASSET_DIR:-/root/wolf-linux/assets}"
     local -a options=(--root /mnt --user "$USERNAME_VALUE" --assets "$asset_dir")
 
-    [[ -f "$defaults_script" ]] || die "Arquivo de configuracao do perfil KDE ausente: $defaults_script"
+    [[ -f "$defaults_script" ]] || die "Arquivo de preferências compartilhadas ausente: $defaults_script"
     [[ -d "$asset_dir/zsh" ]] || die "Assets de terminal/Zsh ausentes: $asset_dir/zsh"
     if stack_selected daily; then options+=(--daily); fi
     if stack_selected development; then options+=(--development); fi
     if stack_selected extras; then options+=(--extras); fi
-    python "$defaults_script" "${options[@]}" || die "Falha ao aplicar preferencias KDE para o usuario"
+    python "$defaults_script" "${options[@]}" || die "Falha ao aplicar preferências compartilhadas no LXQt"
 
     if stack_selected daily; then
         # O arquivo de referencia usa /usr/share/oh-my-zsh. Instalamos o
@@ -3579,7 +3537,7 @@ install_wolf_kde_personal_defaults() {
         arch-chroot /mnt chsh -s /usr/bin/zsh "$USERNAME_VALUE" || \
             die "Falha ao definir Zsh como shell de $USERNAME_VALUE"
     fi
-    ok "Perfil KDE/Wayland, associacoes MIME, mouse, Alt+Tab, Konsole e Zsh preparados."
+    ok "Perfil LXQt: associações MIME, Konsole e Zsh preparados; atalhos gerenciados pelo perfil LXQt."
 }
 
 install_terminal_defaults() {
@@ -6712,8 +6670,11 @@ case "$DESKTOP" in
     *MATE*)
         FILE_MANAGER_DESKTOP="caja.desktop"
         ;;
+    *LXQt*|*LXQT*)
+        FILE_MANAGER_DESKTOP="pcmanfm-qt.desktop"
+        ;;
     *KDE*|*Plasma*)
-        FILE_MANAGER_DESKTOP="org.kde.dolphin.desktop"
+        FILE_MANAGER_DESKTOP="pcmanfm-qt.desktop"
         ;;
     *XFCE*|*Xfce*)
         FILE_MANAGER_DESKTOP="thunar.desktop"
@@ -9045,17 +9006,11 @@ validate_nvidia_dkms_for_both_kernels() {
     local package kdir release
     arch-chroot /mnt pacman -Q nvidia-open-dkms linux-lts-headers >/dev/null ||
         die 'NVIDIA DKMS ou headers do LTS não instalados.'
-    local -a kernels=(linux-lts)
-    if [[ "${CACHYOS_DEFERRED:-no}" != yes ]] \
-        && arch-chroot /mnt pacman -Q linux-cachyos >/dev/null 2>&1; then
-        arch-chroot /mnt pacman -Q linux-cachyos-headers >/dev/null ||
-            die 'CachyOS presente sem headers: DKMS não pode ser validado.'
-        kernels+=(linux-cachyos)
-    fi
+    local -a kernels=(linux-lts linux)
     for package in "${kernels[@]}"; do
         release=''
         case "$package" in
-            linux-cachyos) kdir=(/mnt/usr/lib/modules/*-cachyos) ;;
+            linux) kdir=(/mnt/usr/lib/modules/*-arch*) ;;
             linux-lts) kdir=(/mnt/usr/lib/modules/*-lts) ;;
         esac
         # A verificação é de módulos compilados para cada release, não só
@@ -9191,8 +9146,6 @@ kernel_headers_package() {
     local rel
     rel="$(uname -r)"
     case "$rel" in
-        *-cachyos) echo "linux-cachyos-headers" ;;
-        *-cachyos-lts) echo "linux-cachyos-lts-headers" ;;
         *-zen*) echo "linux-zen-headers" ;;
         *-lts*) echo "linux-lts-headers" ;;
         *-hardened*) echo "linux-hardened-headers" ;;
@@ -11029,8 +10982,8 @@ configure_bootloader() {
         's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="loglevel=3 quiet splash"/' \
         /mnt/etc/default/grub
 
-    # Sempre exibir GRUB: linux-lts é obrigatório e assume o boot quando
-    # Chaotic-AUR/CachyOS não pôde ser concluído.
+    # Sempre exibir GRUB: linux é a entrada principal, linux-lts é reserva.
+    # Indisponibilidade do Chaotic-AUR não interfere no kernel padrão.
     if grep -q '^GRUB_TIMEOUT_STYLE=' /mnt/etc/default/grub; then
         sed -i 's/^GRUB_TIMEOUT_STYLE=.*/GRUB_TIMEOUT_STYLE=menu/' /mnt/etc/default/grub
     else
@@ -11047,12 +11000,9 @@ configure_bootloader() {
     else
         printf 'GRUB_DEFAULT=0\n' >> /mnt/etc/default/grub
     fi
-    local main_kernel="linux-lts"
-    if [[ "${CACHYOS_DEFERRED:-no}" != yes ]] \
-        && arch-chroot /mnt pacman -Q linux-cachyos >/dev/null 2>&1 \
-        && [[ -s /mnt/boot/vmlinuz-linux-cachyos && -s /mnt/boot/initramfs-linux-cachyos.img ]]; then
-        main_kernel=linux-cachyos
-    fi
+    local main_kernel="linux"
+    [[ -s /mnt/boot/vmlinuz-linux && -s /mnt/boot/initramfs-linux.img ]] ||
+        die "Kernel Arch padrão ou initramfs não foi gerado."
     if grep -q '^GRUB_TOP_LEVEL=' /mnt/etc/default/grub; then
         sed -i "s|^GRUB_TOP_LEVEL=.*|GRUB_TOP_LEVEL=\"/boot/vmlinuz-$main_kernel\"|" /mnt/etc/default/grub
     else
@@ -11067,12 +11017,12 @@ configure_bootloader() {
 validate_boot_installation() {
     echo
     echo 'Validando instalação de boot...'
-    local main_kernel=linux-lts
+    local main_kernel=linux
     local recovery_kernel=/mnt/boot/vmlinuz-linux-lts
     local recovery_initramfs=/mnt/boot/initramfs-linux-lts.img
     local grub_cfg=/mnt/boot/grub/grub.cfg
     [[ -s /mnt/etc/wolf-linux/kernel-default ]] && main_kernel="$(< /mnt/etc/wolf-linux/kernel-default)"
-    [[ "$main_kernel" == linux-cachyos || "$main_kernel" == linux-lts ]] ||
+    [[ "$main_kernel" == linux || "$main_kernel" == linux-lts ]] ||
         die 'Kernel principal desconhecido registrado no sistema instalado.'
     local kernel="/mnt/boot/vmlinuz-$main_kernel"
     local initramfs="/mnt/boot/initramfs-$main_kernel.img"
@@ -11092,10 +11042,8 @@ validate_boot_installation() {
         die "grub.cfg não contém initramfs-$main_kernel.img."
     grep -q 'vmlinuz-linux-lts' "$grub_cfg" || die 'LTS ausente do GRUB.'
     grep -q 'initramfs-linux-lts.img' "$grub_cfg" || die 'Initramfs LTS ausente do GRUB.'
-    if [[ "$main_kernel" == linux-cachyos ]]; then
-        grep -q 'vmlinuz-linux-cachyos' "$grub_cfg" || die 'CachyOS ausente do GRUB.'
-    else
-        warn 'Modo de recuperação de repositório: GRUB iniciará pelo LTS; CachyOS pendente.'
+    if [[ "$main_kernel" == linux ]]; then
+        grep -q 'vmlinuz-linux' "$grub_cfg" || die 'Arch Linux ausente do GRUB.'
     fi
     echo
     echo 'Arquivos de boot:'
@@ -12087,13 +12035,12 @@ WOLF_PKG_DESKTOP
 [Desktop Entry]
 Type=Application
 Name=Wolf Package Manager (Monitor)
-Comment=Verificar atualizações e mostrar status na bandeja do KDE
+Comment=Verificar atualizações e mostrar status na bandeja do LXQt
 Exec=/usr/local/bin/wolf-package-manager --tray
 TryExec=/usr/local/bin/wolf-package-manager
 Icon=wolf-package-manager
-OnlyShowIn=KDE;
+OnlyShowIn=LXQt;
 Terminal=false
-X-KDE-autostart-after=panel
 WOLF_PKG_AUTOSTART
     # Yay is a user-run AUR helper. Never invoke it as root.
     if [[ ! -x /mnt/usr/bin/yay ]]; then
@@ -12131,13 +12078,8 @@ install_wolf_helper_bundle() {
         install -m 0755 "$source_root/wolf-validate-helpers-0.1.sh" /mnt/usr/local/bin/wolf-validate-helpers
     fi
 
-    # Only the two VM-validated Plasma helpers run once at the first login.
-    # Other helpers remain strictly manual.
-    if [[ -f "$source_root/wolf-first-login-plasma.sh" ]]; then
-        install -m 0755 "$source_root/wolf-first-login-plasma.sh" /mnt/usr/local/bin/wolf-first-login-plasma
-    else
-        die 'Configurador one-shot do Plasma ausente.'
-    fi
+    # LXQt usa o configurador nativo na etapa 69d2. Não instalar um
+    # primeiro-login Plasma, nem exigir scripts KDE herdados.
 
     # Control Center usa PySide6 dos repos oficiais. UI não executa watchers.
     local gui_source="$source_root/control-center"
@@ -12147,13 +12089,28 @@ install_wolf_helper_bundle() {
     install -d "$gui_target" /mnt/usr/share/applications
     install -m 0644 "$gui_source/main.py" "$gui_target/main.py"
     install -m 0644 "$gui_source/backend.py" "$gui_target/backend.py"
+    for component in lxqt_support.py wolf_profile.py monitor_editor.py monitor_layout.py wolf_monitors.py; do
+        [[ -f "$gui_source/$component" ]] || die "Wolf Control Center incompleto: $component"
+        install -m 0644 "$gui_source/$component" "$gui_target/$component"
+    done
     cat > /mnt/usr/local/bin/wolf-control-center <<'WOLF_CC_WRAPPER'
 #!/usr/bin/env sh
+# A opção --monitors abre apenas o editor, sem a janela principal.
+if [ "${1:-}" = "--monitors" ] && [ "$#" -eq 1 ]; then
+    exec /usr/local/bin/wolf-monitors
+fi
 exec /usr/bin/python3 /usr/local/lib/wolf-linux/control-center/main.py "$@"
 WOLF_CC_WRAPPER
     chmod 0755 /mnt/usr/local/bin/wolf-control-center
+    cat > /mnt/usr/local/bin/wolf-monitors <<'WOLF_MONITORS_WRAPPER'
+#!/usr/bin/env sh
+exec /usr/bin/python3 /usr/local/lib/wolf-linux/control-center/wolf_monitors.py "$@"
+WOLF_MONITORS_WRAPPER
+    chmod 0755 /mnt/usr/local/bin/wolf-monitors
     install -m 0644 "$gui_source/wolf-control-center.desktop" \
         /mnt/usr/share/applications/wolf-control-center.desktop
+    install -m 0644 "$gui_source/wolf-monitors.desktop" \
+        /mnt/usr/share/applications/wolf-monitors.desktop
 
     # Stable tools get friendly command names; they are still manual tools.
     [[ -f "$target_root/stable/wolf-grub-manager-0.3.sh" ]] && \
@@ -12163,12 +12120,12 @@ WOLF_CC_WRAPPER
 
     cat > /mnt/etc/wolf-linux/install-stacks.conf <<EOF
 WOLF_VERSION=$WOLF_VERSION
-DESKTOP=plasma-wayland
+DESKTOP=lxqt-x11
 STACKS=$(selected_stacks_text)
 EOF
 
-    # Guardrail: no system-wide Wolf helper autostart; only the installed
-    # user's own one-time launcher is created by the profile configurator.
+    # Guardrail: não ativar helpers Wolf globais herdados. O perfil LXQt
+    # é aplicado durante a instalação; indicadores próprios vêm depois.
     if find /mnt/etc/xdg/autostart -maxdepth 1 -type f -name 'wolf-*.desktop' -print -quit 2>/dev/null | grep -q .; then
         warn "Removendo autostarts Wolf globais herdados: mantido apenas o setup unico do usuario."
         find /mnt/etc/xdg/autostart -maxdepth 1 -type f -name 'wolf-*.desktop' -delete
@@ -12177,23 +12134,200 @@ EOF
     ok "Helpers e Wolf Package Manager instalados. Use 'wolf-helper list' após o boot."
 }
 
+
+# Integração LXQt não substitui as rotinas de particionamento/UEFI/LVM já homologadas.
+validate_lxqt_base() {
+    arch-chroot /mnt pacman -Q lxqt-session lxqt-panel openbox pcmanfm-qt xorg-xinput \
+        xsettingsd gnome-disk-utility networkmanager network-manager-applet nm-connection-editor \
+        konsole pyside6 python-xlib tk >/dev/null ||
+        die 'Componentes LXQt essenciais ausentes no pacstrap.'
+    if arch-chroot /mnt pacman -Q dolphin >/dev/null 2>&1; then
+        die 'Pacote Dolphin inesperado na base LXQt; verifique as dependências.'
+    fi
+    # O applet acompanha NetworkManager.service, que e habilitado pela etapa
+    # configure_services. Nenhum daemon concorrente deve ser iniciado aqui.
+    [[ -x /mnt/usr/bin/nm-applet && -x /mnt/usr/bin/nm-connection-editor ]] ||
+        die 'Ferramentas graficas de rede LXQt ausentes (nm-applet / nm-connection-editor).'
+    [[ -e /mnt/usr/lib/systemd/system/NetworkManager.service ]] ||
+        die 'Unit NetworkManager.service ausente do sistema instalado.'
+    [[ -e /mnt/usr/share/applications/pcmanfm-qt.desktop ]] ||
+        die 'Entrada desktop do PCManFM-Qt ausente.'
+    [[ -e /mnt/usr/share/xsessions/lxqt.desktop ]] ||
+        die 'Sessão LXQt X11 não está disponível para o SDDM.'
+}
+
+configure_wolf_lxqt_keyring() {
+    # O backend de senhas não depende do KDE Plasma. SDDM normalmente já
+    # possui módulos PAM do GNOME Keyring: apenas complementar se ausentes.
+    local pamfile entry
+    for entry in sddm passwd; do
+        pamfile="/mnt/etc/pam.d/$entry"
+        [[ -f "$pamfile" ]] || die "PAM $entry ausente; não alterar autenticação sem verificação."
+    done
+    pamfile=/mnt/etc/pam.d/sddm
+    if ! grep -Eq '^-?auth[[:space:]]+optional[[:space:]]+pam_gnome_keyring[.]so([[:space:]]|$)' "$pamfile"; then
+        printf '\n-auth optional pam_gnome_keyring.so\n' >> "$pamfile"
+    fi
+    if ! grep -Eq '^-?session[[:space:]]+optional[[:space:]]+pam_gnome_keyring[.]so[[:space:]]+auto_start([[:space:]]|$)' "$pamfile"; then
+        printf '\n-session optional pam_gnome_keyring.so auto_start\n' >> "$pamfile"
+    fi
+    pamfile=/mnt/etc/pam.d/passwd
+    if ! grep -Eq '^password[[:space:]]+optional[[:space:]]+pam_gnome_keyring[.]so([[:space:]]|$)' "$pamfile"; then
+        printf '\npassword optional pam_gnome_keyring.so\n' >> "$pamfile"
+    fi
+    [[ -x /mnt/usr/bin/gnome-keyring-daemon ]] || die 'gnome-keyring-daemon ausente.'
+    ok 'Secret Service instalado; SDDM PAM integrado ao GNOME Keyring.'
+}
+
+# Extensão oficial Wolf validada no hardware: exige artefato compilado pelo usuário.
+# Nunca recompilar / substituir a biblioteca durante hook do Pacman.
+install_wolf_libfm_usb_package() {
+    local name='libfm-qt-2.4.0-4.1-x86_64.pkg.tar.zst'
+    local pkg="$PROJECT_DIR/release-packages/$name"
+    local target="/mnt/var/cache/pacman/pkg/$name"
+    [[ -f "$pkg" && ! -L "$pkg" ]] || die "Pacote Wolf ausente na ISO: $pkg"
+    [[ -x /mnt/usr/bin/zstd ]] || die 'zstd ausente no destino'
+    # Recusar atualização inesperada do Arch; o patch depende da ABI exata.
+    local installed
+    installed="$(arch-chroot /mnt pacman -Q libfm-qt 2>/dev/null || true)"
+    [[ "$installed" == 'libfm-qt 2.4.0-4' || "$installed" == 'libfm-qt 2.4.0-4.1' ]] ||
+        die "libfm-qt inesperada antes do patch Wolf: $installed"
+    install -d /mnt/var/cache/pacman/pkg
+    install -m 0644 "$pkg" "$target"
+    arch-chroot /mnt pacman -U --noconfirm "/var/cache/pacman/pkg/$name" ||
+        die 'Falha ao instalar libfm-qt Wolf no sistema de destino.'
+    arch-chroot /mnt pacman -Q libfm-qt | grep -Fxq 'libfm-qt 2.4.0-4.1' ||
+        die 'Falha na validação do pacote Wolf instalado.'
+    # Hook só registra futuras alterações. Instalar após pacman -U.
+    local source="$PROJECT_DIR/tools/wolf-integration-monitor"
+    install -d /mnt/etc/pacman.d/hooks /mnt/usr/local/lib/wolf-linux/integrations
+    install -m 0644 "$source/90-wolf-libfm-integration.hook" /mnt/etc/pacman.d/hooks/
+    install -m 0644 "$source/wolf_integration_hook.py" \
+        /mnt/usr/local/lib/wolf-linux/integrations/wolf_integration_hook.py
+    # Proteção persistente: pacman -Syu (inclusive fora do Package Manager)
+    # não pode trocar a biblioteca Wolf silenciosamente.
+    # Instalação explícita (-S/-U) ainda exige atenção do usuário.
+    install -m 0755 "$source/wolf-libfm-guard.py" /mnt/usr/local/bin/wolf-libfm-guard
+    /usr/bin/python3 "$source/wolf-libfm-guard.py" --install --config /mnt/etc/pacman.conf ||
+        die 'Não foi possível proteger libfm-qt Wolf em pacman.conf.'
+    arch-chroot /mnt pacman-conf IgnorePkg | grep -Eq '(^|[[:space:]])libfm-qt($|[[:space:]])' ||
+        die 'IgnorePkg libfm-qt não está ativo no pacman.conf do destino.'
+    ok 'libfm-qt Wolf 2.4.0-4.1 instalada; detecção de futuras atualizações habilitada.'
+}
+
+install_wolf_lxqt_profile() {
+    local source="$PROJECT_DIR/tools/lxqt"
+    local dest="/mnt/usr/local/lib/wolf-linux/lxqt"
+    local userhome="/home/$USERNAME_VALUE"
+    local file
+    for file in configurar.py promover-alt-tab.py alt_tab_visual.py super_menu_monitor.py wolf_lxqt_monitors.py wolf-lxqt-menu.svg; do
+        [[ -f "$source/$file" ]] || die "Fonte Wolf LXQt ausente: $file"
+    done
+    install -d "$dest" /mnt/etc/wolf-linux
+    for file in "$source"/*.py "$source"/*.svg; do
+        install -m 0644 "$file" "$dest/$(basename "$file")"
+    done
+    # Chamada por PCManFM-Qt: nova janela VS Code no monitor de origem.
+    install -m 0755 "$source/wolf-open-vscode-monitor" \
+        /mnt/usr/local/bin/wolf-open-vscode-monitor
+    install -d /mnt/usr/share/wolf-linux/lxqt
+    install -m 0644 "$PROJECT_DIR/assets/pcmanfm-qt/wolf-open-vscode.desktop" \
+        /mnt/usr/share/wolf-linux/lxqt/wolf-open-vscode.desktop
+    # Autostart chama este script no primeiro login para detectar monitores X11.
+    install -m 0755 "$source/wolf_lxqt_monitors.py" /mnt/usr/local/bin/wolf-lxqt-monitors
+    # LXQt X11: impedir aceleração em mouses libinput. Não afetar touchpads.
+    install -d /mnt/etc/X11/xorg.conf.d
+    cat > /mnt/etc/X11/xorg.conf.d/50-wolf-lxqt-mouse-flat.conf <<'WOLF_MOUSE_XORG'
+Section "InputClass"
+    Identifier "Wolf LXQt - mouse sem aceleracao"
+    MatchIsPointer "on"
+    MatchIsTouchpad "off"
+    MatchDriver "libinput"
+    Option "AccelProfile" "flat"
+    Option "AccelSpeed" "0"
+EndSection
+WOLF_MOUSE_XORG
+    install -m 0755 "$source/wolf-mouse-flat.sh" /mnt/usr/local/bin/wolf-lxqt-mouse-flat
+    # Migração de nomes ingleses em /home existente: opcional, nunca automática.
+    install -m 0755 "$source/wolf-user-dirs-ptbr.py" /mnt/usr/local/bin/wolf-user-dirs-ptbr
+    install -m 0755 "$source/wolf-appearance-dark" /mnt/usr/local/bin/wolf-appearance-dark
+    install -m 0755 "$source/wolf-gtk-xsettings" /mnt/usr/local/bin/wolf-gtk-xsettings
+    configure_wolf_lxqt_keyring
+    # Preserva /home: configurador cria snapshots antes de qualquer mudança.
+    # Inicia com um painel completo; auto-ajuste reconhece monitor adicional no login.
+    local -a configure=(/usr/bin/python3 /usr/local/lib/wolf-linux/lxqt/configurar.py
+                         --telas 1 --wallpaper /usr/share/backgrounds/wolf-linux/wallpaper.png)
+    arch-chroot /mnt runuser -u "$USERNAME_VALUE" -- env \
+        HOME="$userhome" XDG_CURRENT_DESKTOP= \
+        "${configure[@]}" || die 'Falha na configuração Wolf LXQt.'
+    arch-chroot /mnt runuser -u "$USERNAME_VALUE" -- env \
+        HOME="$userhome" XDG_CURRENT_DESKTOP= \
+        python3 /usr/local/lib/wolf-linux/lxqt/promover-alt-tab.py ||
+        die 'Falha em promover Alt+Tab por monitor.'
+    # Define LXQt/X11 como sessão inicial, sem instalar o KDE Plasma.
+    install -d /mnt/var/lib/sddm
+    cat > /mnt/var/lib/sddm/state.conf <<EOF_SDDM_STATE
+[Last]
+Session=lxqt.desktop
+User=$USERNAME_VALUE
+EOF_SDDM_STATE
+    if arch-chroot /mnt getent passwd sddm >/dev/null 2>&1; then
+        arch-chroot /mnt chown sddm:sddm /var/lib/sddm/state.conf
+    fi
+    # Formatador não destrutivo: valida origem e encaminha para diálogo UDisks2.
+    install -m 0755 "$source/wolf-format-removable" \
+        /mnt/usr/local/bin/wolf-format-removable
+    install -m 0755 "$PROJECT_DIR/tools/package-manager/wolf-integrations-check.py" \
+        /mnt/usr/local/bin/wolf-integrations-check
+    install -m 0755 "$source/wolf-removable-tray" \
+        /mnt/usr/local/bin/wolf-removable-tray
+    # Formatador próprio, restrito a partições USB via UDisks2 com confirmação.
+    # GNOME Disks continua instalado apenas como editor avançado, com nome original.
+    rm -f /mnt/usr/share/applications/wolf-disks.desktop
+    cat > /mnt/usr/share/applications/wolf-format-removable.desktop <<'EOF_WOLF_USB_FORMAT'
+[Desktop Entry]
+Type=Application
+Name=Formatar unidade USB (Wolf Linux)
+Name[pt_BR]=Formatar unidade USB (Wolf Linux)
+Comment=Formatar uma partição USB com confirmação e UDisks2
+Exec=/usr/local/bin/wolf-format-removable --browse
+Icon=drive-removable-media
+Terminal=false
+OnlyShowIn=LXQt;
+Categories=System;Utility;
+EOF_WOLF_USB_FORMAT
+    # Diagnóstico pós-crash apenas por solicitação; não modifica flags/perfil.
+    install -m 0755 "$PROJECT_DIR/tools/lxqt/wolf-chrome-diagnose" \
+        /mnt/usr/local/bin/wolf-chrome-diagnose
+    # Fix Chrome local somente se presente, preservando Exec original e parâmetros.
+    if [[ -r /mnt/usr/share/applications/google-chrome.desktop ]]; then
+        arch-chroot /mnt runuser -u "$USERNAME_VALUE" -- env HOME="$userhome" \
+            mkdir -p "$userhome/.local/share/applications"
+        arch-chroot /mnt runuser -u "$USERNAME_VALUE" -- env HOME="$userhome" \
+            python3 -c 'from pathlib import Path;import re;src=Path("/usr/share/applications/google-chrome.desktop");dst=Path.home()/".local/share/applications/google-chrome.desktop";x=dst.read_text() if dst.is_file() else src.read_text();x=re.sub(r"(?m)^Exec=(?!env GTK_MODULES= )", "Exec=env GTK_MODULES= ", x);dst.write_text(x)' ||
+            warn 'Chrome: não foi possível aplicar launcher GTK_MODULES vazio.'
+    fi
+    # Sem chown recursivo em /home; fontes são aplicadas como usuário normal.
+    ok 'Wolf LXQt: painel principal com tray, segundo dinamico, favoritos PCManFM-Qt e Alt+Tab configurados.'
+}
+
 finalize_vm_install() {
     sync
     echo
     echo "============================================================"
-    echo "         WOLF LINUX 2.1 — INSTALAÇÃO CONCLUÍDA"
+    echo "         WOLF LINUX 2.2 — INSTALAÇÃO CONCLUÍDA"
     echo "============================================================"
-    echo "Desktop ....: KDE Plasma / Wayland"
+    echo "Desktop ....: Wolf LXQt / X11"
     echo "Usuário ....: $USERNAME_VALUE"
     echo "GPU ........: $GPU_PROFILE"
     echo "Stacks .....: $(selected_stacks_text)"
     if [[ -s /mnt/etc/wolf-linux/kernel-default ]]; then
         echo "Kernel principal: $(< /mnt/etc/wolf-linux/kernel-default)"
     else
-        echo 'Kernel principal: linux-lts (provisório)'
+        echo 'Kernel principal: linux (Arch oficial; seleção do GRUB pendente)'
     fi
     echo 'Kernel reserva: linux-lts' 
-    echo "Plasma ......: Branding/MultiMonitor one-shot no primeiro login"
+    echo "LXQt .......: Painéis, Alt+Tab e tema Wolf configurados na instalação"
     echo "Outros helpers: Gamepad e GRUB permanecem manuais"
     echo
     echo "Após o primeiro boot:"
@@ -12581,16 +12715,16 @@ main() {
     stage "60-sistema-base" configure_system_base
     stage "61-identidade-wolf" configure_wolf_identity
     stage "62-usuario-sudo" configure_user_sudo
-    # Todos os perfis tentam Chaotic-AUR/CachyOS, mas indisponibilidade de
-    # chave/CDN/mirror não aborta a instalação: usar LTS e registrar pendência.
+    # Chaotic-AUR é OPCIONAL para pacotes terceiros. Falhas de chave/CDN/mirror
+    # não afetam linux como kernel principal nem linux-lts como reserva.
     stage "63-chaotic-aur" configure_chaotic_aur
-    stage "63a-kernel-cachyos" install_cachyos_kernel
+    stage "63a-kernel-arch" validate_official_arch_kernel
     # Stacks opcionais permanecem independentes do kernel escolhido.
     if (( ${#SELECTED_STACKS[@]} > 0 )); then
         stage "63b-vulkan" install_preferred_vulkan_provider
         stage "64-resolver-stacks" install_selected_stack_packages
     else
-        ok 'Minimal: kernels avaliados; stacks opcionais ignoradas.'
+        ok 'Minimal: kernels oficiais validados; stacks opcionais ignoradas.'
     fi
     stage "67-servicos" configure_services
     stage "68-android-flutter" install_optional_flutter_sdk
@@ -12598,9 +12732,11 @@ main() {
     stage "69b-validar-video" validate_graphics_stack
     stage "69b2-validar-nvidia-dkms" validate_nvidia_dkms_for_both_kernels
     stage "69c-branding-boot" install_wolf_branding
-    stage "69c2-painel-sem-discover" install_wolf_plasma_panel_defaults
-    stage "69c3-preferencias-kde" install_wolf_kde_personal_defaults
+    stage "69c2-lxqt-base" validate_lxqt_base
+    stage "69c3-preferencias-compartilhadas" install_wolf_shared_personal_defaults
     stage "69d-helpers-primeiro-login" install_wolf_helper_bundle
+    stage "69d2-wolf-lxqt" install_wolf_lxqt_profile
+    stage "69d3-formato-usb-menu-wolf" install_wolf_libfm_usb_package
     stage "69e-grub-manager" install_wolf_grub_manager
     stage "70-bootloader" configure_bootloader
     stage "72-validar-boot" validate_boot_installation

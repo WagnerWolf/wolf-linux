@@ -114,7 +114,7 @@ STAGE_SSH_EOF
 }
 
 say '============================================================'
-say " WOLF LINUX ${DEVKIT_VERSION} - PREPARAÇÃO LIMPA KDE/WAYLAND"
+say " WOLF LINUX ${DEVKIT_VERSION} - PREPARAÇÃO LIMPA LXQt/X11"
 say '============================================================'
 say "DevKit : $SELF_DIR"
 say "Projeto: $PROJECT"
@@ -125,6 +125,17 @@ say
 [[ -f "$SELF_DIR/package-profiles/packages.conf" ]] || err 'DevKit incompleto: package-profiles/packages.conf ausente.'
 [[ -f "$SELF_DIR/tests/wolf-customize-iso-profile.sh" ]] || err 'DevKit incompleto: customizador ausente.'
 [[ -f "$SELF_DIR/tests/wolf-enable-ssh-live.sh" ]] || err 'DevKit incompleto: helper SSH live ausente.'
+[[ -f "$SELF_DIR/gerar-iso-2.2.0.sh" ]] || err 'DevKit incompleto: gerador da ISO 2.2.0 ausente.'
+# Um único atalho oficial para PCManFM-Qt: origem do branding deve
+# coincidir com a cópia já distribuída em assets/. Impede ISO com atalho velho.
+VSCODE_ACTION='pcmanfm-qt/wolf-open-vscode.desktop'
+[[ -f "$SELF_DIR/branding-assets/$VSCODE_ACTION" ]] || \
+    err "DevKit incompleto: branding-assets/$VSCODE_ACTION ausente."
+[[ -f "$SELF_DIR/assets/$VSCODE_ACTION" ]] || \
+    err "DevKit incompleto: assets/$VSCODE_ACTION ausente."
+cmp -s "$SELF_DIR/branding-assets/pcmanfm-qt/wolf-open-vscode.desktop" \
+       "$SELF_DIR/assets/pcmanfm-qt/wolf-open-vscode.desktop" || \
+    err 'A ação do PCManFM-Qt diverge entre branding-assets/ e assets/.'
 
 if (( SKIP_DEPS == 0 )); then
     say '[1/8] Instalando/verificando ferramentas de desenvolvimento...'
@@ -183,15 +194,31 @@ mkdir -p \
 say '[4/8] Copiando perfil Archiso releng NOVO...'
 cp -a "$RELENG" "$PROJECT/iso-profile"
 
-say '[5/8] Copiando baseline KDE/Wayland do DevKit...'
+say '[5/8] Copiando baseline LXQt/X11 do DevKit...'
+# Hotfix manual para instalações físicas já existentes (sem sobrescrever o boot).
+cp -f "$SELF_DIR/atualizar-paineis-pastas-control-center.sh" \
+  "$PROJECT/atualizar-paineis-pastas-control-center.sh"
+chmod 755 "$PROJECT/atualizar-paineis-pastas-control-center.sh"
+install -m 0755 "$SELF_DIR/wolf-corrigir-painel-duplo.py" "$PROJECT/wolf-corrigir-painel-duplo.py"
 cp -f "$SELF_DIR/install/wolf-install.sh" "$PROJECT/install/wolf-install.sh"
 cp -f "$SELF_DIR/package-profiles/packages.conf" "$PROJECT/package-profiles/packages.conf"
 cp -a "$SELF_DIR/tests/." "$PROJECT/tests/"
+mkdir -p "$PROJECT/experimental"
+cp -a "$SELF_DIR/experimental/." "$PROJECT/experimental/"
 cp -a "$SELF_DIR/tools/." "$PROJECT/tools/"
+mkdir -p "$PROJECT/release-packages"
+cp -a "$SELF_DIR/release-packages/." "$PROJECT/release-packages/"
 cp -a "$SELF_DIR/docs/." "$PROJECT/docs/"
 cp -a "$SELF_DIR/live-gui/." "$PROJECT/live-gui/"
 cp -a "$SELF_DIR/branding-assets/." "$PROJECT/assets/"
+# Na árvore preparada, assets/ é o destino canônico de branding-assets/.
+# Falhar cedo se o atalho do VS Code não foi efetivamente copiado.
+cmp -s "$PROJECT/assets/pcmanfm-qt/wolf-open-vscode.desktop" \
+       "$SELF_DIR/branding-assets/pcmanfm-qt/wolf-open-vscode.desktop" || \
+    err 'Ação PCManFM-Qt não foi copiada corretamente para o projeto preparado.'
 cp -f "$SELF_DIR/README.md" "$PROJECT/README.md"
+cp -f "$SELF_DIR/WOLF-PM-0.3.7-PROTECAO-LIBFM-VM.md" "$PROJECT/WOLF-PM-0.3.7-PROTECAO-LIBFM-VM.md"
+cp -f "$SELF_DIR/RELEASE-2.2.0-PM-0.3.7.md" "$PROJECT/RELEASE-2.2.0-PM-0.3.7.md"
 cp -f "$SELF_DIR/CHANGELOG.md" "$PROJECT/CHANGELOG.md"
 cp -f "$SELF_DIR/RELEASE-NOTES-2.0.0.md" "$PROJECT/RELEASE-NOTES-2.0.0.md"
 cp -f "$SELF_DIR/RELEASE-NOTES-2.1.0.md" "$PROJECT/RELEASE-NOTES-2.1.0.md"
@@ -199,13 +226,20 @@ cp -f "$SELF_DIR/RELEASE-NOTES-2.1.1-rc1.md" "$PROJECT/RELEASE-NOTES-2.1.1-rc1.m
 cp -f "$SELF_DIR/RELEASE-NOTES-2.1.1-rc2.md" "$PROJECT/RELEASE-NOTES-2.1.1-rc2.md"
 cp -f "$SELF_DIR/RELEASE-NOTES-2.1.1.md" "$PROJECT/RELEASE-NOTES-2.1.1.md"
 cp -f "$SELF_DIR/RELEASE-NOTES-2.1.2.md" "$PROJECT/RELEASE-NOTES-2.1.2.md"
-cp -f "$SELF_DIR/RELEASE-NOTES-2.1.3.md" "$PROJECT/RELEASE-NOTES-2.1.3.md"
+cp -f "$SELF_DIR/RELEASE-NOTES-2.2.0-rc1.md" "$PROJECT/RELEASE-NOTES-2.2.0-rc1.md"
+cp -f "$SELF_DIR/RELEASE-NOTES-2.2.0.md" "$PROJECT/RELEASE-NOTES-2.2.0.md"
+cp -f "$SELF_DIR/FIX-2.2.0-PAINEIS-XDG-TEMA-USB-FIX3.md" "$PROJECT/FIX-2.2.0-PAINEIS-XDG-TEMA-USB-FIX3.md"
+cp -f "$SELF_DIR/FIX-2.2.0-PAINEL-DUPLICADO-FIX4.md" "$PROJECT/FIX-2.2.0-PAINEL-DUPLICADO-FIX4.md"
 cp -f "$SELF_DIR/RELEASE-NOTES-2.1.3-rc5.md" "$PROJECT/RELEASE-NOTES-2.1.3-rc5.md"
 cp -f "$SELF_DIR/RELEASE-NOTES-2.1.3-rc4.md" "$PROJECT/RELEASE-NOTES-2.1.3-rc4.md"
 cp -f "$SELF_DIR/RELEASE-NOTES-2.1.3-rc1.md" "$PROJECT/RELEASE-NOTES-2.1.3-rc1.md"
 cp -f "$SELF_DIR/THIRD-PARTY-LICENSES.md" "$PROJECT/THIRD-PARTY-LICENSES.md"
 cp -f "$SELF_DIR/wolf-linux-logo.png" "$PROJECT/wolf-linux-logo.png"
 cp -f "$SELF_DIR/preparar_ambiente_wolf_linux.sh" "$PROJECT/preparar_ambiente_wolf_linux.sh"
+install -m 0755 "$SELF_DIR/corrigir-lxqt-instalado-2.2.0.sh" "$PROJECT/corrigir-lxqt-instalado-2.2.0.sh"
+# O teste de identidade e o fluxo de release precisam do lançador também na
+# árvore de trabalho preparada (não apenas no DevKit de origem).
+install -m 0755 "$SELF_DIR/gerar-iso-2.2.0.sh" "$PROJECT/gerar-iso-2.2.0.sh"
 printf '%s\n' "$DEVKIT_VERSION" > "$PROJECT/VERSION"
 
 chmod 755 "$PROJECT/install/wolf-install.sh" "$PROJECT/preparar_ambiente_wolf_linux.sh"
@@ -252,7 +286,7 @@ grep -Fq '/usr/local/bin/wolf-enable-ssh-live' "$PROFILEDEF" || err 'profiledef.
 
 # Comparação exata, sem versões duplicadas/hardcoded, e diagnóstico legível.
 LIVE_MARKER="$PROJECT/iso-profile/airootfs/etc/wolf-linux-live-build"
-EXPECTED_MARKER="Wolf Linux ${DEVKIT_VERSION} KDE/Wayland Clean Baseline"
+EXPECTED_MARKER="Wolf Linux ${DEVKIT_VERSION} LXQt/X11 Clean Baseline"
 if ! cmp -s "$LIVE_MARKER" <(printf '%s\n' "$EXPECTED_MARKER"); then
     printf '[ERRO] Marcador da live diverge da versão do DevKit.\n' >&2
     printf '  Esperado: %q\n' "$EXPECTED_MARKER" >&2

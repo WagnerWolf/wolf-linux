@@ -23,12 +23,15 @@ from .backend import (Preferences, Package, STATE_DIR, upgrade_commands, install
                       missing_dependencies, space_snapshot)
 from .terminal import TerminalRunner
 from .terminal_display import TerminalLines
-from .worker import CheckWorker, SearchWorker
+from .worker import CheckWorker, SearchWorker, PostUpdateWorker
 from .search_service import invalidate_search_cache
 from .tray_policy import tray_upgrade_state
+from .integrations import check_all, format_report
+from .upgrade_guard import (probe as probe_libfm, describe as describe_libfm,
+                            newer_repo_available)
 
 ASSETS = Path(__file__).resolve().parent / 'assets'
-VERSION = '0.3.4'
+VERSION = '0.3.7'
 STYLE = '''
 QWidget {background:#121a25;color:#e8eff7;font-size:13px;}
 QFrame#sidebar {background:#172231;border-right:1px solid #304058;}
@@ -85,6 +88,15 @@ class DiagnosticWorker(QThread):
         self.ready.emit(diagnostic_report())
 
 
+class IntegrationsWorker(QThread):
+    ready = Signal(object)
+    def run(self):
+        try:
+            self.ready.emit((check_all(), None))
+        except Exception as exc:
+            self.ready.emit(([], str(exc)))
+
+
 class Manager(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -94,6 +106,10 @@ class Manager(QMainWindow):
         self.search_results = []
         self.checker = None
         self.searcher = None
+        self.integrations_worker = None
+        self.postcheck_worker = None
+        self._postcheck_exit = None
+        self._postcheck_manual = False
         self.errors = {}
         self._last_announced = frozenset()
         self.running_plan = ()
@@ -144,7 +160,7 @@ class Manager(QMainWindow):
         side.addWidget(brand)
         side.addWidget(info('Gerenciador do Wolf Linux'))
         self.nav = QListWidget()
-        self.nav.addItems(['Atualizações', 'Pesquisar e instalar', 'Terminal', 'Preferências', 'Sobre'])
+        self.nav.addItems(['Atualizações', 'Pesquisar e instalar', 'Terminal', 'Preferências', 'Integrações Wolf', 'Sobre'])
         self.nav.setCurrentRow(0)
         self.nav.currentRowChanged.connect(lambda i: self.stack.setCurrentIndex(i) if i >= 0 else None)
         side.addWidget(self.nav, 1)
@@ -157,6 +173,7 @@ class Manager(QMainWindow):
         self.stack.addWidget(self._page_search())
         self.stack.addWidget(self._page_terminal())
         self.stack.addWidget(self._page_settings())
+        self.stack.addWidget(self._page_integrations())
         self.stack.addWidget(self._page_about())
 
     def _page_updates(self):
@@ -253,9 +270,11 @@ class Manager(QMainWindow):
         self.btn_retry=QPushButton('Repetir etapa com erro')
         self.btn_retry.setEnabled(False);self.btn_retry.clicked.connect(self.retry_failed)
         diag=QPushButton('Diagnóstico');diag.clicked.connect(self.show_diagnostics)
+        self.btn_postcheck = QPushButton('Verificar boot/DKMS')
+        self.btn_postcheck.clicked.connect(self.check_boot_manually)
         lock_button=QPushButton('Analisar db.lck');lock_button.clicked.connect(self.show_lock_diagnostics)
         clear=QPushButton('Limpar visualização');clear.clicked.connect(self.clear_terminal_view)
-        buttons.addWidget(self.btn_retry);buttons.addWidget(diag);buttons.addWidget(lock_button);buttons.addWidget(clear);buttons.addStretch()
+        buttons.addWidget(self.btn_retry);buttons.addWidget(diag);buttons.addWidget(self.btn_postcheck);buttons.addWidget(lock_button);buttons.addWidget(clear);buttons.addStretch()
         v.addLayout(buttons)
         return page
 
@@ -277,12 +296,111 @@ class Manager(QMainWindow):
         v.addWidget(save);v.addStretch()
         return page
 
+    def _page_integrations(self):
+        page = QWidget(); v = QVBoxLayout(page)
+        v.setContentsMargins(23,23,23,20); v.setSpacing(12)
+        v.addWidget(title('Integrações Wolf'))
+        v.addWidget(info('Auditoria somente leitura de personalizações do sistema. '
+                         'A integração experimental do menu USB depende de um pacote libfm-qt Wolf '
+                         'compilado e validado separadamente. Nenhum reparo é automático.'))
+        self.integrations_table = self._table(['Integração', 'Estado', 'Descrição'], stretch=2)
+        v.addWidget(self.integrations_table, 1)
+        self.integrations_details = QPlainTextEdit()
+        self.integrations_details.setReadOnly(True)
+        self.integrations_details.setMaximumHeight(170)
+        self.integrations_details.setPlainText('Clique em Verificar integrações.')
+        v.addWidget(self.integrations_details)
+        controls = QHBoxLayout()
+        self.integrations_btn = QPushButton('Verificar integrações')
+        self.integrations_btn.clicked.connect(self.refresh_integrations)
+        controls.addWidget(self.integrations_btn)
+        self.libfm_plan_btn = QPushButton('Planejar atualização libfm-qt')
+        self.libfm_plan_btn.clicked.connect(self.show_libfm_plan)
+        controls.addWidget(self.libfm_plan_btn)
+        controls.addStretch()
+        v.addLayout(controls)
+        return page
+
+    def refresh_integrations(self):
+        worker = getattr(self, 'integrations_worker', None)
+        if worker is not None and worker.isRunning():
+            return
+        self.integrations_btn.setEnabled(False)
+        self.integrations_details.setPlainText('Verificando...')
+        self.integrations_worker = IntegrationsWorker(self)
+        self.integrations_worker.ready.connect(self._integrations_ready)
+        self.integrations_worker.finished.connect(lambda: self.integrations_btn.setEnabled(True))
+        self.integrations_worker.start()
+
+    def _integrations_ready(self, result):
+        statuses, error = result
+        if error:
+            self.integrations_details.setPlainText('Falha na auditoria: ' + error)
+            return
+        self.integrations_table.setRowCount(len(statuses))
+        for i, entry in enumerate(statuses):
+            for j, value in enumerate((entry.name, entry.status, entry.description)):
+                self.integrations_table.setItem(i, j, QTableWidgetItem(value))
+        self.integrations_details.setPlainText(format_report(statuses))
+
+    def show_libfm_plan(self):
+        """Assistente de decisão: não compila nem instala sem validação."""
+        state = probe_libfm()
+        instructions = (
+            'Etapas para uma futura versão da libfm-qt:\n'
+            '1. Conferir a versão oficial e o changelog do LXQt.\n'
+            '2. Obter a fonte/PKGBUILD correspondentes e adaptar o patch Wolf.\n'
+            '3. Compilar com pkgctl build em chroot limpo, verificando assinaturas.\n'
+            '4. Conferir ABI/SONAME, funcionalidades e reversão numa VM.\n'
+            '5. Somente então autorizar a troca da biblioteca e remover ou ajustar a proteção.\n\n'
+            'Este assistente NÃO aplica patch, não remove IgnorePkg e não executa pacman. '
+            'Não tente instalar a versão oficial isoladamente numa atualização parcial.'
+        )
+        QMessageBox.information(self, 'Plano de atualização da integração USB',
+                                describe_libfm(state) + '\n\n' + instructions)
+
+    def _protect_libfm_before_transaction(self, *, explicit=False, checked=False):
+        """Não iniciar transação sem proteção configurada (inclusive installs)."""
+        state = probe_libfm()
+        if explicit and state.wolf_active:
+            QMessageBox.warning(self, 'Integração Wolf protegida',
+                'A biblioteca libfm-qt personalizada não pode ser substituída '
+                'pela instalação genérica. Abra Integrações Wolf para planejar '
+                'um novo pacote validado.')
+            self.open_page(4)
+            return False
+        if not state.safe_for_system_update:
+            QMessageBox.warning(self, 'Proteção da libfm-qt ausente',
+                describe_libfm(state) + '\n\nAtualização bloqueada. '
+                'Reaplique a proteção Wolf (IgnorePkg) antes de continuar.')
+            self.open_page(4)
+            return False
+        if checked and state.wolf_active:
+            # A proteção mantém a biblioteca Wolf fora do upgrade comum.
+            # A aplicação de um patch futuro permanece totalmente manual.
+            target_in_updates = (any(u.name == 'libfm-qt' for u in self.updates)
+                                 or newer_repo_available(state))
+            if target_in_updates:
+                choice = QMessageBox.question(self, 'Atualização da libfm-qt protegida',
+                    'Uma atualização oficial de libfm-qt foi encontrada, mas a biblioteca '
+                    'Wolf ficará preservada por IgnorePkg. Deseja atualizar os OUTROS pacotes?\n\n'
+                    'Se dependências exigirem uma ABI nova, o Pacman deverá interromper '
+                    'a transação; não force uma atualização parcial.\n\n'
+                    'Use Integrações Wolf para planejar a nova versão.',
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No)
+                if choice != QMessageBox.StandardButton.Yes:
+                    self.open_page(4)
+                    return False
+        return True
+
     def _page_about(self):
         page=QWidget();v=QVBoxLayout(page)
         v.setContentsMargins(23,23,23,20)
         v.addWidget(title('Wolf Package Manager '+VERSION))
         v.addWidget(info('Repositórios: pacman. Pacotes AUR: yay como usuário comum. Busca por comandos usa o índice repo.files do pacman, sem cobertura de arquivos de pacotes AUR.'))
         v.addWidget(info('Atualizações: pacman -Syu seguido de yay --aur, somente após sucesso da etapa anterior. Nunca atualizar repositórios isoladamente com pacman -Sy.'))
+        v.addWidget(info('Após pacman -Syu, e depois do AUR, verifica kernel, initramfs, NVIDIA DKMS e pacman -Dk (somente leitura). Inconsistências críticas impedem avanço automático.'))
         v.addWidget(info('O monitor avisa quando uma etapa demora sem produzir saída e oferece diagnóstico. Não encerra pacman/makepkg automaticamente para evitar transações interrompidas.'))
         v.addWidget(info('Os logs são restritos ao usuário em ~/.local/state/wolf-package-manager/logs/. Não guarde informações sensíveis nos prompts do terminal.'))
         v.addStretch();return page
@@ -337,12 +455,14 @@ class Manager(QMainWindow):
 
     def _busy(self):
         diagnostic=getattr(self,'diagnostic_worker',None)
-        return (self.runner.running() or (self.checker is not None and self.checker.isRunning())
+        postcheck=getattr(self,'postcheck_worker',None)
+        return ((postcheck is not None and postcheck.isRunning()) or self.runner.running() or (self.checker is not None and self.checker.isRunning())
                 or (self.searcher is not None and self.searcher.isRunning())
                 or (diagnostic is not None and diagnostic.isRunning()))
 
     def _set_actions_enabled(self, enable):
         self.btn_check.setEnabled(enable)
+        self.btn_postcheck.setEnabled(enable)
         self.btn_upgrade.setEnabled(enable)
         self.btn_search.setEnabled(enable)
         self.btn_install.setEnabled(enable and bool(self._marked_packages()))
@@ -393,7 +513,12 @@ class Manager(QMainWindow):
             if 'Transação' in errors:
                 QTimer.singleShot(60_000, self.check_updates)
         else:
-            self.summary.setText(f'{total} atualização(ões) encontrada(s) — {now}')
+            guard = probe_libfm()
+            self.summary.setText(f'{total} atualização(ões) encontrada(s) — {now}'
+                + (' · ⚠ libfm-qt Wolf protegida: verificar integrações'
+                   if guard.wolf_active and (any(u.name == 'libfm-qt' for u in self.updates)
+                       or newer_repo_available(guard))
+                   else ''))
             self.tray.setIcon(tray_icon('updates' if total else 'ok'))
             ids=frozenset((u.source,u.name,u.available) for u in self.updates)
             if (total and self.prefs.notifications and ids!=self._last_announced
@@ -495,6 +620,9 @@ class Manager(QMainWindow):
         try:cmds=installation_batch_commands(packages,self.prefs.aur_automatic)
         except ValueError as exc:
             QMessageBox.warning(self,'Pacote inválido',str(exc));return
+        if not self._protect_libfm_before_transaction(
+                explicit=any(p.name == 'libfm-qt' for p in packages), checked=True):
+            return
         names=', '.join(f'{p.repo}/{p.name}' for p in packages[:15])
         if len(packages)>15:names+=f' ... (+{len(packages)-15})'
         if not self._confirm('Confirmar instalação',
@@ -509,6 +637,8 @@ class Manager(QMainWindow):
         missing=missing_dependencies()
         if missing:
             QMessageBox.warning(self,'Dependências ausentes','Instale: '+', '.join(missing));return
+        if not self._protect_libfm_before_transaction(checked=True):
+            return
         if not self._confirm('Confirmar atualização',
                 'Atualizar repositórios (Arch/Chaotic-AUR) e, somente após sucesso, os pacotes AUR com yay?',True):
             return
@@ -559,6 +689,61 @@ class Manager(QMainWindow):
         self.terminal_input.setEnabled(False)
         self.btn_send.setEnabled(False)
         self.append_terminal(f'\n[Etapa {self.stage+1}] código de saída: {exit_code}\n')
+        cmd = self.running_plan[self.stage] if 0 <= self.stage < len(self.running_plan) else ()
+        # Sempre verificar após pacman -Syu, inclusive se houve erro nos hooks.
+        # Na atualização completa, verificar também ao final da etapa AUR.
+        needs_check = ('pacman' in cmd and '-Syu' in cmd) or (
+            self.plan_label == 'Atualização completa' and self.stage+1 == len(self.running_plan))
+        if needs_check:
+            self._start_postcheck(exit_code=exit_code)
+            return
+        self._complete_stage(exit_code)
+
+    def check_boot_manually(self):
+        if self._busy():
+            return
+        self.open_page(2)
+        self._start_postcheck(manual=True)
+
+    def _start_postcheck(self, exit_code=None, manual=False):
+        self._postcheck_exit = exit_code
+        self._postcheck_manual = manual
+        self.terminal_state.setText('Verificando kernel, initramfs e DKMS (somente leitura)…')
+        self.append_terminal('\n[POSTCHECK] Verificando arquivos de boot, DKMS e banco do Pacman…\n')
+        self._set_actions_enabled(False)
+        self.postcheck_worker = PostUpdateWorker(self)
+        self.postcheck_worker.finished.connect(self._postcheck_finished)
+        self.postcheck_worker.start()
+        self._sync_tray_upgrade_action()
+
+    def _postcheck_finished(self):
+        report = self.postcheck_worker.report
+        self.append_terminal('\n'+report.describe()+'\n')
+        self._set_actions_enabled(True)
+        self.postcheck_worker = None
+        self._sync_tray_upgrade_action()
+        if report.critical:
+            self.tray.setIcon(tray_icon('error'))
+            self.terminal_state.setText('ALERTA: boot/DKMS inconsistente. Não reinicie sem conferir o diagnóstico.')
+            self.open_page(2)
+            QMessageBox.warning(self, 'Verificação de boot/DKMS',
+                'Foram encontradas inconsistências após a atualização.\n\n'
+                + '\n'.join(report.critical[:8])
+                + '\n\nNenhum reparo automático foi realizado. Confira o log antes de reiniciar.')
+            if not self._postcheck_manual:
+                # Bloqueia o avanço ao AUR; jamais marca a operação como sucesso.
+                self.append_terminal('\n[ALERTA] Plano interrompido antes da próxima etapa. '
+                                     'Não repita a transação automaticamente; investigue o log.\n')
+                self.failed_stage = -1
+                self.btn_retry.setEnabled(False)
+            return
+        if self._postcheck_manual:
+            self.terminal_state.setText('Verificação manual concluída. '+
+                                       ('Ressalvas no log.' if report.advisory else 'Sem inconsistências críticas detectadas.'))
+            return
+        self._complete_stage(self._postcheck_exit)
+
+    def _complete_stage(self,exit_code):
         if exit_code==0 and self.stage+1<len(self.running_plan):
             state, detail = lock_inspection()
             if state != 'livre':
@@ -710,6 +895,13 @@ def main():
     if os.geteuid()==0:
         raise SystemExit('Execute como usuário comum, nunca como root.')
     app=QApplication(sys.argv)
+    # KDE/Wayland: identifica as notificações pelo aplicativo, não pelo main.py.
+    # O nome do arquivo .desktop é informado SEM a extensão.
+    app.setApplicationName('Wolf Package Manager')
+    app.setApplicationDisplayName('Wolf Package Manager')
+    app.setDesktopFileName('wolf-package-manager')
+    app.setApplicationVersion(VERSION)
+    app.setWindowIcon(QIcon(str(ASSETS / 'wolf-logo.png')))
     app.setQuitOnLastWindowClosed(False)
     start_in_tray = '--tray' in sys.argv or '--minimized' in sys.argv
     # At login KDE may create its status notifier after this application starts.
