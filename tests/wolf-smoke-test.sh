@@ -3,6 +3,9 @@ set -Eeuo pipefail
 PROJECT="${WOLF_PROJECT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 printf '\n=== WOLF LXQT 2.2.0 RELEASE: SMOKE ESTÁTICO NÃO DESTRUTIVO ===\n'
 python3 "$PROJECT/tests/wolf-test-lxqt-2.2.0.py"
+python3 "$PROJECT/tests/wolf-test-archiver-integration-2.2.py"
+python3 "$PROJECT/tests/wolf-test-picom-preview-2.2.py"
+python3 "$PROJECT/tests/wolf-test-picom-release-2.2.py"
 python3 "$PROJECT/tests/wolf-test-monitors-entry-2.2.0.py"
 python3 "$PROJECT/tests/wolf-test-windows-keyring-2.2.0.py"
 python3 "$PROJECT/tests/wolf-test-release-2.2.0.py"

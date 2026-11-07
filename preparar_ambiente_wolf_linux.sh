@@ -126,6 +126,7 @@ say
 [[ -f "$SELF_DIR/tests/wolf-customize-iso-profile.sh" ]] || err 'DevKit incompleto: customizador ausente.'
 [[ -f "$SELF_DIR/tests/wolf-enable-ssh-live.sh" ]] || err 'DevKit incompleto: helper SSH live ausente.'
 [[ -f "$SELF_DIR/gerar-iso-2.2.0.sh" ]] || err 'DevKit incompleto: gerador da ISO 2.2.0 ausente.'
+[[ -f "$SELF_DIR/wolf-corrigir-archiver-2.2.0.py" ]] || err 'DevKit incompleto: reparador do LXQt Archiver ausente.'
 # Um único atalho oficial para PCManFM-Qt: origem do branding deve
 # coincidir com a cópia já distribuída em assets/. Impede ISO com atalho velho.
 VSCODE_ACTION='pcmanfm-qt/wolf-open-vscode.desktop'
@@ -200,9 +201,15 @@ cp -f "$SELF_DIR/atualizar-paineis-pastas-control-center.sh" \
   "$PROJECT/atualizar-paineis-pastas-control-center.sh"
 chmod 755 "$PROJECT/atualizar-paineis-pastas-control-center.sh"
 install -m 0755 "$SELF_DIR/wolf-corrigir-painel-duplo.py" "$PROJECT/wolf-corrigir-painel-duplo.py"
+# O smoke do Archiver importa este módulo a partir da raiz do projeto PREPARADO.
+# Ao copiar os testes, copiar também este reparador (sem modificar o sistema instalado).
+install -m 0755 "$SELF_DIR/wolf-corrigir-archiver-2.2.0.py" "$PROJECT/wolf-corrigir-archiver-2.2.0.py"
 cp -f "$SELF_DIR/install/wolf-install.sh" "$PROJECT/install/wolf-install.sh"
 cp -f "$SELF_DIR/package-profiles/packages.conf" "$PROJECT/package-profiles/packages.conf"
 cp -a "$SELF_DIR/tests/." "$PROJECT/tests/"
+# Falhar no preparo, não após iniciar o build, se a dependência do smoke faltar.
+cmp -s "$SELF_DIR/wolf-corrigir-archiver-2.2.0.py" "$PROJECT/wolf-corrigir-archiver-2.2.0.py" || \
+    err 'Reparador do Archiver ausente ou divergente no projeto preparado.'
 mkdir -p "$PROJECT/experimental"
 cp -a "$SELF_DIR/experimental/." "$PROJECT/experimental/"
 cp -a "$SELF_DIR/tools/." "$PROJECT/tools/"
@@ -228,6 +235,7 @@ cp -f "$SELF_DIR/RELEASE-NOTES-2.1.1.md" "$PROJECT/RELEASE-NOTES-2.1.1.md"
 cp -f "$SELF_DIR/RELEASE-NOTES-2.1.2.md" "$PROJECT/RELEASE-NOTES-2.1.2.md"
 cp -f "$SELF_DIR/RELEASE-NOTES-2.2.0-rc1.md" "$PROJECT/RELEASE-NOTES-2.2.0-rc1.md"
 cp -f "$SELF_DIR/RELEASE-NOTES-2.2.0.md" "$PROJECT/RELEASE-NOTES-2.2.0.md"
+cp -f "$SELF_DIR/RELEASE-2.2.0-PICOM-GLX.md" "$PROJECT/RELEASE-2.2.0-PICOM-GLX.md"
 cp -f "$SELF_DIR/FIX-2.2.0-PAINEIS-XDG-TEMA-USB-FIX3.md" "$PROJECT/FIX-2.2.0-PAINEIS-XDG-TEMA-USB-FIX3.md"
 cp -f "$SELF_DIR/FIX-2.2.0-PAINEL-DUPLICADO-FIX4.md" "$PROJECT/FIX-2.2.0-PAINEL-DUPLICADO-FIX4.md"
 cp -f "$SELF_DIR/RELEASE-NOTES-2.1.3-rc5.md" "$PROJECT/RELEASE-NOTES-2.1.3-rc5.md"

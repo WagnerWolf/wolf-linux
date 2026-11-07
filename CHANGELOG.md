@@ -1,3 +1,10 @@
+## Wolf Linux 2.2.0 — Picom integrado à release (02/11/2026)
+- Perfil LXQt/Openbox X11: Picom GLX/VSync ativado por padrão no login.
+- Wolf-dark: fundo opaco dos painéis preservado ao reaplicar o tema.
+- Instalações com /home reutilizada preservam configuração e autostart Picom existentes.
+- Teste específico de regressão com configuração, autostart, tema e backups.
+- Não altera o kernel, a NVIDIA, o Chrome nem a biblioteca USB personalizada.
+
 ## 2.2.0 — Consolidação da integração USB (2026-11-02)
 
 - Menu USB exclusivo do dispositivo, formato --device e migração da ação antiga de pastas.

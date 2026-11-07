@@ -18,7 +18,8 @@ CONFIG = HOME / '.config'
 DATA = HOME / '.local/share'
 BASE = HOME / 'wolf-backups/lxqt'
 
-THEME_QSS = '''/* Wolf LXQt Dark — superfície sem efeitos de composição */
+THEME_QSS = '''/* Wolf LXQt Dark — fundo opaco para Picom */
+LXQtPanel #BackgroundWidget { background: #242a34; }
 QMenu { background-color: #1d222c; color: #e6edf7; border: 1px solid #3b4656; padding: 4px; }
 QMenu::item { padding: 7px 17px; border-radius: 5px; }
 QMenu::item:selected { background-color: #324e69; color: #f6fbff; }
@@ -324,6 +325,48 @@ def setup_ptbr_user_dirs(inst):
     inst.write(target, '\n'.join(lines)+'\n')
     inst.write(CONFIG/'user-dirs.locale', 'pt_BR\n')
     return True
+
+
+# Perfil Picom validado em hardware físico no LXQt/Openbox X11.
+# Configuração conservadora: evita transparência, animações, blur e sombras.
+PICOM_CONF = '''# Wolf Linux - Picom X11 (perfil conservador)
+backend = "glx";
+vsync = true;
+shadow = false;
+fading = false;
+active-opacity = 1.0;
+inactive-opacity = 1.0;
+frame-opacity = 1.0;
+unredir-if-possible = false;
+'''
+PICOM_AUTOSTART = '''[Desktop Entry]
+Type=Application
+Name=Wolf - Composição Picom (LXQt/X11)
+Comment=Composição GLX/VSync para Steam, sem efeitos adicionais
+Exec=picom
+TryExec=picom
+OnlyShowIn=LXQt;
+NoDisplay=true
+X-LXQt-Need-Tray=false
+'''
+
+
+def setup_picom_config(inst):
+    """Cria o perfil Picom para instalações novas, preservando personalizações."""
+    picom = CONFIG/'picom/picom.conf'
+    if picom.exists() or picom.is_symlink():
+        print('Picom: configuração existente preservada:', picom)
+        return
+    inst.write(picom, PICOM_CONF)
+
+
+def setup_picom_autostart(inst):
+    """Ativa Picom somente no LXQt; respeita autostart preexistente de /home."""
+    autostart = CONFIG/'autostart/wolf-picom.desktop'
+    if autostart.exists() or autostart.is_symlink():
+        print('Picom: autostart existente preservado:', autostart)
+        return
+    inst.write(autostart, PICOM_AUTOSTART)
 
 
 def setup_mouse_flat(inst):
@@ -693,6 +736,8 @@ def configure(args):
     setup_ptbr_user_dirs(inst)
     setup_pcmanfm_places(inst)
     setup_mouse_flat(inst)
+    setup_picom_config(inst)
+    setup_picom_autostart(inst)
     write_desktop_mime(inst)
     setup_global_shortcuts(inst)
     setup_lxqt_settings_icon(inst,menu_icon)
@@ -727,7 +772,8 @@ NoDisplay=true
         desktop_options['Wallpaper'] = str(wall)
     inst.write_ini(CONFIG/'pcmanfm-qt/lxqt/settings.conf',{
         'Desktop':desktop_options,
-        'System':{'IconThemeName':'Papirus-Dark','FallbackIconThemeName':'breeze-dark','Terminal':'konsole'}})
+        'System':{'IconThemeName':'Papirus-Dark','FallbackIconThemeName':'breeze-dark',
+                  'Terminal':'konsole', 'Archiver':'lxqt-archiver'}})
     # SDDM, mouse, drivers e boot preservados; MIME e kdeglobals afetam outros desktops também (backup).
     path = inst.complete()
     print(f'\nCONFIGURAÇÃO CRIADA. Backup: {path}')
@@ -736,6 +782,7 @@ NoDisplay=true
     print(f'Alt+Tab: nativo do Openbox; Super+Tab: {"por monitor (experimental)" if args.alttab_monitor else "desativado"}')
     print(f'Ícone do menu: {icon or menu_icon}')
     print('Painel principal com bandeja; painel secundário habilitado automaticamente se houver outra tela.')
+    print('Picom GLX/VSync habilitado na sessão LXQt/X11; fundo opaco Wolf-dark.')
     if wall: print(f'Wallpaper reaproveitado: {wall}')
     else: print('Wallpaper Wolf não localizado. Selecione manualmente em Preferências da Área de Trabalho.')
     print(f'Reverter: python3 configurar.py --restaurar "{path}"')

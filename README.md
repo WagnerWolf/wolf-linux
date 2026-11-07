@@ -63,3 +63,7 @@ O aplicativo `lxqt-config-monitor` faz parte do pacote `lxqt-config`. A release 
 ## Monitores (integração pós-homologação da release 2.2.0)
 
 Use `wolf-control-center --monitors` ou `wolf-monitors` para abrir o editor visual sem a janela principal. O menu LXQt apresenta **Monitores (Wolf Linux)**; a entrada nativa é ocultada sem remover `lxqt-config`. O configurador LXQt salva backup do override ao reaplicar o perfil.
+
+### Compositor do LXQt (release 2.2.0)
+
+O Picom GLX/VSync inicia automaticamente na sessão LXQt/X11, com fundo opaco dos painéis Wolf-dark. Detalhes e reversão: `RELEASE-2.2.0-PICOM-GLX.md`.
