@@ -24,7 +24,7 @@ assert 'vsync = true;' in module.PICOM_CONF
 assert 'shadow = false;' in module.PICOM_CONF
 assert 'fading = false;' in module.PICOM_CONF
 assert 'OnlyShowIn=LXQt;' in module.PICOM_AUTOSTART
-assert 'Exec=picom' in module.PICOM_AUTOSTART
+assert 'Exec={launcher}' in module.PICOM_AUTOSTART
 assert 'TryExec=picom' in module.PICOM_AUTOSTART
 
 with TemporaryDirectory() as temp:
@@ -37,7 +37,8 @@ with TemporaryDirectory() as temp:
         conf=config/'picom/picom.conf'
         auto=config/'autostart/wolf-picom.desktop'
         assert conf.read_text()==module.PICOM_CONF
-        assert auto.read_text()==module.PICOM_AUTOSTART
+        assert auto.read_text()==module.PICOM_AUTOSTART.format(launcher=home/'.local/bin/wolf-picom-session')
+        assert (home/'.local/bin/wolf-picom-session').stat().st_mode & 0o111
         # Preservar /home reutilizada sem forçar perfil ou autostart novos.
         conf.write_text('# personalizado pelo usuário\nbackend = "xrender";\n')
         auto.write_text('[Desktop Entry]\nType=Application\nExec=false\nHidden=true\n')
@@ -47,6 +48,18 @@ with TemporaryDirectory() as temp:
         assert 'xrender' in conf.read_text()
         assert 'Hidden=true' in auto.read_text()
         assert not inst2.manifest
+        # Autostart Wolf de versões antigas migra com backup, sem alterar perfil pessoal.
+        auto.write_text(module.PICOM_AUTOSTART_LEGACY)
+        inst_migrate=module.Installer()
+        module.setup_picom_autostart(inst_migrate)
+        assert auto.read_text()==module.PICOM_AUTOSTART.format(launcher=home/'.local/bin/wolf-picom-session')
+        assert len(inst_migrate.manifest)==1
+        # Uma configuração desabilitada (Hidden=true) NÃO pode ser reativada.
+        auto.write_text(module.PICOM_AUTOSTART_LEGACY+'Hidden=true\n')
+        inst_hidden=module.Installer()
+        module.setup_picom_autostart(inst_hidden)
+        assert 'Hidden=true' in auto.read_text()
+        assert not inst_hidden.manifest
         # Em /home novo o script dá opção de rollback dos arquivos criados.
         inst3=module.Installer()
         conf.unlink();auto.unlink()

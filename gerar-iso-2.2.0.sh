@@ -15,13 +15,15 @@ command -v pacman >/dev/null 2>&1 || {
     echo 'Para preservar instalações anteriores, não o apagarei automaticamente.' >&2
     exit 1
 }
-USB_PKG="$SELF_DIR/release-packages/libfm-qt-2.4.0-4.1-x86_64.pkg.tar.zst"
+USB_PKG="$SELF_DIR/release-packages/libfm-qt-2.4.0-4.2-x86_64.pkg.tar.zst"
 if [[ ! -f "$USB_PKG" ]]; then
     echo '[ERRO] Release com menu USB requer pacote libfm-qt Wolf já compilado.' >&2
     echo "Copie o pacote .pkg.tar.zst para: $USB_PKG" >&2
     exit 1
 fi
 bash "$SELF_DIR/tools/wolf-integration-monitor/validar-pacote-usb.sh" "$USB_PKG"
+# Pacote customizado 2.4.0-4.2 exige ABI 17 em toda stack 2.4.x; nunca misturar 2.5.x.
+bash "$SELF_DIR/tools/wolf-integration-monitor/verificar-abi-lxqt-24.sh"
 "$SELF_DIR/preparar_ambiente_wolf_linux.sh" --project "$PROJECT"
 cd "$PROJECT"
 ./tests/wolf-test-lxqt-2.2.0.py

@@ -1,3 +1,5 @@
+> **Atenção — Next Preview 7 (08/11/2026):** este arquivo descreve a release histórica baseada em `libfm-qt 2.4.0-4.1`. Para a nova prévia, a ISO exige **`libfm-qt 2.4.0-4.2`**, com USB + links simbólicos. Siga `RELEASE-CANDIDATE-2.2.0-NEXT-PREVIEW7.md` em vez dos comandos antigos abaixo.
+
 # Wolf Linux 2.2.0 — Release LXQt / Package Manager 0.3.7
 
 **Promoção em 02/11/2026 após validação em VM do mecanismo de proteção da integração USB.**

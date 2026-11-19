@@ -12,7 +12,7 @@
 O perfil LXQt instala o pacote oficial `picom` e prepara, com backup:
 
 - `~/.config/picom/picom.conf`: GLX + VSync, sem sombras, fades, transparência ou blur.
-- `~/.config/autostart/wolf-picom.desktop`: inicialização somente LXQt (não Plasma nem Wayland).
+- `~/.config/autostart/wolf-picom.desktop`: inicialização por guard de VM somente LXQt (não Plasma nem Wayland).
 - `~/.local/share/lxqt/themes/wolf-dark/lxqt-panel.qss`: fundo opaco `#242a34`.
 
 A reaplicação de Wolf-dark pelo Control Center utiliza `THEME_QSS` do configurador
@@ -52,3 +52,8 @@ Sem alterações em kernéis, NVIDIA, Openbox, regras de Alt+Tab, PCManFM-Qt,
 biblioteca `libfm-qt` Wolf, particionamento, Chrome ou proteção IgnorePkg.
 O Package Manager permanece na versão 0.3.7. A ISO gerada com esta revisão
 continua dependendo do pacote `libfm-qt 2.4.0-4.1` compilado pelo usuário.
+
+
+## Atualização Preview 4 — proteção de VM
+
+O autostart chama `~/.local/bin/wolf-picom-session` que verifica `systemd-detect-virt --vm` na sessão. Em VM omite o compositor por padrão; em físico mantém GLX/VSync. `~/.local/bin/wolf-picom-session --status` informa o modo escolhido. Para ensaiar XRender em VM, use `WOLF_PICOM_VM_MODE=xrender ~/.local/bin/wolf-picom-session` em um terminal, depois de parar outros compositores. Não é ativado automaticamente.

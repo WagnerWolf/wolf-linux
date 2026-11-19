@@ -1,3 +1,24 @@
+## Wolf Linux 2.2.0 — Next Preview 7 (08/11/2026): aparência GTK4/libadwaita
+
+- Fix: GNOME System Monitor recebe preferência de aparência escura `color-scheme=prefer-dark`,
+  preservando GTK3 Breeze-Dark e ordenação estável Nome A-Z.
+- Atualizador do sistema instalado agora oferece backup e restauração independentes
+  da nova preferência de cor, sem alterar o tema GTK global.
+- Nenhum loop, serviço ou processo novo.
+
+## Wolf Linux 2.2.0 — Next Preview 6 (08/11/2026): monitor gráfico de sistema
+- Adicionado gnome-system-monitor como monitor visual padrão do LXQt (todas as stacks).
+- Processos por Nome crescente (GSettings default system-wide), sem ordenação dinâmica por CPU.
+- Instalação imediata com script reversível e backup por usuário, mantendo btop.
+- Nenhuma alteração em Alt+Tab residente, Window Keeper, PM, libfm-qt ou boot.
+
+## Wolf Linux 2.2.0 — Next Preview 4 (07/11/2026): guard Picom em VMs
+- Corrigido autostart incondicional `Exec=picom` que provocava tela preta/falha de refresh numa VM com GLX.
+- Guard avalia a sessão na execução: GLX/VSync no físico; VM sem Picom por padrão; Wayland não inicializa; XRender em VM somente opt-in.
+- Preserva configurações personalizadas e bloqueia migração de autostart desativado; inclui hotfix com backup e testes em VMs simuladas.
+- Mantidos libfm-qt 2.4.0-4.2, formatador USB, links simbólicos nativos e Package Manager 0.3.7.
+- Não houve validação do hipervisor real nem instalação de nova ISO neste ambiente.
+
 ## Wolf Linux 2.2.0 — Picom integrado à release (02/11/2026)
 - Perfil LXQt/Openbox X11: Picom GLX/VSync ativado por padrão no login.
 - Wolf-dark: fundo opaco dos painéis preservado ao reaplicar o tema.

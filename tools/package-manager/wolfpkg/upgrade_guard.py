@@ -3,7 +3,8 @@ from dataclasses import dataclass
 from pathlib import Path
 import subprocess
 
-WOLF_VERSION = '2.4.0-4.1'
+WOLF_VERSION = '2.4.0-4.2'
+WOLF_PREVIOUS = '2.4.0-4.1'
 
 @dataclass(frozen=True)
 class Protection:
@@ -35,7 +36,7 @@ def probe():
         return Protection(None, False, False, None, 'Versão local desconhecida.')
     installed = tokens[1]
     # Revisões futuras devem ter manifesto do pacote, não inferir de nomes arbitrários.
-    active = installed == WOLF_VERSION
+    active = installed in (WOLF_VERSION, WOLF_PREVIOUS)
     if not active:
         return Protection(installed, False, False, None)
     protection = _run(['pacman-conf', 'IgnorePkg'])
@@ -69,7 +70,7 @@ def describe(result: Protection) -> str:
              else 'ALERTA: sem proteção IgnorePkg!')
     return (f'{title}\nlibfm-qt Wolf instalada: {result.installed}\n'
             f'Versão nos repositórios: {result.available or "não verificada"}\n'
-            'A integração de formatação USB exige adaptação do patch e testes antes '
+            'As integrações nativas USB e links exigem adaptação dos patches e testes antes '
             'de trocar a biblioteca. O bloqueio pode impedir upgrades que dependam '
             'de uma nova ABI. Não force atualizações parciais.\n'
             + (result.failure or ''))

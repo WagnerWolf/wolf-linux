@@ -10,7 +10,7 @@ def cp(args, out='', rc=0):
 
 class GuardProbeTests(unittest.TestCase):
     def test_custom_guarded(self):
-        with patch.object(G, '_run', side_effect=[cp([], 'libfm-qt 2.4.0-4.1\n'), cp([], 'libfm-qt\n'), cp([], 'Repository : extra\nVersion : 2.4.1-1\n')]):
+        with patch.object(G, '_run', side_effect=[cp([], 'libfm-qt 2.4.0-4.2\n'), cp([], 'libfm-qt\n'), cp([], 'Repository : extra\nVersion : 2.4.1-1\n')]):
             result = G.probe()
             self.assertTrue(result.wolf_active and result.protected and result.safe_for_system_update)
             self.assertEqual(result.available, '2.4.1-1')

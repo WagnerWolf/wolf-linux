@@ -138,6 +138,19 @@ cmp -s "$SELF_DIR/branding-assets/pcmanfm-qt/wolf-open-vscode.desktop" \
        "$SELF_DIR/assets/pcmanfm-qt/wolf-open-vscode.desktop" || \
     err 'A ação do PCManFM-Qt diverge entre branding-assets/ e assets/.'
 
+# Release metadata is validated BEFORE any optional removal of an existing build.
+# Do not hard-code a previous preview filename: exactly one release candidate
+# must be shipped in this DevKit, or preparation stops safely.
+shopt -s nullglob
+RELEASE_CANDIDATES=("$SELF_DIR"/RELEASE-CANDIDATE-2.2.0-NEXT-PREVIEW*.md)
+shopt -u nullglob
+if (( ${#RELEASE_CANDIDATES[@]} != 1 )); then
+    err "DevKit precisa de exatamente uma nota Next Preview (encontradas: ${#RELEASE_CANDIDATES[@]}). Não alterei o projeto preparado."
+fi
+RELEASE_CANDIDATE_SRC="${RELEASE_CANDIDATES[0]}"
+RELEASE_CANDIDATE_NAME="${RELEASE_CANDIDATE_SRC##*/}"
+[[ -s "$RELEASE_CANDIDATE_SRC" ]] || err 'Nota da release vazia; preparação cancelada.'
+
 if (( SKIP_DEPS == 0 )); then
     say '[1/8] Instalando/verificando ferramentas de desenvolvimento...'
     sudo pacman -S --needed --noconfirm \
@@ -226,6 +239,9 @@ cmp -s "$PROJECT/assets/pcmanfm-qt/wolf-open-vscode.desktop" \
 cp -f "$SELF_DIR/README.md" "$PROJECT/README.md"
 cp -f "$SELF_DIR/WOLF-PM-0.3.7-PROTECAO-LIBFM-VM.md" "$PROJECT/WOLF-PM-0.3.7-PROTECAO-LIBFM-VM.md"
 cp -f "$SELF_DIR/RELEASE-2.2.0-PM-0.3.7.md" "$PROJECT/RELEASE-2.2.0-PM-0.3.7.md"
+install -m 0644 "$RELEASE_CANDIDATE_SRC" "$PROJECT/$RELEASE_CANDIDATE_NAME"
+cmp -s "$RELEASE_CANDIDATE_SRC" "$PROJECT/$RELEASE_CANDIDATE_NAME" || \
+    err 'Nota de release ausente ou divergente no projeto preparado.' 
 cp -f "$SELF_DIR/CHANGELOG.md" "$PROJECT/CHANGELOG.md"
 cp -f "$SELF_DIR/RELEASE-NOTES-2.0.0.md" "$PROJECT/RELEASE-NOTES-2.0.0.md"
 cp -f "$SELF_DIR/RELEASE-NOTES-2.1.0.md" "$PROJECT/RELEASE-NOTES-2.1.0.md"

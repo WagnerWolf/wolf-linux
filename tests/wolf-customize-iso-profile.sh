@@ -83,7 +83,7 @@ cp -f "$PROJECT/install/wolf-install.sh" "$AIROOT/root/wolf-linux/install/wolf-i
 cp -f "$PROJECT/package-profiles/packages.conf" "$AIROOT/root/wolf-linux/package-profiles/packages.conf"
 rm -rf "$AIROOT/root/wolf-linux/tools"
 cp -a "$PROJECT/tools" "$AIROOT/root/wolf-linux/tools"
-USB_PKG="$PROJECT/release-packages/libfm-qt-2.4.0-4.1-x86_64.pkg.tar.zst"
+USB_PKG="$PROJECT/release-packages/libfm-qt-2.4.0-4.2-x86_64.pkg.tar.zst"
 [[ -f "$USB_PKG" ]] || { echo '[ERRO] Pacote libfm-qt Wolf não foi copiado ao projeto.' >&2; exit 1; }
 bash "$PROJECT/tools/wolf-integration-monitor/validar-pacote-usb.sh" "$USB_PKG"
 mkdir -p "$AIROOT/root/wolf-linux/release-packages"

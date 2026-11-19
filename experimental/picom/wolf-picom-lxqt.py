@@ -40,7 +40,7 @@ AUTOSTART = '''[Desktop Entry]
 Type=Application
 Name=Wolf - Composição Picom (LXQt/X11)
 Comment=Composição GLX/VSync para Steam, sem efeitos adicionais
-Exec=picom
+Exec={launcher}
 TryExec=picom
 OnlyShowIn=LXQt;
 NoDisplay=true
@@ -137,8 +137,17 @@ def enable():
     ensure_safe(AUTO)
     if AUTO.is_file() and 'Name=Wolf - Composição Picom' not in AUTO.read_text(encoding='utf-8',errors='replace'):
         raise RuntimeError('Há um autostart com este nome não criado pelo Wolf. Preservado: '+str(AUTO))
-    directory, entries=record_backup([AUTO])
-    write_file(AUTO,AUTOSTART.encode())
+    launcher=HOME/'.local/bin/wolf-picom-session'
+    source=Path(__file__).resolve().parents[2]/'tools/lxqt/wolf-picom-session.sh'
+    if not source.is_file():
+        raise RuntimeError('Guard VM do Picom ausente no DevKit: '+str(source))
+    ensure_safe(launcher)
+    if launcher.is_file() and '# Wolf Linux - Picom VM guard v1' not in launcher.read_text(encoding='utf-8'):
+        raise RuntimeError('Launcher existente não pertence ao Wolf; não sobrescrevendo: '+str(launcher))
+    directory, entries=record_backup([AUTO,launcher])
+    write_file(launcher,source.read_bytes())
+    launcher.chmod(0o755)
+    write_file(AUTO,AUTOSTART.format(launcher=launcher).encode())
     commit_backup(directory,entries)
     print('[OK] Autostart Wolf Picom ativado para a próxima sessão LXQt. Backup:',directory)
 

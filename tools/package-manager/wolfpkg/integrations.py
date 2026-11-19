@@ -69,7 +69,7 @@ def check_libfm(*, manifest=MANIFEST, pending=PENDING):
     pending_event = pending.is_file()
     # A revisão compilada/confirmada no hardware tem esta identificação.
     # Pacote/versionamento NÃO provam que a janela do menu funciona.
-    if version == '2.4.0-4.1' and not manifest.is_file():
+    if version in ('2.4.0-4.1', '2.4.0-4.2') and not manifest.is_file():
         formatter = Path('/usr/local/bin/wolf-format-removable')
         has_device = (formatter.is_file() and not formatter.is_symlink() and
                       b'--device' in formatter.read_bytes()[:100000])
@@ -110,6 +110,15 @@ def check_libfm(*, manifest=MANIFEST, pending=PENDING):
 
 def check_all():
     results = [check_libfm()]
+    # O helper é de usuário; não basta a biblioteca estar instalada.
+    helper = Path.home() / '.local/bin/wolf-symlink-actions'
+    ver = _pkg_version('libfm-qt')
+    usable = (helper.is_file() and not helper.is_symlink() and os.access(helper, os.X_OK))
+    if ver == '2.4.0-4.2':
+        results.append(IntegrationResult('PCManFM-Qt · Links simbólicos',
+            'Detectada' if usable else 'Incompleta',
+            'Helper nativo disponível; teste gráfico necessário.' if usable else 'Helper do usuário ausente.',
+            f'libfm-qt {ver}; helper: {helper}'))
     formatter = shutil.which('wolf-format-removable') or '/usr/local/bin/wolf-format-removable'
     if os.path.isfile(formatter):
         results.append(IntegrationResult('Formatador USB Wolf', 'Disponível',

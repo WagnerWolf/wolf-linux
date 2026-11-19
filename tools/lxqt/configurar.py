@@ -339,11 +339,21 @@ inactive-opacity = 1.0;
 frame-opacity = 1.0;
 unredir-if-possible = false;
 '''
-PICOM_AUTOSTART = '''[Desktop Entry]
+PICOM_AUTOSTART_LEGACY = '''[Desktop Entry]
 Type=Application
 Name=Wolf - Composição Picom (LXQt/X11)
 Comment=Composição GLX/VSync para Steam, sem efeitos adicionais
 Exec=picom
+TryExec=picom
+OnlyShowIn=LXQt;
+NoDisplay=true
+X-LXQt-Need-Tray=false
+'''
+PICOM_AUTOSTART = '''[Desktop Entry]
+Type=Application
+Name=Wolf - Composição Picom (LXQt/X11)
+Comment=Compositor GLX no físico, desativado por padrão em VMs
+Exec={launcher}
 TryExec=picom
 OnlyShowIn=LXQt;
 NoDisplay=true
@@ -361,12 +371,37 @@ def setup_picom_config(inst):
 
 
 def setup_picom_autostart(inst):
-    """Ativa Picom somente no LXQt; respeita autostart preexistente de /home."""
+    """Guarda do Picom em runtime; respeita autostart modificado ou desativado."""
     autostart = CONFIG/'autostart/wolf-picom.desktop'
-    if autostart.exists() or autostart.is_symlink():
-        print('Picom: autostart existente preservado:', autostart)
+    launcher = HOME/'.local/bin/wolf-picom-session'
+    source = Path(__file__).with_name('wolf-picom-session.sh')
+    if not source.is_file():
+        raise RuntimeError('Guard do Picom não foi distribuído: '+str(source))
+    if autostart.is_symlink():
+        print('Picom: autostart simbólico preservado:', autostart)
         return
-    inst.write(autostart, PICOM_AUTOSTART)
+    if autostart.is_file():
+        content = autostart.read_text(encoding='utf-8')
+        if content != PICOM_AUTOSTART_LEGACY:
+            print('Picom: autostart existente/personalizado preservado:', autostart)
+            return
+        print('Picom: migrando autostart Wolf legado Exec=picom para guard VM.')
+    elif autostart.exists():
+        print('Picom: autostart inesperado preservado:', autostart)
+        return
+
+    if launcher.is_symlink() or (launcher.exists() and not launcher.is_file()):
+        print('Picom: launcher não regular preservado; sem alterar autostart:', launcher)
+        return
+    if launcher.exists():
+        content = launcher.read_text(encoding='utf-8')
+        if '# Wolf Linux - Picom VM guard v1' not in content:
+            print('Picom: launcher existente e não Wolf preservado; sem ativar:', launcher)
+            return
+    if not launcher.is_file() or launcher.read_text(encoding='utf-8') != source.read_text(encoding='utf-8'):
+        inst.write(launcher, source.read_text(encoding='utf-8'))
+        launcher.chmod(0o755)
+    inst.write(autostart, PICOM_AUTOSTART.format(launcher=launcher))
 
 
 def setup_mouse_flat(inst):
@@ -782,7 +817,7 @@ NoDisplay=true
     print(f'Alt+Tab: nativo do Openbox; Super+Tab: {"por monitor (experimental)" if args.alttab_monitor else "desativado"}')
     print(f'Ícone do menu: {icon or menu_icon}')
     print('Painel principal com bandeja; painel secundário habilitado automaticamente se houver outra tela.')
-    print('Picom GLX/VSync habilitado na sessão LXQt/X11; fundo opaco Wolf-dark.')
+    print('Picom: guard por sessão (GLX no físico; VM sem Picom por padrão); fundo opaco Wolf-dark.')
     if wall: print(f'Wallpaper reaproveitado: {wall}')
     else: print('Wallpaper Wolf não localizado. Selecione manualmente em Preferências da Área de Trabalho.')
     print(f'Reverter: python3 configurar.py --restaurar "{path}"')

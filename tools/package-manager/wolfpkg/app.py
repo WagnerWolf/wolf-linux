@@ -356,7 +356,7 @@ class Manager(QMainWindow):
             'Este assistente NÃO aplica patch, não remove IgnorePkg e não executa pacman. '
             'Não tente instalar a versão oficial isoladamente numa atualização parcial.'
         )
-        QMessageBox.information(self, 'Plano de atualização da integração USB',
+        QMessageBox.information(self, 'Plano de atualização da integração USB (e links simbólicos)',
                                 describe_libfm(state) + '\n\n' + instructions)
 
     def _protect_libfm_before_transaction(self, *, explicit=False, checked=False):

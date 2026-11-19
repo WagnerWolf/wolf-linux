@@ -12179,10 +12179,10 @@ configure_wolf_lxqt_keyring() {
     ok 'Secret Service instalado; SDDM PAM integrado ao GNOME Keyring.'
 }
 
-# Extensão oficial Wolf validada no hardware: exige artefato compilado pelo usuário.
+# Extensão Wolf (USB + links simbólicos), validada no hardware: pacote compilado pelo mantenedor.
 # Nunca recompilar / substituir a biblioteca durante hook do Pacman.
 install_wolf_libfm_usb_package() {
-    local name='libfm-qt-2.4.0-4.1-x86_64.pkg.tar.zst'
+    local name='libfm-qt-2.4.0-4.2-x86_64.pkg.tar.zst'
     local pkg="$PROJECT_DIR/release-packages/$name"
     local target="/mnt/var/cache/pacman/pkg/$name"
     [[ -f "$pkg" && ! -L "$pkg" ]] || die "Pacote Wolf ausente na ISO: $pkg"
@@ -12190,13 +12190,13 @@ install_wolf_libfm_usb_package() {
     # Recusar atualização inesperada do Arch; o patch depende da ABI exata.
     local installed
     installed="$(arch-chroot /mnt pacman -Q libfm-qt 2>/dev/null || true)"
-    [[ "$installed" == 'libfm-qt 2.4.0-4' || "$installed" == 'libfm-qt 2.4.0-4.1' ]] ||
+    [[ "$installed" == 'libfm-qt 2.4.0-4' || "$installed" == 'libfm-qt 2.4.0-4.1' || "$installed" == 'libfm-qt 2.4.0-4.2' ]] ||
         die "libfm-qt inesperada antes do patch Wolf: $installed"
     install -d /mnt/var/cache/pacman/pkg
     install -m 0644 "$pkg" "$target"
     arch-chroot /mnt pacman -U --noconfirm "/var/cache/pacman/pkg/$name" ||
         die 'Falha ao instalar libfm-qt Wolf no sistema de destino.'
-    arch-chroot /mnt pacman -Q libfm-qt | grep -Fxq 'libfm-qt 2.4.0-4.1' ||
+    arch-chroot /mnt pacman -Q libfm-qt | grep -Fxq 'libfm-qt 2.4.0-4.2' ||
         die 'Falha na validação do pacote Wolf instalado.'
     # Hook só registra futuras alterações. Instalar após pacman -U.
     local source="$PROJECT_DIR/tools/wolf-integration-monitor"
@@ -12212,7 +12212,20 @@ install_wolf_libfm_usb_package() {
         die 'Não foi possível proteger libfm-qt Wolf em pacman.conf.'
     arch-chroot /mnt pacman-conf IgnorePkg | grep -Eq '(^|[[:space:]])libfm-qt($|[[:space:]])' ||
         die 'IgnorePkg libfm-qt não está ativo no pacman.conf do destino.'
-    ok 'libfm-qt Wolf 2.4.0-4.1 instalada; detecção de futuras atualizações habilitada.'
+    ok 'libfm-qt Wolf 2.4.0-4.2 instalada; USB e links nativos habilitados, IgnorePkg ativo.'
+}
+
+install_wolf_native_symlink_helper() {
+    local helper='/usr/local/lib/wolf-linux/lxqt/instalar-helper.py'
+    local userhome="/home/$USERNAME_VALUE"
+    [[ -f "/mnt$helper" ]] || die 'Helper Wolf de links simbólicos não foi preparado.'
+    arch-chroot /mnt pacman -Q libfm-qt | grep -Fxq 'libfm-qt 2.4.0-4.2' ||
+        die 'O helper nativo requer libfm-qt Wolf 2.4.0-4.2.'
+    # Executar como dono do /home: backups próprios, jamais chown recursivo.
+    arch-chroot /mnt runuser -u "$USERNAME_VALUE" -- env HOME="$userhome" \
+        /usr/bin/python3 "$helper" ||
+        die 'Falha ao instalar backend de links nativos (ações legadas preservadas para revisão).'
+    ok 'Wolf Symlink Native instalado com sucesso silencioso e backups das ações antigas.'
 }
 
 install_wolf_lxqt_profile() {
@@ -12220,13 +12233,22 @@ install_wolf_lxqt_profile() {
     local dest="/mnt/usr/local/lib/wolf-linux/lxqt"
     local userhome="/home/$USERNAME_VALUE"
     local file
-    for file in configurar.py promover-alt-tab.py alt_tab_visual.py super_menu_monitor.py wolf_lxqt_monitors.py wolf-lxqt-menu.svg; do
+    for file in configurar.py promover-alt-tab.py alt_tab_visual.py super_menu_monitor.py wolf_lxqt_monitors.py wolf-picom-session.sh wolf-lxqt-menu.svg; do
         [[ -f "$source/$file" ]] || die "Fonte Wolf LXQt ausente: $file"
     done
     install -d "$dest" /mnt/etc/wolf-linux
     for file in "$source"/*.py "$source"/*.svg; do
         install -m 0644 "$file" "$dest/$(basename "$file")"
     done
+    install -m 0755 "$source/wolf-picom-session.sh" "$dest/wolf-picom-session.sh"
+    # Fontes verificadas do Alt+Tab 0.3 e Window Keeper orientado a eventos.
+    install -d "$dest/responsividade"
+    local component
+    for component in wolf-alt-tab-monitor wolf-alt-tab-daemon.py wolf_alt_common.py wolf_alt_core.py wolf-window-keeper.py; do
+        [[ -f "$source/responsividade/$component" ]] || die "Componente responsividade ausente: $component"
+        install -m 0644 "$source/responsividade/$component" "$dest/responsividade/$component"
+    done
+    install -m 0755 "$source/wolf-responsividade-instalar.py" "$dest/wolf-responsividade-instalar.py"
     # Chamada por PCManFM-Qt: nova janela VS Code no monitor de origem.
     install -m 0755 "$source/wolf-open-vscode-monitor" \
         /mnt/usr/local/bin/wolf-open-vscode-monitor
@@ -12251,7 +12273,19 @@ WOLF_MOUSE_XORG
     # Migração de nomes ingleses em /home existente: opcional, nunca automática.
     install -m 0755 "$source/wolf-user-dirs-ptbr.py" /mnt/usr/local/bin/wolf-user-dirs-ptbr
     install -m 0755 "$source/wolf-appearance-dark" /mnt/usr/local/bin/wolf-appearance-dark
+    install -m 0755 "$source/wolf-monitor-sistema-instalar.sh" /mnt/usr/local/bin/wolf-monitor-sistema-instalar
     install -m 0755 "$source/wolf-gtk-xsettings" /mnt/usr/local/bin/wolf-gtk-xsettings
+    # Monitor gráfico do sistema (repositório oficial Arch, todos perfis LXQt).
+    # 0 = coluna Nome, 0 = crescente. O override não altera escolhas do usuário.
+    [[ -f "$source/99-wolf-system-monitor.gschema.override" ]] ||
+        die 'Wolf System Monitor: arquivo de padrão GSettings ausente.'
+    arch-chroot /mnt pacman -Qq gnome-system-monitor >/dev/null ||
+        die 'Wolf System Monitor: pacote oficial ausente após a instalação LXQt.'
+    install -d /mnt/usr/share/glib-2.0/schemas
+    install -m 0644 "$source/99-wolf-system-monitor.gschema.override" \
+        /mnt/usr/share/glib-2.0/schemas/99-wolf-system-monitor.gschema.override
+    arch-chroot /mnt glib-compile-schemas /usr/share/glib-2.0/schemas ||
+        die 'Wolf System Monitor: falha ao compilar padrões GSettings.'
     configure_wolf_lxqt_keyring
     # Preserva /home: configurador cria snapshots antes de qualquer mudança.
     # Inicia com um painel completo; auto-ajuste reconhece monitor adicional no login.
@@ -12264,6 +12298,12 @@ WOLF_MOUSE_XORG
         HOME="$userhome" XDG_CURRENT_DESKTOP= \
         python3 /usr/local/lib/wolf-linux/lxqt/promover-alt-tab.py ||
         die 'Falha em promover Alt+Tab por monitor.'
+    # Next Preview 5: reutilizar o seletor visual homologado, agora residente.
+    # Fontes são instaladas no DESTINO antes do chroot; não iniciar daemon no chroot.
+    arch-chroot /mnt runuser -u "$USERNAME_VALUE" -- env \
+        HOME="$userhome" XDG_CURRENT_DESKTOP= \
+        python3 /usr/local/lib/wolf-linux/lxqt/wolf-responsividade-instalar.py --no-start ||
+        die 'Falha ao persistir Wolf Alt+Tab residente e Window Keeper.'
     # Define LXQt/X11 como sessão inicial, sem instalar o KDE Plasma.
     install -d /mnt/var/lib/sddm
     cat > /mnt/var/lib/sddm/state.conf <<EOF_SDDM_STATE
@@ -12703,6 +12743,11 @@ main() {
     revalidate_gui_lab42_target
     revalidate_gui_physical_target
     confirm_preserved_home_cleanup
+    # IMPORTANTE: verificar ABI e atualizar somente o banco pacman efêmero da Live
+    # ANTES de qualquer formatação. Não criar sistema incompatível com libfm Wolf.
+    pacman -Sy --noconfirm || die 'Falha ao atualizar bases oficiais na Live antes da formatação.'
+    bash "$PROJECT_DIR/tools/wolf-integration-monitor/verificar-abi-lxqt-24.sh" ||
+        die 'Repositórios incompatíveis com a libfm-qt Wolf ABI 17; nenhum disco foi formatado.'
     stage "10-preparar-disco" prepare_erase_disk
     stage "20-formatar-montar" format_and_mount
     stage "22-limpar-home" clean_preserved_home_dotfiles
@@ -12737,6 +12782,7 @@ main() {
     stage "69d-helpers-primeiro-login" install_wolf_helper_bundle
     stage "69d2-wolf-lxqt" install_wolf_lxqt_profile
     stage "69d3-formato-usb-menu-wolf" install_wolf_libfm_usb_package
+    stage "69d4-links-simbolicos-wolf" install_wolf_native_symlink_helper
     stage "69e-grub-manager" install_wolf_grub_manager
     stage "70-bootloader" configure_bootloader
     stage "72-validar-boot" validate_boot_installation

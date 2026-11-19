@@ -1,0 +1,10 @@
+# Wolf Linux LXQt — monitor com lista de processos estável, ordenada por Nome.
+# GSettings defaults (user overrides continue to take precedence).
+[org.gnome.gnome-system-monitor.proctree]
+sort-col=0
+sort-order=0
+
+# GTK4/libadwaita uses color-scheme; Breeze-Dark/XSettings alone is not enough.
+# Does NOT override gtk-theme, icon themes or GTK_THEME environment globally.
+[org.gnome.desktop.interface]
+color-scheme='prefer-dark'

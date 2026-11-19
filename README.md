@@ -1,3 +1,20 @@
+> **Wolf Linux DevKit 2.2.0 — Next Preview 7 (08/11/2026)**  
+> Inclui **gnome-system-monitor** (interface gráfica, processos em ordem fixa
+> por Nome), além do Alt+Tab residente 0.3, Window Keeper 0.2 e Picom VM Guard.
+> Instalação no Wolf Linux já em uso: `tools/lxqt/wolf-monitor-sistema-instalar.sh`.
+> Instalador de persistência do Alt+Tab: `tools/lxqt/wolf-responsividade-instalar.py`. Consulte
+> `RELEASE-CANDIDATE-2.2.0-NEXT-PREVIEW7.md` para as instruções atuais.
+> A ISO desta prévia ainda não foi compilada/homologada.
+
+---
+
+### Histórico da baseline (instruções de pacote antigo abaixo)
+
+> **Arquivo histórico de referência:** instruções da Preview 3 abaixo.
+> Para a nova ISO, siga exclusivamente as notas da Next Preview 7 no início deste README.
+
+**NEXT PREVIEW 3 (06/11/2026):** corrige também a cópia das notas de release no preparo da ISO. Mantém a versão instalada 2.2.0 e requer libfm-qt Wolf 2.4.0-4.2.
+
 # Wolf Linux DevKit 2.2.0 — Release LXQt/X11
 
 **Versão 2.2.0 com Package Manager 0.3.7 (integração USB e proteção validadas em VM, 02/11/2026).**
