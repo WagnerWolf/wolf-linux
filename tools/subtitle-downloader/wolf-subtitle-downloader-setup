@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Primeiro uso: reaproveita exatamente o instalador aprovado no sistema atual.
+set -Eeuo pipefail
+if (( EUID == 0 )); then
+    echo '[ERRO] Não execute como root.' >&2
+    exit 1
+fi
+exec /usr/bin/bash /usr/local/lib/wolf-linux/subtitle-downloader/instalar-legendas.sh --install

@@ -161,6 +161,8 @@ class Center(QMainWindow):
             actions = self._card(monitors, "Restaurar configurações", "A restauração é feita fora do LXQt, para evitar que o painel sobrescreva arquivos em execução.")
             actions.addWidget(self._button("Mostrar instruções de restauração", self._restore_instructions, activity=False))
         elif self.desktop_kind == "plasma":
+            actions = self._card(monitors, "Monitores KDE / Wayland", "KScreen gerencia frequencia, escala, posicao e persistencia do layout nativo. Sem XRandR nem Wolf Monitor Guard.")
+            actions.addWidget(self._button("Configurar monitores (KScreen)", lambda: self._open_native("systemsettings", "kcm_kscreen"), activity=False))
             actions = self._card(monitors, "Painéis Plasma", "Reutiliza o helper Plasma original, apenas nesta sessão. Não instala watcher.")
             actions.addWidget(self._button("Consultar estado", lambda: self._helper("monitor", "status")))
             actions.addWidget(self._button("Reconciliar painéis (manual)", self._reconcile))
@@ -180,7 +182,7 @@ class Center(QMainWindow):
                 ("Atalhos globais LXQt", "Atalhos Super+E, Ctrl+Alt+T e Spectacle.", "lxqt-config-globalkeyshortcuts"),
                 ("Janelas Openbox", "Configura foco, decoração e comportamento do gerenciador de janelas.", "obconf-qt"),
                 ("Dispositivos de entrada", "Mouse sem aceleração e periféricos.", "lxqt-config-input"),
-                ("Associações de arquivos", "Chrome, PCManFM-Qt e LXQt Archiver.", "lxqt-config-file-associations"),
+                ("Associações de arquivos", "Thorium, PCManFM-Qt e LXQt Archiver.", "lxqt-config-file-associations"),
             ):
                 actions = self._card(appearance, title, description)
                 actions.addWidget(self._button("Abrir configurações", lambda checked=False, cmd=executable: self._open_native(cmd), activity=False))
@@ -189,11 +191,20 @@ class Center(QMainWindow):
             actions.addWidget(self._button("Reaplicar Wolf-dark (LXQt + GTK)", self._apply_dark_theme))
             actions = self._card(appearance, "Wolf Alt+Tab", "Alternador por monitor aprovado; não será sobrescrito ou reconfigurado por esta central.")
             actions.addWidget(self._button("Verificar executável", self._check_switcher, activity=False))
-            actions = self._card(appearance, "Aplicativos padrão Wolf", "Verifica Chrome, PCManFM-Qt, Kate, MPC-QT, Audacious, Okular e LXQt Archiver. Reaplicação somente com confirmação e snapshot.")
+            actions = self._card(appearance, "Aplicativos padrão Wolf", "Verifica Thorium, PCManFM-Qt, Kate, MPC-QT, Audacious, Okular e LXQt Archiver. Reaplicação somente com confirmação e snapshot.")
             actions.addWidget(self._button("Conferir associações", self._audit_wolf_mimes, activity=False))
             actions.addWidget(self._button("Reaplicar padrões Wolf", self._apply_wolf_mimes))
+        elif self.desktop_kind == "plasma":
+            for title, description, executable, arg in (
+                ("Aparência do Plasma", "Tema escuro, icones, fontes e cursores.", "systemsettings", "kcm_lookandfeel"),
+                ("Atalhos globais", "KWin, Super+E e atalhos por monitor.", "systemsettings", "kcm_keys"),
+                ("Janelas KWin", "Efeitos, foco, comportamento e composicao Wayland.", "systemsettings", "kcm_kwinoptions"),
+                ("Dispositivos de entrada", "Perfil flat do mouse e dispositivos libinput.", "systemsettings", "kcm_mouse"),
+            ):
+                actions = self._card(appearance, title, description)
+                actions.addWidget(self._button("Abrir configurações", lambda checked=False, c=executable, a=arg: self._open_native(c, a), activity=False))
         else:
-            actions = self._card(appearance, "Configurações do desktop", "As ferramentas LXQt só são apresentadas na sessão LXQt/X11.")
+            actions = self._card(appearance, "Configurações do desktop", "Sessão Plasma ou LXQt necessária.")
             actions.addWidget(self._button("Mostrar diagnóstico", self._show_report, activity=False))
 
         game = self._page()
@@ -300,18 +311,16 @@ class Center(QMainWindow):
     def _restore(self) -> None:
         self._confirm_helper("monitor", "restore", "Restaurar o backup anterior de painéis? O Plasma poderá reiniciar.")
 
-    def _open_native(self, command: str) -> None:
+    def _open_native(self, command: str, *args: str) -> None:
         import shutil
-        if self.desktop_kind != "lxqt-x11":
-            self._warn("Configuração nativa LXQt disponível somente em LXQt/X11")
-            return
         exe = shutil.which(command)
         if not exe:
             self._warn(f"Ferramenta não instalada: {command}")
             return
-        result = QProcess.startDetached(exe, [])
+        result = QProcess.startDetached(exe, list(args))
         started = result[0] if isinstance(result, tuple) else result
-        self._log(("[OK] Aberto: " if started else "[ERRO] Falha ao abrir: ") + command)
+        self._log(("[OK] Aberto: " if started else "[ERRO] Falha ao abrir: ")
+                  + " ".join((command, *args)))
 
     def _edit_monitors(self) -> None:
         if self.desktop_kind != "lxqt-x11":
@@ -447,7 +456,7 @@ class Center(QMainWindow):
             self._warn("Reaplicação de padrões disponível somente no LXQt/X11.")
             return
         if not self._confirm("Reaplicar aplicativos padrão Wolf neste usuário?\n"
-                             "Chrome, PCManFM-Qt, Kate, MPC-QT, Audacious, Okular e LXQt Archiver.\n\n"
+                             "Thorium, PCManFM-Qt, Kate, MPC-QT, Audacious, Okular e LXQt Archiver.\n\n"
                              "As associações MIME do usuário podem valer em outros desktops.\n"
                              "Será salvo um snapshot antes de qualquer mudança."):
             return

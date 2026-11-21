@@ -18,6 +18,8 @@ def main() -> None:
         mockbin = root / 'mock-bin'
         mockbin.mkdir()
         called = root / 'sudo-invoked'
+        (mockbin / 'pacman').write_text('#!/bin/sh\nexit 0\n', encoding='utf-8')
+        (mockbin / 'pacman').chmod(0o755)
         sudo = mockbin / 'sudo'
         sudo.write_text('#!/bin/sh\nprintf "yes" > "$WOLF_PREFLIGHT_CALLED"\nexit 39\n', encoding='utf-8')
         sudo.chmod(0o755)
@@ -25,7 +27,7 @@ def main() -> None:
         env.update({'WOLF_RELENG': str(root / 'missing-releng'),
                     'WOLF_PREFLIGHT_CALLED': str(called),
                     'PATH': str(mockbin) + os.pathsep + env['PATH']})
-        args = ['bash', str(PREPARER), '--force', '--project', str(proj), '--no-smoke']
+        args = ['bash', str(PREPARER), '--project', str(root / 'new-project'), '--no-smoke']
         response = subprocess.run(args, env=env, capture_output=True, text=True, timeout=15)
         assert response.returncode != 0, 'Mock sudo deve bloquear instalação de dependências'
         assert called.is_file(), 'Preparador não tentou instalar dependências antes de testar releng'

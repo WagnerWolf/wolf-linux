@@ -7,7 +7,7 @@ fi
 
 set -Eeuo pipefail
 
-WOLF_VERSION="2.2.0"
+WOLF_VERSION="2.3.1"
 DRY_RUN=0
 PLAN_ONLY=0
 RESET_STATE=0
@@ -103,7 +103,7 @@ XKB_VARIANT="abnt2"
 CINNAMON_LAYOUT="br"
 MATE_LAYOUT="br\tabnt2"
 
-DESKTOP="lxqt"
+DESKTOP="plasma"
 STACK_PRESET=""
 STACKS_ARG=""
 LIST_STACKS=0
@@ -145,7 +145,7 @@ cleanup_temporary_privileges() {
 trap cleanup_temporary_privileges EXIT
 
 usage() {
-    printf 'Wolf Linux Installer %s - LXQt / X11 baseline\n\n' "$WOLF_VERSION"
+    printf 'Wolf Linux Installer %s - KDE Plasma / Wayland baseline\n\n' "$WOLF_VERSION"
     cat <<'EOF'
 Uso:
   ./wolf-install.sh [opções]
@@ -173,8 +173,8 @@ Seleção de software:
   --preset full         Todas as stacks opcionais (padrão do Wagner).
   --preset test         VM/teste: daily + gaming + development + extras.
                         Não instala Android/Flutter nem containers.
-  --preset minimal      Somente sistema + Wolf LXQt/X11.
-  --preset basic        LXQt + LibreOffice, Chrome, áudio/vídeo e PDF.
+  --preset minimal      Somente sistema + Wolf KDE Plasma/Wayland.
+  --preset basic        Plasma + LibreOffice, Thorium, áudio/vídeo e PDF.
   --preset custom       Abre seleção interativa das stacks.
   --stacks LISTA        Seleção explícita, separada por vírgulas.
                         Ex.: daily,gaming,development
@@ -276,7 +276,7 @@ fi
 if (( LIST_STACKS == 1 )); then
     cat <<'EOF'
 Stacks opcionais disponíveis:
-  daily        Escritório, multimídia, impressão, Chrome, Flatpak, Zsh
+  daily        Escritório, multimídia, impressão, Thorium AVX2, Flatpak, Zsh
   gaming       Steam, Discord, Lutris, Heroic, Wine/Proton, MangoHud, Gamescope
   development  Compiladores, Python, JDK, VS Code, Insomnia
   android      Android Studio/SDK + Flutter (stack grande)
@@ -705,14 +705,14 @@ check_network() {
 }
 
 choose_desktop() {
-    DESKTOP="lxqt"
-    ok "Desktop fixo: Wolf LXQt / X11 (Openbox)"
+    DESKTOP="plasma"
+    ok "Desktop fixo: Wolf KDE Plasma / Wayland"
 }
 
 list_stacks() {
     cat <<'EOF'
 Stacks opcionais disponíveis:
-  daily        Escritório, multimídia, impressão, Chrome, Flatpak, Zsh
+  daily        Escritório, multimídia, impressão, Thorium AVX2, Flatpak, Zsh
   gaming       Steam, Discord, Lutris, Heroic, Wine/Proton, MangoHud, Gamescope
   development  Compiladores, Python, JDK, VS Code, Insomnia
   android      Android Studio/SDK + Flutter (stack grande)
@@ -770,7 +770,7 @@ choose_stacks_interactive() {
     echo "Seleção de software opcional:"
     echo "  1) Full    - todas as stacks [padrão]"
     echo "  2) Test    - sem Android/Flutter e containers"
-    echo "  3) Minimal - somente LXQt/base"
+    echo "  3) Minimal - somente KDE Plasma/Wayland"
     echo "  4) Basic   - escritório, navegador e multimídia"
     echo "  5) Custom  - escolher stack por stack"
     echo
@@ -1789,7 +1789,7 @@ PYCLEAN
 
 packages_for_desktop() {
     printf '%s
-' "${LXQT_PACKAGES[@]}" "${LXQT_PORTAL_PACKAGES[@]}"
+' "${KDE_PACKAGES[@]}" "${KDE_PORTAL_PACKAGES[@]}"
 }
 
 enable_multilib_in_file() {
@@ -1983,9 +1983,9 @@ configure_wolf_identity() {
 
     cat > /mnt/etc/os-release <<'EOF'
 NAME="Wolf Linux"
-PRETTY_NAME="Wolf Linux 2.2"
-VERSION="2.2"
-VERSION_ID="2.2.0"
+PRETTY_NAME="Wolf Linux 2.3.1"
+VERSION="2.3.1"
+VERSION_ID="2.3.1"
 LOGO="wolf-linux"
 VENDOR_NAME="Wolf Linux"
 ID=arch
@@ -2036,7 +2036,7 @@ EOF
     fi
 
     # Validar os campos efetivamente gravados; evitar comparação com release antigo.
-    grep -Fxq 'PRETTY_NAME="Wolf Linux 2.2"' /mnt/etc/os-release &&
+    grep -Fxq 'PRETTY_NAME="Wolf Linux 2.3.1"' /mnt/etc/os-release &&
     grep -Fxq "VERSION_ID=\"${WOLF_VERSION}\"" /mnt/etc/os-release &&
     grep -Fxq 'ID=arch' /mnt/etc/os-release ||
         die "Falha ao validar identidade Wolf Linux em /etc/os-release."
@@ -2274,8 +2274,8 @@ enable_one_service() {
 }
 
 configure_services() {
-    # Apenas serviços usados pelo LXQt e pelas stacks selecionadas.
-    # Baloo/KDE não fazem parte do perfil ativo.
+    # Serviços KDE/Wayland e stacks selecionadas; sem watchers LXQt.
+    # Baloo fica sob controle do proprio KDE; nao impor indexacao global.
     local -a services=(NetworkManager.service bluetooth.service sddm.service)
     stack_selected daily && services+=(cups.service)
     stack_selected containers && services+=(docker.service)
@@ -2307,7 +2307,7 @@ configure_multilib() {
 complete_base_packages() {
     local -a packages
     mapfile -t packages < <(collect_base_packages)
-    info "Conferindo/completando perfil LXQt/base..."
+    info "Conferindo/completando perfil KDE Plasma/base..."
     arch-chroot /mnt pacman -S --needed --noconfirm "${packages[@]}"
 
     local -a expected_units=(
@@ -2319,7 +2319,7 @@ complete_base_packages() {
     for unit_path in "${expected_units[@]}"; do
         [[ -e "$unit_path" ]] || die "Unit esperada ausente: $unit_path"
     done
-    ok "Perfil LXQt/base completo."
+    ok "Perfil KDE Plasma/base completo."
 }
 
 # Falha no Chaotic-AUR é tratada apenas como indisponibilidade de pacotes
@@ -3082,21 +3082,19 @@ EOF
 # Wolf Linux - Android / Flutter
 export ANDROID_HOME=/opt/android-sdk
 export ANDROID_SDK_ROOT=/opt/android-sdk
-export CHROME_EXECUTABLE=/usr/bin/google-chrome-stable
+export CHROME_EXECUTABLE=/usr/local/bin/wolf-thorium
 export PATH="/opt/flutter/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/cmdline-tools/latest/bin:$PATH"
 EOF
     chmod 644 /mnt/etc/profile.d/wolf-development.sh
 
-    # Flutter no Linux procura por `google-chrome`. O pacote google-chrome
-    # do Arch/AUR fornece `google-chrome-stable`, então expomos um alias
-    # global sem tocar em arquivos pertencentes ao pacote.
-    mkdir -p /mnt/usr/local/bin
-    if [[ -x /mnt/usr/bin/google-chrome-stable ]]; then
-        ln -sfn /usr/bin/google-chrome-stable /mnt/usr/local/bin/google-chrome
-        ok "Compatibilidade Flutter Web: google-chrome -> google-chrome-stable."
-    else
-        warn "google-chrome-stable não encontrado; Flutter Web poderá reclamar do Chrome."
+    # Flutter utiliza a variável CHROME_EXECUTABLE, mas o navegador será o Thorium.
+    # O wrapper Wolf detecta o executável realmente entregue pelo pacote AUR.
+    [[ -x /mnt/usr/local/bin/wolf-thorium ]] ||
+        die 'Wrapper Wolf Thorium ausente; não é seguro apontar Flutter para Chrome.'
+    if ! arch-chroot /mnt /usr/local/bin/wolf-thorium --version; then
+        die 'Thorium não foi instalado ou não é executável; Flutter Web requer o navegador antes de configurar o SDK.'
     fi
+    ok 'Flutter Web: CHROME_EXECUTABLE aponta para Wolf Thorium.'
 
     # O metapacote android-sdk não instala uma SDK Platform. Sem ao menos
     # uma plataforma, Flutter encontra /opt/android-sdk mas considera o SDK
@@ -3129,7 +3127,7 @@ set -u
 
 export ANDROID_HOME=/opt/android-sdk
 export ANDROID_SDK_ROOT=/opt/android-sdk
-export CHROME_EXECUTABLE=/usr/bin/google-chrome-stable
+export CHROME_EXECUTABLE=/usr/local/bin/wolf-thorium
 export PATH="/opt/flutter/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/cmdline-tools/latest/bin:$PATH"
 
 echo "============================================================"
@@ -3169,11 +3167,11 @@ else
     printf '    %s\n' "${adb_bins[@]}"
 fi
 echo
-echo "Chrome para Flutter Web:"
-if command -v google-chrome >/dev/null 2>&1; then
-    echo "  $(command -v google-chrome)"
+echo "Thorium para Flutter Web:"
+if [[ -x "${CHROME_EXECUTABLE:-}" ]]; then
+    "$CHROME_EXECUTABLE" --version
 else
-    echo "  [ERRO] google-chrome não encontrado."
+    echo "  [ERRO] Wolf Thorium não encontrado."
 fi
 echo
 echo "Permissões do Android SDK:"
@@ -3326,12 +3324,24 @@ EOF
               WOLF LINUX
 EOF
 
+    cat > /mnt/usr/share/wolf-linux/fastfetch/wolf-tux-tty.txt <<'WOLF_TUX_TTY'
+           .--.
+          |o_o |
+          |:_/ |
+         //   \ \
+        (|     | )
+        /'\_   _/`\
+        \___)=(___/
+
+          WOLF LINUX
+WOLF_TUX_TTY
+
     cat > /mnt/etc/skel/.config/fastfetch/config-tty.jsonc <<'EOF'
 {
     "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
     "logo": {
         "type": "file-raw",
-        "source": "/usr/share/wolf-linux/fastfetch/wolf-linux-ascii.txt",
+        "source": "/usr/share/wolf-linux/fastfetch/wolf-tux-tty.txt",
         "padding": {
             "left": 1,
             "right": 3
@@ -3381,7 +3391,7 @@ if [[ -z "\${DISPLAY:-}" &&
 
     export ANDROID_HOME=/opt/android-sdk
     export ANDROID_SDK_ROOT=/opt/android-sdk
-    export CHROME_EXECUTABLE=/usr/bin/google-chrome-stable
+    export CHROME_EXECUTABLE=/usr/local/bin/wolf-thorium
     export PATH="/opt/flutter/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/cmdline-tools/latest/bin:\$PATH"
 
     if [[ -t 1 && "\${WOLF_FASTFETCH:-1}" != "0" ]] &&
@@ -3454,7 +3464,7 @@ fi
 # Flutter / Android
 export ANDROID_HOME=/opt/android-sdk
 export ANDROID_SDK_ROOT=/opt/android-sdk
-export CHROME_EXECUTABLE=/usr/bin/google-chrome-stable
+export CHROME_EXECUTABLE=/usr/local/bin/wolf-thorium
 export PATH="/opt/flutter/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/cmdline-tools/latest/bin:\$PATH"
 
 if [[ -n "$p10k_theme" && -r "$p10k_theme" && -f ~/.p10k.zsh ]]; then
@@ -3494,8 +3504,22 @@ EOF
     ok "Zsh/Oh My Zsh/Powerlevel10k configurados."
 }
 
+# Available before stage 68 (Flutter). Never writes into package-managed paths.
+install_wolf_thorium_launcher() {
+    install -d -m 0755 /mnt/usr/local/bin
+    install -m 0755 "$PROJECT_DIR/tools/wolf-thorium" /mnt/usr/local/bin/wolf-thorium ||
+        die 'Falha ao instalar wrapper do Thorium.'
+    if stack_selected daily; then
+        if ! arch-chroot /mnt /usr/local/bin/wolf-thorium --version; then
+            warn 'Thorium AVX2 ausente/não executável; confira as pendências de AUR no sistema instalado.'
+            install -d /mnt/var/log
+            printf '%s\n' 'Thorium AVX2 pendente ou binário indisponível; verificar instalação AUR e CPU' >> /mnt/var/log/wolf-optional-failures.log
+        fi
+    fi
+}
+
 install_wolf_shared_personal_defaults() {
-    info "Instalando as preferências compartilhadas do LXQt (MIME, Konsole e Zsh)..."
+    info "Instalando preferências Wolf para KDE (MIME, Konsole e Zsh)..."
     local defaults_script="/root/wolf-linux/tests/wolf-configure-user-defaults.py"
     local asset_dir="${WOLF_ASSET_DIR:-/root/wolf-linux/assets}"
     local -a options=(--root /mnt --user "$USERNAME_VALUE" --assets "$asset_dir")
@@ -3505,7 +3529,7 @@ install_wolf_shared_personal_defaults() {
     if stack_selected daily; then options+=(--daily); fi
     if stack_selected development; then options+=(--development); fi
     if stack_selected extras; then options+=(--extras); fi
-    python "$defaults_script" "${options[@]}" || die "Falha ao aplicar preferências compartilhadas no LXQt"
+    python "$defaults_script" "${options[@]}" || die "Falha ao aplicar preferências compartilhadas no KDE"
 
     if stack_selected daily; then
         # O arquivo de referencia usa /usr/share/oh-my-zsh. Instalamos o
@@ -3516,6 +3540,8 @@ install_wolf_shared_personal_defaults() {
             /mnt/usr/share/wolf-linux/fastfetch/wolf-linux.txt
         install -m 0644 "$asset_dir/zsh/fastfetch-wolf-linux-ascii.txt" \
             /mnt/usr/share/wolf-linux/fastfetch/wolf-linux-ascii.txt
+        install -m 0644 "$asset_dir/zsh/fastfetch-wolf-tux-tty.txt" \
+            /mnt/usr/share/wolf-linux/fastfetch/wolf-tux-tty.txt
         if [[ ! -f /mnt/usr/share/oh-my-zsh/oh-my-zsh.sh ]]; then
             if ! arch-chroot /mnt git clone --depth=1 --quiet \
                 https://github.com/ohmyzsh/ohmyzsh.git /usr/share/oh-my-zsh; then
@@ -3537,7 +3563,7 @@ install_wolf_shared_personal_defaults() {
         arch-chroot /mnt chsh -s /usr/bin/zsh "$USERNAME_VALUE" || \
             die "Falha ao definir Zsh como shell de $USERNAME_VALUE"
     fi
-    ok "Perfil LXQt: associações MIME, Konsole e Zsh preparados; atalhos gerenciados pelo perfil LXQt."
+    ok "Perfil Plasma: associações MIME, Konsole e Zsh preparados; atalhos gerenciados pelo KWin."
 }
 
 install_terminal_defaults() {
@@ -8983,6 +9009,20 @@ install_gpu_profile() {
         mkdir -p /mnt/etc/modprobe.d
         printf 'options nvidia_drm modeset=1\n' \
             > /mnt/etc/modprobe.d/nvidia-drm.conf
+
+        # Wolf Linux 2.3.0 Refinos 1: contorno para travamentos de pageflip
+        # NVIDIA R620 / KWin Wayland com duas telas. Validado na RTX 4060.
+        # Escopo intencionalmente restrito a 620.x; nao alterar Nouveau, Intel,
+        # AMD, VirtualBox nem versoes futuras sem nova homologacao.
+        local wolf_nvidia_driver_version=''
+        wolf_nvidia_driver_version="$(arch-chroot /mnt pacman -Q nvidia-utils 2>/dev/null | awk '{print $2}')"
+        if [[ "$wolf_nvidia_driver_version" == 620.* ]]; then
+            printf 'options nvidia_modeset opportunistic_flip_sync=0\n' \
+                > /mnt/etc/modprobe.d/90-wolf-nvidia-wayland-multimonitor.conf
+            ok 'NVIDIA R620: workaround de sincronizacao para KWin/Wayland com multiplos monitores ativado.'
+        else
+            info "NVIDIA ${wolf_nvidia_driver_version:-desconhecido}: workaround R620 nao aplicado."
+        fi
     fi
 
     if ((${#early_modules[@]} > 0)); then
@@ -12035,11 +12075,11 @@ WOLF_PKG_DESKTOP
 [Desktop Entry]
 Type=Application
 Name=Wolf Package Manager (Monitor)
-Comment=Verificar atualizações e mostrar status na bandeja do LXQt
+Comment=Verificar atualizações e mostrar status na bandeja do Plasma
 Exec=/usr/local/bin/wolf-package-manager --tray
 TryExec=/usr/local/bin/wolf-package-manager
 Icon=wolf-package-manager
-OnlyShowIn=LXQt;
+OnlyShowIn=KDE;
 Terminal=false
 WOLF_PKG_AUTOSTART
     # Yay is a user-run AUR helper. Never invoke it as root.
@@ -12052,7 +12092,105 @@ WOLF_PKG_AUTOSTART
             echo 'wolf-package-manager: yay ausente; instalar como usuário para ativar AUR' >> /mnt/var/log/wolf-optional-failures.log
         fi
     fi
-    ok 'Wolf Package Manager integrado (menu + autostart KDE em modo tray).'
+    grep -Fqx "VERSION = '1.0.0'" "$dst/wolfpkg/app.py" || die 'Wolf Package Manager não é versão 1.0.0.'
+    ok 'Wolf Package Manager 1.0.0 integrado (menu + autostart KDE em modo tray, yay preservado).'
+}
+
+# Instalacao do backend seguro de USB e do helper de VS Code para Dolphin.
+# As acoes do usuario (KIO e KDE Solid) sao geradas pelo configurador de
+# preferencias; nao usar menus genericos para formatar qualquer pasta.
+# Wolf Subtitle Downloader 0.3-preview3, anteriormente homologado no LXQt,
+# integrado ao Dolphin 6 usando exatamente as fontes aprovadas no KDE.
+# A instalacao da ISO NAO acessa o chaveiro nem executa pip como root.
+# Subliminal 2.8.0 e configurado UMA VEZ por usuario, com consentimento.
+install_wolf_subtitle_downloader_kde() {
+    local source="$PROJECT_DIR/tools/subtitle-downloader"
+    local dest="/mnt/usr/local/lib/wolf-linux/subtitle-downloader"
+    local pyfile
+    [[ -f "$source/instalar-legendas.sh" && -f "$source/legendas/deploy.py" &&
+       -f "$source/legendas/fontes/gui.py" && -f "$source/legendas/fontes/backend.py" &&
+       -f "$source/legendas/fontes/helpers.py" && -f "$source/legendas/fontes/credentials.py" &&
+       -f "$source/wolf-subtitle-downloader" && -f "$source/wolf-subtitle-downloader-setup" ]] ||
+        die 'Wolf Subtitle Downloader KDE incompleto no DevKit.'
+    for p in python pyside6 mediainfo libnotify libsecret gnome-keyring python-pip; do
+        arch-chroot /mnt pacman -Q "$p" >/dev/null 2>&1 || die "Dependência de legendas ausente: $p"
+    done
+    install -d -m 0755 "$dest/legendas/fontes" /mnt/usr/local/bin \
+        /mnt/usr/share/applications /mnt/usr/share/kio/servicemenus
+    install -m 0755 "$source/instalar-legendas.sh" "$dest/instalar-legendas.sh"
+    install -m 0644 "$source/legendas/deploy.py" "$dest/legendas/deploy.py"
+    for pyfile in gui.py backend.py credentials.py helpers.py; do
+        install -m 0644 "$source/legendas/fontes/$pyfile" "$dest/legendas/fontes/$pyfile"
+    done
+    install -m 0755 "$source/wolf-subtitle-downloader" /mnt/usr/local/bin/wolf-subtitle-downloader
+    install -m 0755 "$source/wolf-subtitle-downloader-setup" /mnt/usr/local/bin/wolf-subtitle-downloader-setup
+    cat > /mnt/usr/share/applications/wolf-subtitle-downloader.desktop <<'WOLF_SUB_DESKTOP'
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Wolf Subtitle Downloader
+Comment=Buscar e baixar legendas para filmes e séries; prepara dependências no primeiro uso
+Exec=/usr/local/bin/wolf-subtitle-downloader %f
+TryExec=/usr/local/bin/wolf-subtitle-downloader
+Icon=video-x-generic
+Terminal=false
+Categories=AudioVideo;Utility;
+MimeType=video/*;
+StartupNotify=true
+WOLF_SUB_DESKTOP
+    cat > /mnt/usr/share/applications/wolf-subtitle-downloader-setup.desktop <<'WOLF_SUB_SETUP'
+[Desktop Entry]
+Type=Application
+Name=Wolf Subtitle Downloader - Preparar dependências
+Comment=Instalar Subliminal no ambiente Python isolado desta conta (requer internet)
+Exec=konsole --hold -e /usr/local/bin/wolf-subtitle-downloader-setup
+TryExec=/usr/local/bin/wolf-subtitle-downloader-setup
+Icon=preferences-system
+Terminal=false
+Categories=AudioVideo;Utility;
+WOLF_SUB_SETUP
+    cat > /mnt/usr/share/kio/servicemenus/wolf-subtitle-downloader-kde.desktop <<'WOLF_SUB_MENU'
+[Desktop Entry]
+Type=Service
+MimeType=video/*;application/x-matroska;
+Actions=wolfSubtitleSearch;wolfSubtitleQuick;
+X-KDE-RequiredNumberOfUrls=1
+X-KDE-Protocols=file
+X-KDE-Priority=TopLevel
+
+[Desktop Action wolfSubtitleSearch]
+Name=Buscar legendas...
+Icon=edit-find
+Exec=/usr/local/bin/wolf-subtitle-downloader %f
+
+[Desktop Action wolfSubtitleQuick]
+Name=Baixar melhor legenda PT-BR
+Icon=download
+Exec=/usr/local/bin/wolf-subtitle-downloader --quick %f
+WOLF_SUB_MENU
+    # /usr/share/kio/servicemenus e confiável; não requer chmod +x global.
+    chmod 0644 /mnt/usr/share/kio/servicemenus/wolf-subtitle-downloader-kde.desktop
+    arch-chroot /mnt /usr/bin/python3 -m py_compile \
+        /usr/local/lib/wolf-linux/subtitle-downloader/legendas/deploy.py \
+        /usr/local/lib/wolf-linux/subtitle-downloader/legendas/fontes/gui.py \
+        /usr/local/lib/wolf-linux/subtitle-downloader/legendas/fontes/backend.py \
+        /usr/local/lib/wolf-linux/subtitle-downloader/legendas/fontes/helpers.py \
+        /usr/local/lib/wolf-linux/subtitle-downloader/legendas/fontes/credentials.py ||
+        die 'Wolf Subtitle Downloader: sintaxe inválida.'
+    ok 'Wolf Subtitle Downloader no Dolphin; setup Subliminal 2.8 por usuário no primeiro uso.'
+}
+
+install_wolf_kde_refinement_helpers() {
+    local kde_tools="$PROJECT_DIR/tools/kde"
+    [[ -f "$kde_tools/wolf-format-removable" && -f "$kde_tools/wolf-open-vscode-kde" ]] ||
+        die 'Helpers KDE ausentes no DevKit.'
+    install -d -m 0755 /mnt/usr/local/bin
+    install -m 0755 "$kde_tools/wolf-format-removable" /mnt/usr/local/bin/wolf-format-removable
+    install -m 0755 "$kde_tools/wolf-open-vscode-kde" /mnt/usr/local/bin/wolf-open-vscode-kde
+    arch-chroot /mnt /usr/bin/python3 -m py_compile \
+        /usr/local/bin/wolf-format-removable /usr/local/bin/wolf-open-vscode-kde ||
+        die 'Erro de sintaxe nos helpers KDE instalados.'
+    ok 'Dolphin VS Code e backend USB disponiveis; widget Plasma sem menu de pastas.'
 }
 
 install_wolf_helper_bundle() {
@@ -12078,8 +12216,11 @@ install_wolf_helper_bundle() {
         install -m 0755 "$source_root/wolf-validate-helpers-0.1.sh" /mnt/usr/local/bin/wolf-validate-helpers
     fi
 
-    # LXQt usa o configurador nativo na etapa 69d2. Não instalar um
-    # primeiro-login Plasma, nem exigir scripts KDE herdados.
+    # KDE recebe um unico primeiro login one-shot, com branding e paineis.
+    # Sem watchers permanentes, sem layout XRandR e sem scripts Openbox.
+    local plasma_first="$source_root/wolf-first-login-plasma.sh"
+    [[ -f "$plasma_first" ]] || die "Primeiro login Plasma ausente: $plasma_first"
+    install -m 0755 "$plasma_first" /mnt/usr/local/bin/wolf-first-login-plasma
 
     # Control Center usa PySide6 dos repos oficiais. UI não executa watchers.
     local gui_source="$source_root/control-center"
@@ -12097,20 +12238,35 @@ install_wolf_helper_bundle() {
 #!/usr/bin/env sh
 # A opção --monitors abre apenas o editor, sem a janela principal.
 if [ "${1:-}" = "--monitors" ] && [ "$#" -eq 1 ]; then
-    exec /usr/local/bin/wolf-monitors
+    if command -v kcmshell6 >/dev/null 2>&1; then
+        exec kcmshell6 kcm_kscreen
+    fi
+    exec systemsettings kcm_kscreen
 fi
 exec /usr/bin/python3 /usr/local/lib/wolf-linux/control-center/main.py "$@"
 WOLF_CC_WRAPPER
     chmod 0755 /mnt/usr/local/bin/wolf-control-center
     cat > /mnt/usr/local/bin/wolf-monitors <<'WOLF_MONITORS_WRAPPER'
 #!/usr/bin/env sh
-exec /usr/bin/python3 /usr/local/lib/wolf-linux/control-center/wolf_monitors.py "$@"
+if command -v kcmshell6 >/dev/null 2>&1; then
+    exec kcmshell6 kcm_kscreen "$@"
+fi
+exec systemsettings kcm_kscreen "$@"
 WOLF_MONITORS_WRAPPER
     chmod 0755 /mnt/usr/local/bin/wolf-monitors
     install -m 0644 "$gui_source/wolf-control-center.desktop" \
         /mnt/usr/share/applications/wolf-control-center.desktop
-    install -m 0644 "$gui_source/wolf-monitors.desktop" \
-        /mnt/usr/share/applications/wolf-monitors.desktop
+    cat > /mnt/usr/share/applications/wolf-monitors.desktop <<'WOLF_KSCREEN_DESKTOP'
+[Desktop Entry]
+Type=Application
+Name=Monitores (Wolf Linux / KScreen)
+Comment=Configurar resolucoes, frequencias, escala e posicao de cada monitor no Plasma Wayland
+Exec=/usr/local/bin/wolf-control-center --monitors
+Icon=video-display
+OnlyShowIn=KDE;
+Terminal=false
+Categories=Settings;System;
+WOLF_KSCREEN_DESKTOP
 
     # Stable tools get friendly command names; they are still manual tools.
     [[ -f "$target_root/stable/wolf-grub-manager-0.3.sh" ]] && \
@@ -12118,14 +12274,39 @@ WOLF_MONITORS_WRAPPER
     [[ -f "$target_root/stable/wolf-gamepad-setup-0.3.sh" ]] && \
         ln -sfn ../lib/wolf-linux/helpers/stable/wolf-gamepad-setup-0.3.sh /mnt/usr/local/bin/wolf-gamepad-setup
 
+    # Wolf Linux: ferramenta opcional, jamais executada na instalacao/primeiro login.
+    # --apply bloqueia a suspensao e ajusta wallpaper de bloqueio; --undo restaura.
+    [[ -f "$target_root/stable/wolf-sem-suspensao.sh" ]] ||
+        die 'Utilitario opcional de suspensao ausente no staging.'
+    ln -sfn ../lib/wolf-linux/helpers/stable/wolf-sem-suspensao.sh /mnt/usr/local/bin/wolf-sem-suspensao
+    cat > /mnt/usr/share/applications/wolf-sem-suspensao.desktop <<'WOLF_SUSPEND_OPTIONAL'
+[Desktop Entry]
+Type=Application
+Name=Wolf Linux - Desativar suspensão (opcional)
+Comment=Executar manualmente a desativação de suspensão e o fundo de bloqueio Wolf
+Icon=preferences-system-power-management
+Exec=konsole --hold -e /usr/local/bin/wolf-sem-suspensao --apply
+Terminal=false
+OnlyShowIn=KDE;
+Categories=Settings;System;
+Actions=Status;Restaurar;
+
+[Desktop Action Status]
+Name=Consultar estado
+Exec=konsole --hold -e /usr/local/bin/wolf-sem-suspensao --status
+
+[Desktop Action Restaurar]
+Name=Restaurar suspensão
+Exec=konsole --hold -e /usr/local/bin/wolf-sem-suspensao --undo
+WOLF_SUSPEND_OPTIONAL
+
     cat > /mnt/etc/wolf-linux/install-stacks.conf <<EOF
 WOLF_VERSION=$WOLF_VERSION
-DESKTOP=lxqt-x11
+DESKTOP=plasma-wayland
 STACKS=$(selected_stacks_text)
 EOF
 
-    # Guardrail: não ativar helpers Wolf globais herdados. O perfil LXQt
-    # é aplicado durante a instalação; indicadores próprios vêm depois.
+    # Remove autostarts globais legados. Novo primeiro login e PM sao instalados depois.
     if find /mnt/etc/xdg/autostart -maxdepth 1 -type f -name 'wolf-*.desktop' -print -quit 2>/dev/null | grep -q .; then
         warn "Removendo autostarts Wolf globais herdados: mantido apenas o setup unico do usuario."
         find /mnt/etc/xdg/autostart -maxdepth 1 -type f -name 'wolf-*.desktop' -delete
@@ -12134,6 +12315,24 @@ EOF
     ok "Helpers e Wolf Package Manager instalados. Use 'wolf-helper list' após o boot."
 }
 
+
+# Base KDE/Wayland verificada no destino, antes dos helpers Wolf.
+validate_plasma_base() {
+    arch-chroot /mnt pacman -Q plasma-workspace plasma-desktop kwin kscreen \
+        dolphin konsole kate xdg-desktop-portal-kde xorg-xwayland \
+        systemsettings sddm pyside6 >/dev/null ||
+        die 'Componentes Plasma/Wayland essenciais ausentes.'
+    [[ -f /mnt/usr/share/wayland-sessions/plasma.desktop ]] ||
+        die 'Sessao Plasma Wayland nao encontrada no destino.'
+    for forbidden in lxqt-session lxqt-panel openbox picom plasma-x11-session discover plasma-meta; do
+        if arch-chroot /mnt pacman -Q "$forbidden" >/dev/null 2>&1; then
+            die "Pacote indevido na base KDE: $forbidden"
+        fi
+    done
+    [[ -e /mnt/usr/lib/systemd/system/NetworkManager.service ]] ||
+        die 'NetworkManager.service ausente.'
+    ok 'Base KDE/Wayland verificada, sem LXQt e sem Discover.'
+}
 
 # Integração LXQt não substitui as rotinas de particionamento/UEFI/LVM já homologadas.
 validate_lxqt_base() {
@@ -12351,13 +12550,45 @@ EOF_WOLF_USB_FORMAT
     ok 'Wolf LXQt: painel principal com tray, segundo dinamico, favoritos PCManFM-Qt e Alt+Tab configurados.'
 }
 
+# Instala somente o perfil plasma; nao aplica XRandR nem altera o layout real.
+install_wolf_plasma_profile() {
+    info 'Configurando login Plasma Wayland e primeiro login Wolf...'
+    local userhome="/mnt/home/$USERNAME_VALUE"
+    [[ -d "$userhome" ]] || die "Home nao encontrada: $userhome"
+    install -d /mnt/var/lib/sddm "$userhome/.config/autostart"
+    cat > /mnt/var/lib/sddm/state.conf <<EOF_SDDM_PLASMA
+[Last]
+Session=plasma.desktop
+User=$USERNAME_VALUE
+EOF_SDDM_PLASMA
+    if arch-chroot /mnt getent passwd sddm >/dev/null 2>&1; then
+        arch-chroot /mnt chown sddm:sddm /var/lib/sddm/state.conf
+    fi
+    cat > "$userhome/.config/autostart/wolf-first-login-plasma.desktop" <<'EOF_PLASMA_FIRST_LOGIN'
+[Desktop Entry]
+Type=Application
+Name=Wolf Linux - primeira configuracao Plasma
+Comment=Branding e paineis individuais uma unica vez apos o primeiro login
+Exec=/usr/local/bin/wolf-first-login-plasma
+TryExec=/usr/local/bin/wolf-first-login-plasma
+OnlyShowIn=KDE;
+NoDisplay=true
+Terminal=false
+EOF_PLASMA_FIRST_LOGIN
+    arch-chroot /mnt chown -R "$USERNAME_VALUE:$USERNAME_VALUE" \
+        "/home/$USERNAME_VALUE/.config/autostart"
+    [[ -x /mnt/usr/local/bin/wolf-first-login-plasma ]] ||
+        die 'Primeiro login Plasma nao instalado.'
+    ok 'SDDM Plasma Wayland, KScreen e configuracao inicial Wolf preparados.'
+}
+
 finalize_vm_install() {
     sync
     echo
     echo "============================================================"
-    echo "         WOLF LINUX 2.2 — INSTALAÇÃO CONCLUÍDA"
+    echo "         WOLF LINUX 2.3 — INSTALAÇÃO CONCLUÍDA"
     echo "============================================================"
-    echo "Desktop ....: Wolf LXQt / X11"
+    echo "Desktop ....: Wolf KDE Plasma / Wayland"
     echo "Usuário ....: $USERNAME_VALUE"
     echo "GPU ........: $GPU_PROFILE"
     echo "Stacks .....: $(selected_stacks_text)"
@@ -12367,7 +12598,7 @@ finalize_vm_install() {
         echo 'Kernel principal: linux (Arch oficial; seleção do GRUB pendente)'
     fi
     echo 'Kernel reserva: linux-lts' 
-    echo "LXQt .......: Painéis, Alt+Tab e tema Wolf configurados na instalação"
+    echo "Plasma .....: branding e paineis locais por monitor no primeiro login"
     echo "Outros helpers: Gamepad e GRUB permanecem manuais"
     echo
     echo "Após o primeiro boot:"
@@ -12738,16 +12969,19 @@ main() {
         exit 0
     fi
 
+    # Fail closed BEFORE touching target disks: AVX2 is needed for Thorium AVX2.
+    # Minimal has no browser and can still be installed on older CPUs.
+    if stack_selected daily && ! grep -qE '(^|[[:space:]])avx2([[:space:]]|$)' /proc/cpuinfo; then
+        die 'Perfil com Thorium AVX2 selecionado, mas CPU sem AVX2. Instalação cancelada antes de alterar discos; use Minimal ou outra variante do navegador.'
+    fi
+
     confirm_installation
     revalidate_gui_vm_target
     revalidate_gui_lab42_target
     revalidate_gui_physical_target
     confirm_preserved_home_cleanup
-    # IMPORTANTE: verificar ABI e atualizar somente o banco pacman efêmero da Live
-    # ANTES de qualquer formatação. Não criar sistema incompatível com libfm Wolf.
-    pacman -Sy --noconfirm || die 'Falha ao atualizar bases oficiais na Live antes da formatação.'
-    bash "$PROJECT_DIR/tools/wolf-integration-monitor/verificar-abi-lxqt-24.sh" ||
-        die 'Repositórios incompatíveis com a libfm-qt Wolf ABI 17; nenhum disco foi formatado.'
+    # Repositorios antes da formatacao; sem dependencia de libfm/PCManFM.
+    pacman -Sy --noconfirm || die 'Falha ao atualizar bases oficiais na Live antes da formatacao.'
     stage "10-preparar-disco" prepare_erase_disk
     stage "20-formatar-montar" format_and_mount
     stage "22-limpar-home" clean_preserved_home_dotfiles
@@ -12771,18 +13005,20 @@ main() {
     else
         ok 'Minimal: kernels oficiais validados; stacks opcionais ignoradas.'
     fi
+    stage "66-thorium-launcher" install_wolf_thorium_launcher
     stage "67-servicos" configure_services
     stage "68-android-flutter" install_optional_flutter_sdk
     stage "69-video" install_gpu_profile
     stage "69b-validar-video" validate_graphics_stack
     stage "69b2-validar-nvidia-dkms" validate_nvidia_dkms_for_both_kernels
     stage "69c-branding-boot" install_wolf_branding
-    stage "69c2-lxqt-base" validate_lxqt_base
+    stage "69c2-plasma-base" validate_plasma_base
+    stage "69c2-painel-sem-discover" install_wolf_plasma_panel_defaults
     stage "69c3-preferencias-compartilhadas" install_wolf_shared_personal_defaults
+    stage "69c3a-helpers-kde" install_wolf_kde_refinement_helpers
+    stage "69c3b-legendas-dolphin" install_wolf_subtitle_downloader_kde
     stage "69d-helpers-primeiro-login" install_wolf_helper_bundle
-    stage "69d2-wolf-lxqt" install_wolf_lxqt_profile
-    stage "69d3-formato-usb-menu-wolf" install_wolf_libfm_usb_package
-    stage "69d4-links-simbolicos-wolf" install_wolf_native_symlink_helper
+    stage "69d2-wolf-plasma" install_wolf_plasma_profile
     stage "69e-grub-manager" install_wolf_grub_manager
     stage "70-bootloader" configure_bootloader
     stage "72-validar-boot" validate_boot_installation

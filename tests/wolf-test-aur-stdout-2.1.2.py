@@ -58,11 +58,11 @@ for fn in collect_selected_stack_packages collect_selected_official_packages col
         case "$PROFILE" in
             minimal) (( ${#names[@]} == 0 )) || exit 60 ;;
             basic)
-                [[ "$combined" == *' google-chrome '* && "$combined" != *' docker '* ]] || exit 61 ;;
+                [[ "$combined" == *' thorium-browser-avx2-bin '* && "$combined" != *' docker '* ]] || exit 61 ;;
             test)
-                [[ "$combined" == *' google-chrome '* && "$combined" == *' gimp '* && "$combined" != *' docker '* ]] || exit 62 ;;
+                [[ "$combined" == *' thorium-browser-avx2-bin '* && "$combined" == *' gimp '* && "$combined" != *' docker '* ]] || exit 62 ;;
             full)
-                [[ "$combined" == *' docker '* && "$combined" == *' google-chrome '* && "$combined" == *' android-studio '* ]] || exit 63 ;;
+                [[ "$combined" == *' docker '* && "$combined" == *' thorium-browser-avx2-bin '* && "$combined" == *' android-studio '* ]] || exit 63 ;;
         esac
     fi
     printf '%s count=%s\\n' "$fn" "${#names[@]}"
@@ -93,7 +93,7 @@ arch-chroot() {{
     shift
     if [[ "$1" == pacman && "$2" == -Q ]]; then
         case "${{3:-}}" in
-            google-chrome|mpc-qt|zsh-theme-powerlevel10k)
+            thorium-browser-avx2-bin|mpc-qt|zsh-theme-powerlevel10k)
                 [[ -e "$STATE_DIR/installed.${{3}}" ]] ;; 
             *) return 0 ;;
         esac
@@ -120,7 +120,7 @@ cat "$STATE_DIR/yay-targets"
             self.assertNotIn('FALHA NA INSTALAÇÃO', done.stdout)
             self.assertIn('[AUR 3/3] zsh-theme-powerlevel10k', done.stdout)
             self.assertEqual(done.stdout.split('YAY_TARGETS_BEGIN\n')[-1].splitlines(),
-                             ['google-chrome', 'mpc-qt', 'zsh-theme-powerlevel10k'])
+                             ['thorium-browser-avx2-bin', 'mpc-qt', 'zsh-theme-powerlevel10k'])
             result = Path(work, 'packages.tsv').read_text()
             self.assertNotIn('FALHA NA INSTALAÇÃO', result)
             self.assertNotIn('Etapa:', result)

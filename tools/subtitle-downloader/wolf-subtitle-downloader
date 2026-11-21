@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Wolf Linux 2.3 KDE — launcher for the approved Subtitle Downloader 0.3.
+# Never runs pip or touches a user's keyring without user consent.
+set -Eeuo pipefail
+if (( EUID == 0 )); then
+    echo '[ERRO] Execute como usuario normal.' >&2
+    exit 1
+fi
+user_app="$HOME/.local/bin/wolf-subtitle-downloader"
+venv="$HOME/.local/share/wolf-subtitle-downloader/.venv/bin/python"
+if [[ -x "$user_app" && -x "$venv" ]] &&
+   "$venv" -c 'from importlib.metadata import version; assert version("subliminal")=="2.8.0"; import subliminal; from babelfish import Language; Language.fromietf("pt-BR")' >/dev/null 2>&1; then
+    exec "$user_app" "$@"
+fi
+if ! command -v kdialog >/dev/null 2>&1; then
+    echo '[INFO] Configure uma vez com: /usr/local/bin/wolf-subtitle-downloader-setup' >&2
+    exit 1
+fi
+if kdialog --title 'Wolf Subtitle Downloader' --yesno       'O mecanismo de legendas precisa ser preparado uma vez para esta conta.\n\nAs dependências serão instaladas no ambiente Python isolado do usuário, usando acesso à internet. Nenhuma credencial será alterada.\n\nDeseja abrir o assistente agora?'; then
+    if command -v konsole >/dev/null 2>&1; then
+        konsole --hold -e /usr/local/bin/wolf-subtitle-downloader-setup
+    else
+        kdialog --error 'Konsole indisponível. Execute wolf-subtitle-downloader-setup no terminal.'
+    fi
+fi
+# Após a preparação, execute a ação do Dolphin novamente.
+exit 0

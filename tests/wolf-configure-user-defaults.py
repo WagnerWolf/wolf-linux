@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Preferências compartilhadas Wolf LXQt: MIME, Konsole, Zsh e ação VS Code.
+"""Preferências Wolf KDE Plasma/Wayland: MIME, Konsole e Zsh.
 
 Usado no sistema alvo (sysroot) durante instalação. Não inicia watchers.
 """
@@ -37,9 +37,20 @@ def set_key(filename: Path, section: str, key: str, value: str) -> None:
     filename.write_text("".join(lines), encoding="utf-8")
 
 
-def apply_mime(config: Path, daily: bool) -> None:
+def thorium_desktop(root: Path) -> str:
+    """Choose a desktop entry provided by Thorium AUR, not an old Chrome alias."""
+    apps = root / 'usr' / 'share' / 'applications'
+    for name in ('thorium-browser-avx2.desktop', 'thorium-browser.desktop', 'thorium.desktop'):
+        if (apps / name).is_file():
+            return name
+    # Before AUR availability, prefer the expected AVX2 desktop id. The
+    # installer records missing-browser warnings independently.
+    return 'thorium-browser-avx2.desktop'
+
+
+def apply_mime(config: Path, daily: bool, browser_desktop: str = 'thorium-browser-avx2.desktop') -> None:
     mime = {
-        "inode/directory": "pcmanfm-qt.desktop",
+        "inode/directory": "org.kde.dolphin.desktop",
         "application/pdf": "org.kde.okular.desktop",
         "text/plain": "org.kde.kate.desktop",
         "text/markdown": "org.kde.kate.desktop",
@@ -50,7 +61,7 @@ def apply_mime(config: Path, daily: bool) -> None:
         "text/xml": "org.kde.kate.desktop",
         "application/x-shellscript": "org.kde.kate.desktop",
         "text/x-python": "org.kde.kate.desktop",
-        # Gwenview incluído na base LXQt (inclusive Minimal).
+        # Gwenview incluído na base KDE (inclusive Minimal).
         "image/png": "org.kde.gwenview.desktop",
         "image/jpeg": "org.kde.gwenview.desktop",
         "image/webp": "org.kde.gwenview.desktop",
@@ -85,9 +96,9 @@ def apply_mime(config: Path, daily: bool) -> None:
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "libreoffice-calc.desktop",
             "application/msword": "libreoffice-writer.desktop",
             "application/vnd.ms-excel": "libreoffice-calc.desktop",
-            "x-scheme-handler/http": "google-chrome.desktop",
-            "x-scheme-handler/https": "google-chrome.desktop",
-            "text/html": "google-chrome.desktop",
+            "x-scheme-handler/http": browser_desktop,
+            "x-scheme-handler/https": browser_desktop,
+            "text/html": browser_desktop,
         })
     for typ, desktop in mime.items():
         set_key(config, "Default Applications", typ, desktop + ";")
@@ -126,6 +137,88 @@ def configure_vscode_keyring(home: Path) -> Path | None:
     return file
 
 
+def thorium_window_class_launcher(root: Path, home: Path) -> Path:
+    """Sombreia somente o .desktop AUR do usuario; preserva Desktop Actions.
+
+    A janela real do Thorium no KWin/Wayland anuncia Thorium-browser, enquanto
+    o .desktop upstream usa StartupWMClass=thorium. Corrige o agrupamento no
+    gerenciador de tarefas do Plasma sem editar arquivos do pacman.
+    """
+    filename = 'thorium-browser-avx2.desktop'
+    system_file = root / 'usr/share/applications' / filename
+    if system_file.is_file():
+        lines = system_file.read_text(encoding='utf-8').splitlines()
+    else:
+        # AUR opcional: o launcher continua valido se pacote for instalado depois.
+        lines = ['[Desktop Entry]', 'Type=Application', 'Name=Thorium Browser AVX2',
+                 'Exec=/usr/bin/thorium-browser-avx2 %U',
+                 'Icon=thorium-browser-avx2', 'Categories=Network;WebBrowser;']
+    section = ''
+    replaced = False
+    output = []
+    seen_entry = False
+    for line in lines:
+        if line.startswith('[') and line.endswith(']'):
+            if section == 'Desktop Entry' and not replaced:
+                output.append('StartupWMClass=Thorium-browser')
+                replaced = True
+            section = line[1:-1]
+            if section == 'Desktop Entry':
+                seen_entry = True
+        if section == 'Desktop Entry' and line.startswith('StartupWMClass='):
+            if not replaced:
+                output.append('StartupWMClass=Thorium-browser')
+                replaced = True
+            continue
+        output.append(line)
+    if section == 'Desktop Entry' and not replaced:
+        output.append('StartupWMClass=Thorium-browser')
+        replaced = True
+    if not seen_entry or not replaced:
+        raise RuntimeError('Lancador Thorium invalido')
+    target = home / '.local/share/applications' / filename
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text('\n'.join(output)+'\n', encoding='utf-8')
+    return target
+
+
+def install_kde_device_actions(home: Path, development: bool) -> list[Path]:
+    """Apenas o widget Solid para USB; sem menu de pastas nem launcher extra."""
+    installed = []
+    solid = home / '.local/share/solid/actions/wolf-format-usb.desktop'
+    solid.parent.mkdir(parents=True, exist_ok=True)
+    solid.write_text('''[Desktop Entry]
+Type=Service
+X-KDE-Solid-Predicate=[ StorageDrive.bus == 'Usb' AND StorageDrive.hotpluggable == true ]
+Actions=wolfFormatUSB;
+
+[Desktop Action wolfFormatUSB]
+Name=Formatar unidade USB… (Wolf Linux)
+Icon=drive-removable-media
+Exec=/usr/local/bin/wolf-format-removable --browse
+''', encoding='utf-8')
+    installed.append(solid)
+    if development:
+        action = home / '.local/share/kio/servicemenus/wolf-open-vscode.desktop'
+        action.parent.mkdir(parents=True, exist_ok=True)
+        action.write_text('''[Desktop Entry]
+Type=Service
+MimeType=inode/directory;
+X-KDE-Protocols=file
+X-KDE-RequiredNumberOfUrls=1
+X-KDE-Priority=TopLevel
+Actions=wolfOpenVSCode;
+
+[Desktop Action wolfOpenVSCode]
+Name=Abrir pasta no Visual Studio Code
+Icon=visual-studio-code
+Exec=/usr/local/bin/wolf-open-vscode-kde %f
+''', encoding='utf-8')
+        action.chmod(0o755)
+        installed.append(action)
+    return installed
+
+
 def configure(root: Path, user: str, assets: Path, daily: bool, development: bool, extras: bool = False) -> None:
     if not root.is_dir():
         raise RuntimeError(f"Sysroot não encontrado: {root}")
@@ -137,7 +230,9 @@ def configure(root: Path, user: str, assets: Path, daily: bool, development: boo
     config = home / ".config"
     config.mkdir(parents=True, exist_ok=True)
 
-    apply_mime(config / "mimeapps.list", daily)
+    apply_mime(config / "mimeapps.list", daily, thorium_desktop(root))
+    kde_action_files = install_kde_device_actions(home, development)
+    browser_file = thorium_window_class_launcher(root, home) if daily else None
 
     konsole = home / ".local" / "share" / "konsole"
     konsole.mkdir(parents=True, exist_ok=True)
@@ -156,12 +251,77 @@ def configure(root: Path, user: str, assets: Path, daily: bool, development: boo
         copy_profile(assets / "zsh" / "p10k.zsh", home / ".p10k.zsh")
         copy_profile(assets / "zsh" / "fastfetch.jsonc", config / "fastfetch" / "config.jsonc")
         tty_config = config / "fastfetch" / "config-tty.jsonc"
-        tty_config.write_text('''{\n  "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",\n  "logo": {"type": "file-raw", "source": "/usr/share/wolf-linux/fastfetch/wolf-linux-ascii.txt"},\n  "display": {"separator": " : "},\n  "modules": ["title", "separator", "os", "host", "kernel", "uptime", "packages", "shell", "cpu", "gpu", "memory", "disk", "localip"]\n}\n''', encoding="utf-8")
+        tty_config.write_text('''{\n  "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",\n  "logo": {"type": "file-raw", "source": "/usr/share/wolf-linux/fastfetch/wolf-tux-tty.txt"},\n  "display": {"separator": " : "},\n  "modules": ["title", "separator", "os", "host", "kernel", "uptime", "packages", "shell", "cpu", "gpu", "memory", "disk", "localip"]\n}\n''', encoding="utf-8")
 
     if development:
-        action_dir = home / ".local" / "share" / "file-manager" / "actions"
-        copy_profile(assets / "pcmanfm-qt" / "wolf-open-vscode.desktop", action_dir / "wolf-open-vscode.desktop")
+        # KDE Dolphin utiliza ServiceMenus, nao actions do PCManFM-Qt.
+        # VS Code conserva cofre seguro; integracao por monitor sera portada para KWin.
         vscode_argv = configure_vscode_keyring(home)
+
+    # Preferencias Wayland: filtros KWin por monitor sem X11, sem watchers.
+    set_key(config / "kwinrc", "TabBox", "MultiScreenMode", "1")
+    set_key(config / "kwinrc", "Desktops", "Number", "1")
+    # KWin/libinput Flat profile (Plasma Wayland); usuario pode mudar no KCM.
+    set_key(config / "kcminputrc", "Mouse", "PointerAccelerationProfile", "1")
+
+    # O perfil de teclado vem da escolha do instalador (ABNT2/ThinkPad), não
+    # de uma configuração Xorg que não seria aplicada sob Wayland.
+    kbfile = root / "etc" / "wolf-linux-keyboard.conf"
+    kb = {}
+    if kbfile.is_file():
+        for line in kbfile.read_text(encoding="utf-8", errors="replace").splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                if key in {"XKB_LAYOUT", "XKB_VARIANT"}:
+                    kb[key] = value.strip().strip("'\"")
+    layout = kb.get("XKB_LAYOUT", "br")
+    variant = kb.get("XKB_VARIANT", "abnt2")
+    set_key(config / "kxkbrc", "Layout", "Use", "true")
+    set_key(config / "kxkbrc", "Layout", "LayoutList", layout)
+    set_key(config / "kxkbrc", "Layout", "VariantList", variant)
+
+    # O Wolf Linux utiliza uma única área de trabalho virtual. Libertar TODOS
+    # os atalhos globais de navegação entre desktops, inclusive Ctrl+F1..F4,
+    # setas, próximo/anterior, lista, grade e deslocamento de janelas entre
+    # áreas. O primeiro campo é o atalho ativo: "none" realmente o desativa.
+    # Preservar Alt+Tab (janelas), Meta+E, Alt+F4 e atalhos de monitores.
+    workspace_keys = {}
+    for desktop in range(1, 21):
+        default = f"Ctrl+F{desktop}" if desktop <= 4 else "none"
+        workspace_keys[f"Switch to Desktop {desktop}"] = default
+        workspace_keys[f"Window to Desktop {desktop}"] = "none"
+    workspace_keys.update({
+        "Switch to Next Desktop": "none",
+        "Switch to Previous Desktop": "none",
+        "Switch One Desktop Up": "Meta+Ctrl+Up",
+        "Switch One Desktop Down": "Meta+Ctrl+Down",
+        "Switch One Desktop to the Left": "Meta+Ctrl+Left",
+        "Switch One Desktop to the Right": "Meta+Ctrl+Right",
+        "Walk Through Desktops": "none",
+        "Walk Through Desktops (Reverse)": "none",
+        "Walk Through Desktop List": "none",
+        "Walk Through Desktop List (Reverse)": "none",
+        "Window to Next Desktop": "none",
+        "Window to Previous Desktop": "none",
+        "Window One Desktop Up": "none",
+        "Window One Desktop Down": "none",
+        "Window One Desktop to the Left": "none",
+        "Window One Desktop to the Right": "none",
+        "Window On All Desktops": "none",
+        "ShowDesktopGrid": "Ctrl+F8",
+    })
+    for action, default in workspace_keys.items():
+        set_key(config / "kglobalshortcutsrc", "kwin", action,
+                f"none,{default},{action}")
+
+    # KDE KStandardShortcut Close: mantenha Ctrl+W e adicione Ctrl+F4 como
+    # alternativa em aplicativos KDE que honram esta acao (inclui Dolphin).
+    # Atalho local, nao global: cada aplicacao pode tratar a tecla normalmente.
+    set_key(config / "kdeglobals", "Shortcuts", "Close", "Ctrl+W; Ctrl+F4")
+
+    # Atalhos declarados para validação na VM KWin, preservando padrao Super.
+    set_key(config / "kglobalshortcutsrc", "org.kde.dolphin.desktop", "_launch", "Meta+E,Meta+E,Dolphin")
+    set_key(config / "kglobalshortcutsrc", "org.kde.konsole.desktop", "_launch", "Ctrl+Alt+T,Ctrl+Alt+T,Konsole")
 
     # Set ownership of files we create, not of arbitrary preexisting home content.
     if os.geteuid() == 0:
@@ -181,9 +341,13 @@ def configure(root: Path, user: str, assets: Path, daily: bool, development: boo
             targets += [home / ".zshrc", home / ".p10k.zsh",
                         config / "fastfetch" / "config.jsonc", config / "fastfetch" / "config-tty.jsonc"]
         if development:
-            targets.append(home / ".local" / "share" / "file-manager" / "actions" / "wolf-open-vscode.desktop")
             if vscode_argv is not None:
                 targets.append(vscode_argv)
+        targets += [config / "kwinrc", config / "kxkbrc", config / "kglobalshortcutsrc",
+                    config / "kcminputrc", config / "kdeglobals"]
+        targets += kde_action_files
+        if browser_file is not None:
+            targets.append(browser_file)
         for p in targets:
             os.chown(p, uid, gid)
             parent = p.parent
@@ -203,7 +367,7 @@ def main() -> None:
     parser.add_argument("--extras", action="store_true")
     args = parser.parse_args()
     configure(args.root, args.user, args.assets, args.daily, args.development, args.extras)
-    print(f"[OK] Preferências LXQt para {args.user}: MIME, Konsole, Zsh={args.daily}, VSCode={args.development}")
+    print(f"[OK] Preferências KDE/Wayland para {args.user}: MIME, Konsole, Zsh={args.daily}, VSCode={args.development}")
 
 
 if __name__ == "__main__":

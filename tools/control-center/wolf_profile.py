@@ -12,14 +12,14 @@ import shutil
 import subprocess
 
 APP_GROUPS: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
-    ('Navegador', ('google-chrome.desktop', 'google-chrome-stable.desktop', 'chromium.desktop'),
+    ('Navegador', ('thorium-browser-avx2.desktop', 'thorium-browser.desktop', 'thorium.desktop'),
      ('x-scheme-handler/http', 'x-scheme-handler/https', 'text/html', 'application/xhtml+xml')),
-    ('Pastas', ('pcmanfm-qt.desktop',), ('inode/directory',)),
+    ('Pastas', ('org.kde.dolphin.desktop',), ('inode/directory',)),
     ('Texto', ('org.kde.kate.desktop', 'kate.desktop'), ('text/plain',)),
     ('Vídeo', ('io.github.mpc_qt.mpc-qt.desktop', 'mpc-qt.desktop', 'mpcqt.desktop'), ('video/mp4', 'video/x-matroska', 'video/webm')),
     ('Áudio', ('audacious.desktop',), ('audio/mpeg', 'audio/flac', 'audio/ogg')),
     ('PDF', ('org.kde.okular.desktop', 'okular.desktop'), ('application/pdf',)),
-    ('Arquivos compactados', ('lxqt-archiver.desktop',),
+    ('Arquivos compactados', ('org.kde.ark.desktop',),
      ('application/zip', 'application/x-zip-compressed', 'application/x-7z-compressed', 'application/vnd.rar')),
 )
 

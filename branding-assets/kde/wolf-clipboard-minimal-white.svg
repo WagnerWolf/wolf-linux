@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <title>Wolf Linux — Área de transferência</title>
+  <desc>Ícone monocromático branco de uma prancheta com linhas, fundo transparente.</desc>
+  <g fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M18 11H14.5A4.5 4.5 0 0 0 10 15.5V39.5A4.5 4.5 0 0 0 14.5 44H33.5A4.5 4.5 0 0 0 38 39.5V15.5A4.5 4.5 0 0 0 33.5 11H30"/>
+    <path d="M20 8H28A3 3 0 0 1 31 11V15H17V11A3 3 0 0 1 20 8Z"/>
+    <path d="M18 25H30M18 32H30"/>
+  </g>
+</svg>

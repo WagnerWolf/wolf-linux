@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+from .desktop_profile import is_plasma
 
 MANIFEST = Path('/usr/share/wolf-linux/integrations/libfm-qt-usb-format.json')
 PENDING = Path('/var/lib/wolf-linux/integrations/libfm-qt.changed')
@@ -108,7 +109,46 @@ def check_libfm(*, manifest=MANIFEST, pending=PENDING):
                              f'Pacote libfm-qt: {version}. Validação declarada no manifesto da compilação Wolf.')
 
 
+def check_kde_integrations():
+    """Auditoria informativa; nunca afirmar que o menu foi testado graficamente."""
+    results = []
+    dolphin = shutil.which('dolphin')
+    results.append(IntegrationResult(
+        'Dolphin · Gerenciador de arquivos', 'Disponível' if dolphin else 'Ausente',
+        'Dolphin detectado no PATH.' if dolphin else 'Dolphin não encontrado.',
+        dolphin or 'O aplicativo não modifica associações MIME.'))
+    vscode = shutil.which('wolf-open-vscode-kde') or '/usr/local/bin/wolf-open-vscode-kde'
+    ok = Path(vscode).is_file()
+    results.append(IntegrationResult(
+        'Dolphin · Abrir no VS Code', 'Helper presente' if ok else 'Ausente',
+        'Helper de abertura detectado; verifique o menu graficamente.' if ok else
+        'Helper Wolf para KDE não localizado.', str(vscode)))
+    formatter = shutil.which('wolf-format-removable') or '/usr/local/bin/wolf-format-removable'
+    ok = Path(formatter).is_file()
+    results.append(IntegrationResult(
+        'Plasma · Formatação USB', 'Backend presente' if ok else 'Ausente',
+        'O backend existe; a ação do widget e o filtro de unidades exigem teste gráfico.' if ok
+        else 'Formatador USB Wolf não encontrado.', str(formatter)))
+    launcher = Path.home() / '.local/share/applications/thorium-browser-avx2.desktop'
+    if not launcher.is_file():
+        launcher = Path('/usr/share/applications/thorium-browser-avx2.desktop')
+    present = launcher.is_file()
+    try:
+        text = launcher.read_text(encoding='utf-8') if present else ''
+    except OSError:
+        text = ''
+    linked = any(line.strip() == 'StartupWMClass=Thorium-browser' for line in text.splitlines())
+    results.append(IntegrationResult(
+        'Thorium · Ícone no painel',
+        'Configurado' if linked else ('Verificar' if present else 'Não encontrado'),
+        'Classe do lançador corresponde à identificada no KWin.' if linked
+        else 'Confira StartupWMClass no lançador e a associação da janela.', str(launcher)))
+    return results
+
+
 def check_all():
+    if is_plasma():
+        return check_kde_integrations()
     results = [check_libfm()]
     # O helper é de usuário; não basta a biblioteca estar instalada.
     helper = Path.home() / '.local/bin/wolf-symlink-actions'

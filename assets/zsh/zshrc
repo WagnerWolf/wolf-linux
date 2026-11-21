@@ -13,7 +13,7 @@ if [[ -z "${DISPLAY:-}" &&
 
     export ANDROID_HOME=/opt/android-sdk
     export ANDROID_SDK_ROOT=/opt/android-sdk
-    export CHROME_EXECUTABLE=/usr/bin/google-chrome-stable
+    export CHROME_EXECUTABLE=/usr/local/bin/wolf-thorium
     export PATH="/opt/flutter/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/cmdline-tools/latest/bin:$PATH"
 
     if [[ -t 1 && "${WOLF_FASTFETCH:-1}" != "0" ]] &&
@@ -90,7 +90,7 @@ ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE="fg=250"
 # Flutter / Android
 export ANDROID_HOME=/opt/android-sdk
 export ANDROID_SDK_ROOT=/opt/android-sdk
-export CHROME_EXECUTABLE=/usr/bin/google-chrome-stable
+export CHROME_EXECUTABLE=/usr/local/bin/wolf-thorium
 export PATH="/opt/flutter/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/cmdline-tools/latest/bin:$PATH"
 
 # Configuração .p10k.zsh carregada somente quando o tema estiver disponível.

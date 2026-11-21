@@ -14,25 +14,31 @@ OUT="${WOLF_OUT_DIR:-$PROJECT/out}"
     echo "Perfil Archiso não encontrado: $PROFILE" >&2
     exit 1
 }
-[[ -x "$PROJECT/tests/wolf-customize-iso-profile.sh" ]] || {
+[[ -f "$PROJECT/tests/wolf-customize-iso-profile.sh" ]] || {
     echo "[ERRO] Customizador ausente: $PROJECT/tests/wolf-customize-iso-profile.sh" >&2
     exit 1
 }
-[[ -x "$PROJECT/tests/wolf-stage-live-ssh.sh" ]] || {
+[[ -f "$PROJECT/tests/wolf-stage-live-ssh.sh" ]] || {
     echo "[ERRO] Stager SSH ausente: $PROJECT/tests/wolf-stage-live-ssh.sh" >&2
     exit 1
 }
+
+# Abortamos antes do mkarchiso se a identidade do destino estiver incoerente.
+# Esta verificação não modifica discos, arquivos montados ou repositórios.
+python3 "$PROJECT/tests/wolf-test-kde-2.3.0.py" "$PROJECT"
+python3 "$PROJECT/tests/wolf-test-pm-subtitle-iso.py" "$PROJECT"
+python3 "$PROJECT/tests/wolf-test-release-2.3.1.py" "$PROJECT"
 
 mkdir -p "$WORK" "$OUT"
 
 # Customização geral e, DEPOIS, staging explícito do SSH. O build não confia
 # em efeitos colaterais de uma etapa anterior.
 WOLF_PROJECT="$PROJECT" WOLF_ISO_PROFILE="$PROFILE" \
-    "$PROJECT/tests/wolf-customize-iso-profile.sh"
+    bash "$PROJECT/tests/wolf-customize-iso-profile.sh"
 WOLF_PROJECT="$PROJECT" WOLF_ISO_PROFILE="$PROFILE" \
-    "$PROJECT/tests/wolf-stage-live-ssh.sh"
+    bash "$PROJECT/tests/wolf-stage-live-ssh.sh"
 WOLF_PROJECT="$PROJECT" WOLF_ISO_PROFILE="$PROFILE" \
-    "$PROJECT/tests/wolf-stage-live-desktop.sh"
+    bash "$PROJECT/tests/wolf-stage-live-desktop.sh"
 
 SSH_PROFILE="$PROFILE/airootfs/usr/local/bin/wolf-enable-ssh-live"
 SSH_ALIAS_PROFILE="$PROFILE/airootfs/usr/local/bin/wolf-ssh"

@@ -79,7 +79,19 @@ install -Dm0644 "$SOURCE/wolf-live-autologin.conf" "$AIROOT/etc/systemd/system/g
 install -Dm0644 "$SOURCE/wolf-live-sudoers" "$AIROOT/etc/sudoers.d/90-wolf-live"
 chmod 0440 "$AIROOT/etc/sudoers.d/90-wolf-live"
 install -Dm0644 "$SOURCE/wolf-live-session.desktop" "$AIROOT/usr/share/xsessions/wolf-live.desktop"
-install -Dm0644 "$PROJECT/assets/wallpapers/wolf-linux-wallpaper.png" "$AIROOT/usr/share/backgrounds/wolf-linux/wallpaper.png"
+# O wallpaper deve permanecer identico ao original, mesmo se o staging
+# anterior tiver sido interrompido antes da copia em assets/.
+WOLF_WALLPAPER="$PROJECT/assets/wallpapers/wolf-linux-wallpaper.png"
+if [[ ! -s "$WOLF_WALLPAPER" ]]; then
+    WOLF_WALLPAPER_BACKUP="$PROJECT/branding-assets/wallpapers/wolf-linux-wallpaper.png"
+    [[ -s "$WOLF_WALLPAPER_BACKUP" && ! -L "$WOLF_WALLPAPER" ]] || {
+        echo "[ERRO] Wallpaper Wolf ausente em assets e branding-assets: $PROJECT" >&2
+        exit 1
+    }
+    install -Dm0644 "$WOLF_WALLPAPER_BACKUP" "$WOLF_WALLPAPER"
+    echo '[OK] Wallpaper Live recuperado da reserva original.'
+fi
+install -Dm0644 "$WOLF_WALLPAPER" "$AIROOT/usr/share/backgrounds/wolf-linux/wallpaper.png"
 install -d "$AIROOT/usr/share/wolf-live/home"
 cp -a "$SOURCE/home/." "$AIROOT/usr/share/wolf-live/home/"
 

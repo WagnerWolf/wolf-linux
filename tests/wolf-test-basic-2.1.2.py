@@ -18,7 +18,7 @@ class BasicProfile(unittest.TestCase):
         src=(ROOT/'live-gui/preview/app.py').read_text()
         ast.parse(src)
         self.assertIn("self.preset_combo.addItem('Basic — escritório, navegador e multimídia', 'basic')",src)
-        self.assertIn("'basic': (30, 45)",src)
+        self.assertIn('Dimensionamento bloqueado', src)  # KDE Fix2: sem estimativa antiga LXQt
         self.assertIn('"basic"',(ROOT/'live-gui/wolf_plan.py').read_text())
         self.assertIn("'basic'",(ROOT/'live-gui/wolf_discovery.py').read_text())
         self.assertIn('"Basic": ("daily",)',(ROOT/'live-gui/main.py').read_text())
@@ -36,7 +36,7 @@ class BasicProfile(unittest.TestCase):
             self.assertEqual(cp.returncode,0,cp.stderr)
             self.assertEqual(cp.stdout.strip(),expected)
 
-    def test_daily_is_lean_and_chrome_present(self):
+    def test_daily_is_lean_and_thorium_present(self):
         script=("source " + str(ROOT/'package-profiles/packages.conf') + "\n"
                 "printf 'DAILY:%s\\n' \"${DAILY_PACKAGES[@]}\"\n"
                 "printf 'THIRD:%s\\n' \"${DAILY_THIRD_PARTY_PACKAGES[@]}\"\n"
@@ -47,7 +47,8 @@ class BasicProfile(unittest.TestCase):
         lines=proc.stdout.splitlines()
         groups={prefix: set(x.split(':',1)[1] for x in lines if x.startswith(prefix+':')) for prefix in ('DAILY','THIRD','EXTRA','KDE')}
         self.assertTrue({'libreoffice-fresh','libreoffice-fresh-pt-br','mpv','ffmpeg','audacious'} <= groups['DAILY'])
-        self.assertIn('google-chrome',groups['THIRD'])
+        self.assertIn('thorium-browser-avx2-bin',groups['THIRD'])
+        self.assertNotIn('google-chrome',groups['THIRD'])
         self.assertIn('okular',groups['KDE'])
         self.assertFalse({'gimp','obs-studio','steam','lutris','cmake','android-studio'} & groups['DAILY'])
         self.assertTrue({'gimp','obs-studio','transmission-qt'} <= groups['EXTRA'])

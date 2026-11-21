@@ -195,8 +195,8 @@ def erase_budget(inv: Inventory, path: str) -> EraseBudget:
     if disk.ro:
         raise PreviewError('Unidade somente leitura; não pode receber instalação.')
     disk_gib = disk.size // GIB
-    if disk_gib < 30:
-        raise PreviewError('O disco precisa ter pelo menos 30 GiB neste esboço.')
+    if disk.size < 32 * GIB:
+        raise PreviewError(f'Disco {disk.path}: {human_size(disk.size)}. A instalação automática exige pelo menos 32 GiB de capacidade real, conforme a validação do executor.')
     boot_gib = 1 if inv.firmware == 'UEFI' else 0
     margin_gib = 1
     usable_gib = disk_gib - boot_gib - margin_gib
@@ -208,6 +208,10 @@ def erase_budget(inv: Inventory, path: str) -> EraseBudget:
 def erase_allocation(inv: Inventory, choices: 'Choices') -> EraseAllocation:
     budget = erase_budget(inv, choices.erase_disk)
     home_minimum = 10 if choices.erase_home_separate else 0
+    if choices.erase_home_separate and budget.usable_gib < 35:
+        raise PreviewError(
+            f'/home separada exige 35 GiB úteis (25 GiB para / e 10 GiB para /home); '
+            f'o disco oferece somente {budget.usable_gib} GiB.')
     root = choices.erase_root_gib
     if not 25 <= root <= budget.usable_gib - home_minimum:
         raise PreviewError('O tamanho da raiz excede o espaço disponível; reserve no mínimo 25 GiB para / e 10 GiB para /home separada.')

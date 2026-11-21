@@ -29,7 +29,11 @@ def _run(args):
 
 def probe():
     local = _run(['pacman', '-Q', 'libfm-qt'])
-    if local is None or local.returncode != 0:
+    if local is None:
+        return Protection(None, False, False, None, 'Não foi possível consultar libfm-qt.')
+    if local.returncode == 1 and not local.stdout.strip():
+        return Protection(None, False, False, None)  # biblioteca não instalada
+    if local.returncode != 0:
         return Protection(None, False, False, None, 'Não foi possível consultar libfm-qt.')
     tokens = local.stdout.strip().split()
     if len(tokens) != 2 or tokens[0] != 'libfm-qt':

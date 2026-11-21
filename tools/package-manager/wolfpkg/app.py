@@ -27,11 +27,13 @@ from .worker import CheckWorker, SearchWorker, PostUpdateWorker
 from .search_service import invalidate_search_cache
 from .tray_policy import tray_upgrade_state
 from .integrations import check_all, format_report
+from .desktop_profile import is_plasma, needs_libfm_guard
+from .upgrade_flow import should_confirm_aur_stage
 from .upgrade_guard import (probe as probe_libfm, describe as describe_libfm,
                             newer_repo_available)
 
 ASSETS = Path(__file__).resolve().parent / 'assets'
-VERSION = '0.3.7'
+VERSION = '1.0.0'
 STYLE = '''
 QWidget {background:#121a25;color:#e8eff7;font-size:13px;}
 QFrame#sidebar {background:#172231;border-right:1px solid #304058;}
@@ -195,7 +197,7 @@ class Manager(QMainWindow):
         v.addWidget(self.details)
         row = QHBoxLayout()
         self.btn_check = QPushButton('Verificar agora'); self.btn_check.clicked.connect(self.check_updates)
-        self.btn_upgrade = QPushButton('Atualizar repositórios + AUR')
+        self.btn_upgrade = QPushButton('Atualizar sistema (pacman → yay)')
         self.btn_upgrade.setObjectName('primary'); self.btn_upgrade.clicked.connect(self.start_upgrade)
         row.addWidget(self.btn_check); row.addStretch(); row.addWidget(self.btn_upgrade)
         v.addLayout(row)
@@ -300,9 +302,11 @@ class Manager(QMainWindow):
         page = QWidget(); v = QVBoxLayout(page)
         v.setContentsMargins(23,23,23,20); v.setSpacing(12)
         v.addWidget(title('Integrações Wolf'))
-        v.addWidget(info('Auditoria somente leitura de personalizações do sistema. '
-                         'A integração experimental do menu USB depende de um pacote libfm-qt Wolf '
-                         'compilado e validado separadamente. Nenhum reparo é automático.'))
+        v.addWidget(info('Auditoria somente leitura das integrações do KDE/Dolphin no Wolf Linux. '
+                         'Não exige nem bloqueia atualizações por causa da libfm-qt do antigo LXQt.'
+                         if is_plasma() else
+                         'Auditoria LXQt/PCManFM-Qt: bibliotecas Wolf legadas exigem proteção específica. '
+                         'Nenhum reparo é automático.'))
         self.integrations_table = self._table(['Integração', 'Estado', 'Descrição'], stretch=2)
         v.addWidget(self.integrations_table, 1)
         self.integrations_details = QPlainTextEdit()
@@ -314,9 +318,10 @@ class Manager(QMainWindow):
         self.integrations_btn = QPushButton('Verificar integrações')
         self.integrations_btn.clicked.connect(self.refresh_integrations)
         controls.addWidget(self.integrations_btn)
-        self.libfm_plan_btn = QPushButton('Planejar atualização libfm-qt')
-        self.libfm_plan_btn.clicked.connect(self.show_libfm_plan)
-        controls.addWidget(self.libfm_plan_btn)
+        if needs_libfm_guard():
+            self.libfm_plan_btn = QPushButton('Planejar atualização libfm-qt (LXQt)')
+            self.libfm_plan_btn.clicked.connect(self.show_libfm_plan)
+            controls.addWidget(self.libfm_plan_btn)
         controls.addStretch()
         v.addLayout(controls)
         return page
@@ -360,7 +365,12 @@ class Manager(QMainWindow):
                                 describe_libfm(state) + '\n\n' + instructions)
 
     def _protect_libfm_before_transaction(self, *, explicit=False, checked=False):
-        """Não iniciar transação sem proteção configurada (inclusive installs)."""
+        """No KDE, o legado libfm-qt não deve bloquear qualquer transação.
+
+        Em LXQt (ou sessão desconhecida), mantém a proteção existente.
+        """
+        if not needs_libfm_guard():
+            return True
         state = probe_libfm()
         if explicit and state.wolf_active:
             QMessageBox.warning(self, 'Integração Wolf protegida',
@@ -399,7 +409,7 @@ class Manager(QMainWindow):
         v.setContentsMargins(23,23,23,20)
         v.addWidget(title('Wolf Package Manager '+VERSION))
         v.addWidget(info('Repositórios: pacman. Pacotes AUR: yay como usuário comum. Busca por comandos usa o índice repo.files do pacman, sem cobertura de arquivos de pacotes AUR.'))
-        v.addWidget(info('Atualizações: pacman -Syu seguido de yay --aur, somente após sucesso da etapa anterior. Nunca atualizar repositórios isoladamente com pacman -Sy.'))
+        v.addWidget(info('Atualizações: pacman -Syu, pós-verificação de boot/DKMS e confirmação separada antes de yay -Sua --aur. Nunca usar pacman -Sy isoladamente.'))
         v.addWidget(info('Após pacman -Syu, e depois do AUR, verifica kernel, initramfs, NVIDIA DKMS e pacman -Dk (somente leitura). Inconsistências críticas impedem avanço automático.'))
         v.addWidget(info('O monitor avisa quando uma etapa demora sem produzir saída e oferece diagnóstico. Não encerra pacman/makepkg automaticamente para evitar transações interrompidas.'))
         v.addWidget(info('Os logs são restritos ao usuário em ~/.local/state/wolf-package-manager/logs/. Não guarde informações sensíveis nos prompts do terminal.'))
@@ -513,11 +523,12 @@ class Manager(QMainWindow):
             if 'Transação' in errors:
                 QTimer.singleShot(60_000, self.check_updates)
         else:
-            guard = probe_libfm()
+            guard = probe_libfm() if needs_libfm_guard() else None
             self.summary.setText(f'{total} atualização(ões) encontrada(s) — {now}'
                 + (' · ⚠ libfm-qt Wolf protegida: verificar integrações'
-                   if guard.wolf_active and (any(u.name == 'libfm-qt' for u in self.updates)
-                       or newer_repo_available(guard))
+                   if guard is not None and guard.wolf_active
+                      and (any(u.name == 'libfm-qt' for u in self.updates)
+                           or newer_repo_available(guard))
                    else ''))
             self.tray.setIcon(tray_icon('updates' if total else 'ok'))
             ids=frozenset((u.source,u.name,u.available) for u in self.updates)
@@ -640,7 +651,7 @@ class Manager(QMainWindow):
         if not self._protect_libfm_before_transaction(checked=True):
             return
         if not self._confirm('Confirmar atualização',
-                'Atualizar repositórios (Arch/Chaotic-AUR) e, somente após sucesso, os pacotes AUR com yay?',True):
+                'Atualizar primeiro os repositórios com pacman -Syu? Após sucesso e checagem de boot/DKMS, haverá outra confirmação antes do yay/AUR.',True):
             return
         self._begin_plan(upgrade_commands(self.prefs.aur_automatic),'Atualização completa')
 
@@ -751,8 +762,31 @@ class Manager(QMainWindow):
                                      'Etapas posteriores NÃO serão executadas.\n'+detail+'\n')
                 exit_code = 113
             else:
-                self._run_stage(self.stage+1)
-                return
+                # Fluxo do UFOPA adaptado: confirmação adicional da etapa AUR.
+                # O gerenciador escolhido continua sendo o yay, como no Wolf.
+                if should_confirm_aur_stage(self.plan_label, self.stage, len(self.running_plan)):
+                    result = QMessageBox.question(
+                        self, 'Atualizar pacotes AUR com yay?',
+                        'A atualização oficial com pacman -Syu terminou e as verificações '
+                        'de boot/DKMS não apontaram falhas críticas.\n\n'
+                        'Deseja consultar e atualizar agora os pacotes AUR com yay?\n\n'
+                        'O yay executará como usuário comum e poderá solicitar senha '
+                        'administrativa para instalar pacotes compilados. PKGBUILDs de '
+                        'terceiros podem executar código. Escolha Não para deixar o AUR pendente.',
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.No)
+                    if result != QMessageBox.StandardButton.Yes:
+                        self.append_terminal('\n[AVISO] Atualização oficial concluída; '
+                                             'etapa AUR ignorada por escolha do usuário.\n')
+                        self.terminal_state.setText('Pacman concluído; AUR não executado por escolha do usuário.')
+                        self.running_plan = self.running_plan[:1]
+                        self.plan_label = 'Atualização dos repositórios (AUR pendente)'
+                    else:
+                        self._run_stage(self.stage+1)
+                        return
+                else:
+                    self._run_stage(self.stage+1)
+                    return
         self._set_actions_enabled(True)
         if exit_code==0 and lock_inspection()[0] != 'livre':
             self.append_terminal('\n[ALERTA] A transação retornou 0, mas db.lck existe. '
@@ -901,12 +935,14 @@ def main():
     app.setApplicationDisplayName('Wolf Package Manager')
     app.setDesktopFileName('wolf-package-manager')
     app.setApplicationVersion(VERSION)
+    if os.environ.get('WOLF_PM_PREVIEW') == '1':
+        app.setDesktopFileName('wolf-package-manager-preview')
     app.setWindowIcon(QIcon(str(ASSETS / 'wolf-logo.png')))
     app.setQuitOnLastWindowClosed(False)
     start_in_tray = '--tray' in sys.argv or '--minimized' in sys.argv
     # At login KDE may create its status notifier after this application starts.
     # Wait briefly for it rather than flashing the main window on the desktop.
-    name=f'wolf-package-manager-{os.getuid()}'
+    name=f'wolf-package-manager-{"preview-" if os.environ.get("WOLF_PM_PREVIEW") == "1" else ""}{os.getuid()}'
     client=QLocalSocket();client.connectToServer(name)
     if client.waitForConnected(350):
         # An autostart attempt must never pop open the already-running window.

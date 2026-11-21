@@ -357,14 +357,14 @@ class MainWindow(QMainWindow):
         nav.addWidget(text_label('Escolha quais programas instalar. A revisão ficará bloqueada até selecionar um perfil.', name='info'))
         self.preset_combo = make_combo()
         self.preset_combo.addItem('Escolha Minimal, Basic, Test ou Full...', None)
-        self.preset_combo.addItem('Minimal — LXQt essencial', 'minimal')
+        self.preset_combo.addItem('Minimal — KDE Plasma/Wayland essencial', 'minimal')
         self.preset_combo.addItem('Basic — escritório, navegador e multimídia', 'basic')
         self.preset_combo.addItem('Test — apps principais', 'test')
         self.preset_combo.addItem('Full — todas as stacks', 'full')
         nav.addWidget(self.preset_combo)
         self.preset_combo.setObjectName('requiredProfile')
         self.preset_combo.currentIndexChanged.connect(self.update_state)
-        self.space_help = text_label('Estimativas de espaço em / (GiB): Minimal 25–35; Basic 30–45; Test 40–60; Full 75–110. Varia conforme downloads e atualizações.', name='info')
+        self.space_help = text_label('KDE Plasma/Wayland: estimativas de ocupação por perfil ainda não homologadas nesta Preview. Instalação automática exige disco de pelo menos 32 GiB; perfis maiores exigem margem adicional para pacotes e atualizações.', name='info')
         nav.addWidget(self.space_help)
         nav.addWidget(section('4. Identificação'))
         nav.addWidget(text_label('Nome de usuário'))
@@ -536,15 +536,40 @@ class MainWindow(QMainWindow):
     def update_erase_budget(self):
         try:
             budget = erase_budget(self.inventory, self.erase_disk.currentData() or '')
-        except PreviewError:
-            self.erase_capacity.setText('Selecione um disco para calcular o espaço disponível.')
+            separate = bool(self.erase_home.currentData())
+            if separate and budget.usable_gib < 35:
+                raise PreviewError(
+                    f'/home separada exige pelo menos 35 GiB úteis '
+                    f'(25 GiB para / e 10 GiB para /home); '
+                    f'este disco oferece somente {budget.usable_gib} GiB.')
+        except PreviewError as exc:
+            # Falha fechada: nunca mostrar 60 GiB herdados de outro disco
+            # nem deixar sliders editáveis quando o destino é insuficiente.
+            self.erase_capacity.setText(str(exc))
+            self.erase_capacity.setObjectName('warning')
+            self.erase_capacity.style().unpolish(self.erase_capacity)
+            self.erase_capacity.style().polish(self.erase_capacity)
+            self.erase_root.setSpecialValueText('Indisponível')
+            self.erase_home_size.setSpecialValueText('Indisponível')
+            for widget in (self.erase_root, self.erase_root_slider,
+                           self.erase_home_size, self.erase_home_slider):
+                self.set_numeric(widget, 0, 0, 0)
+            self.erase_root_group.setEnabled(False)
             self.erase_home_group.setVisible(bool(self.erase_home.currentData()))
-            self.erase_budget_summary.setText('')
+            self.erase_home_group.setEnabled(False)
+            self.erase_budget_summary.setText('Dimensionamento bloqueado: escolha um disco compatível ou altere o layout de /home.')
             self.erase_root_remaining.setText('')
             self.erase_home_remaining.setText('')
             return
         separate = bool(self.erase_home.currentData())
-        upper_root = max(25, budget.usable_gib - (10 if separate else 0))
+        self.erase_root.setSpecialValueText('')
+        self.erase_home_size.setSpecialValueText('')
+        self.erase_root_group.setEnabled(True)
+        self.erase_home_group.setEnabled(True)
+        self.erase_capacity.setObjectName('info')
+        self.erase_capacity.style().unpolish(self.erase_capacity)
+        self.erase_capacity.style().polish(self.erase_capacity)
+        upper_root = budget.usable_gib - (10 if separate else 0)
         root = min(self.erase_root.value(), upper_root)
         self.set_numeric(self.erase_root, 25, upper_root, root)
         self.set_numeric(self.erase_root_slider, 25, upper_root, root)
@@ -1029,15 +1054,17 @@ class MainWindow(QMainWindow):
                        backup_dotfiles=self.reuse_backup.isChecked())
 
     def update_profile_space(self):
-        """Advisory only: root filesystem sizes vary with optional downloads."""
-        estimates = {'minimal': (25, 35), 'basic': (30, 45), 'test': (40, 60), 'full': (75, 110)}
+        """Sem números herdados de outro ambiente: KDE requer aferição em VM."""
         preset = self.preset_combo.currentData()
-        if preset not in estimates:
-            self.disk_space_advice.setText('Escolha um perfil para ver a estimativa de espaço em / (não inclui jogos e arquivos pessoais).')
+        labels = {'minimal': 'Minimal', 'basic': 'Basic', 'test': 'Test', 'full': 'Full'}
+        if preset not in labels:
+            self.disk_space_advice.setText('Escolha um perfil para continuar. O espaço necessário do KDE/Wayland será aferido em instalação de teste.')
             return
-        low, high = estimates[preset]
+        headline = (f'Perfil {labels[preset]} — KDE Plasma/Wayland. '
+                    'O consumo de disco desta Preview ainda não foi medido; '
+                    'reserve espaço adicional para pacotes, downloads e atualizações.')
         root_gib = None
-        if self.mode == 'erase':
+        if self.mode == 'erase' and self.erase_root_group.isEnabled():
             root_gib = self.erase_root.value()
         elif self.mode == 'manual':
             root = self.inventory.get(self.manual_root.currentData() or '')
@@ -1045,25 +1072,22 @@ class MainWindow(QMainWindow):
         elif self.mode == 'reuse':
             root = self.inventory.get(self.reuse_root.currentData() or '')
             root_gib = root.size / (1024 ** 3) if root else None
-        parts = ('Base LXQt 25–35 GiB · Daily +8–15 · Gaming +10–25 · '
-                 'Development +5–12 · Android/Flutter +20–40 · Containers +3–10 · Extras +2–8 GiB')
-        headline = f'{preset.title()}: estimativa de {low}–{high} GiB em / (valores indicativos, não limites garantidos).'
         if root_gib is not None:
             headline += f' Raiz selecionada: {root_gib:.0f} GiB.'
-            if root_gib < low:
-                headline += ' ATENÇÃO: a raiz é menor que o estimado; downloads podem esgotar o espaço.'
-        self.disk_space_advice.setText(headline + '\n' + parts)
-        self.disk_space_advice.setObjectName('warning' if root_gib is not None and root_gib < low else 'info')
+        if preset == 'full':
+            headline += ' O perfil Full instala todas as stacks e requer espaço consideravelmente maior.'
+        self.disk_space_advice.setText(headline)
+        self.disk_space_advice.setObjectName('info')
         self.disk_space_advice.style().unpolish(self.disk_space_advice)
         self.disk_space_advice.style().polish(self.disk_space_advice)
 
     def update_state(self, *_):
         if not hasattr(self, 'validation_label'):
             return
-        self.update_profile_space()
         if self.mode == 'erase':
             self.update_erase_table()
             self.update_erase_budget()
+        self.update_profile_space()
         if hasattr(self, 'manual_format_home'):
             selected_home = self.inventory.get(self.manual_home.currentData() or '')
             self.manual_format_home.setEnabled(bool(selected_home and selected_home.kind == 'part'))

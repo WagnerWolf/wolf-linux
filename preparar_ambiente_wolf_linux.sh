@@ -1,354 +1,123 @@
 #!/usr/bin/env bash
-if [[ -z "${BASH_VERSION:-}" ]]; then
-    exec /usr/bin/env bash "$0" "$@"
-fi
 set -Eeuo pipefail
-
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Uma única fonte de verdade para a versão: VERSION.
-[[ -r "$SELF_DIR/VERSION" ]] || { echo '[ERRO] DevKit sem VERSION.' >&2; exit 1; }
-DEVKIT_VERSION="$(< "$SELF_DIR/VERSION")"
-[[ "$DEVKIT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9]+)?$ ]] || {
-    printf '[ERRO] VERSION inválido em %s/VERSION: %q\n' "$SELF_DIR" "$DEVKIT_VERSION" >&2
-    exit 1
-}
-PROJECT="${WOLF_PROJECT:-$HOME/wolf-linux}"
+VERSION="$(< "$SELF_DIR/VERSION")"
+PROJECT="${WOLF_PROJECT:-$HOME/wolf-linux-2.3.1}"
 RELENG="${WOLF_RELENG:-/usr/share/archiso/configs/releng}"
-FORCE=0
 SKIP_DEPS=0
 RUN_SMOKE=1
-
+RESUME=0
 usage() {
-    cat <<USAGE
-Wolf Linux ${DEVKIT_VERSION} - preparação limpa do ambiente
-
-Uso:
-  ./preparar_ambiente_wolf_linux.sh [opções]
-
-Opções:
-  --force         apaga o projeto existente sem perguntar
-  --skip-deps     não executa pacman (útil para desenvolvimento/testes)
-  --no-smoke      não executa o smoke test ao final
-  --project PATH  usa outro diretório em vez de ~/wolf-linux
-  -h, --help      mostra esta ajuda
-
-Fluxo recomendado para uma reconstrução limpa:
-  rm -rf ~/wolf-linux
-  ./preparar_ambiente_wolf_linux.sh
-USAGE
+  cat <<EOF
+Wolf Linux $VERSION — KDE Plasma Wayland; Live Openbox
+Uso: $0 [--project CAMINHO] [--skip-deps] [--no-smoke] [--resume]
+Sem --resume: nunca sobrescreve um projeto existente.
+Com --resume: valida a identidade do projeto interrompido e retoma o staging
+sem apagar arquivos ou sobrescrever o instalador.
+EOF
 }
-
 while (($#)); do
-    case "$1" in
-        --force) FORCE=1; shift ;;
-        --skip-deps) SKIP_DEPS=1; shift ;;
-        --no-smoke) RUN_SMOKE=0; shift ;;
-        --project)
-            [[ $# -ge 2 ]] || { echo '[ERRO] --project exige um caminho.' >&2; exit 2; }
-            PROJECT="$2"; shift 2 ;;
-        -h|--help) usage; exit 0 ;;
-        *) echo "[ERRO] Opção desconhecida: $1" >&2; usage >&2; exit 2 ;;
-    esac
+  case "$1" in
+    --project) [[ $# -ge 2 ]] || { echo 'Falta caminho.' >&2; exit 2; }; PROJECT="$2"; shift 2 ;;
+    --skip-deps) SKIP_DEPS=1; shift ;;
+    --no-smoke) RUN_SMOKE=0; shift ;;
+    --resume) RESUME=1; shift ;;
+    --help|-h) usage; exit 0 ;;
+    *) echo "Opção desconhecida: $1" >&2; usage; exit 2 ;;
+  esac
 done
-
-say(){ printf '%s\n' "$*"; }
-ok(){ printf '[OK] %s\n' "$*"; }
-err(){ printf '[ERRO] %s\n' "$*" >&2; exit 1; }
-
-write_stage_live_ssh() {
-    local dst="$1"
-    mkdir -p "$(dirname "$dst")"
-    cat > "$dst" <<'STAGE_SSH_EOF'
-#!/usr/bin/env bash
-if [[ -z "${BASH_VERSION:-}" ]]; then
-    exec /usr/bin/env bash "$0" "$@"
-fi
-set -Eeuo pipefail
-
-SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT="${WOLF_PROJECT:-$(cd "$SELF_DIR/.." && pwd)}"
-PROFILE="${WOLF_ISO_PROFILE:-$PROJECT/iso-profile}"
-AIROOT="$PROFILE/airootfs"
-PACKAGES_FILE="$PROFILE/packages.x86_64"
-PROFILEDEF="$PROFILE/profiledef.sh"
-SSH_SRC="$PROJECT/tests/wolf-enable-ssh-live.sh"
-
-[[ -d "$PROFILE" ]] || { echo "[ERRO] Perfil Archiso não encontrado: $PROFILE" >&2; exit 1; }
-[[ -f "$SSH_SRC" ]] || { echo "[ERRO] Helper SSH fonte ausente: $SSH_SRC" >&2; exit 1; }
-[[ -f "$PACKAGES_FILE" ]] || { echo "[ERRO] packages.x86_64 ausente: $PACKAGES_FILE" >&2; exit 1; }
-[[ -f "$PROFILEDEF" ]] || { echo "[ERRO] profiledef.sh ausente: $PROFILEDEF" >&2; exit 1; }
-
-mkdir -p "$AIROOT/usr/local/bin" "$AIROOT/root/wolf-linux/tests"
-install -m 0755 "$SSH_SRC" "$AIROOT/usr/local/bin/wolf-enable-ssh-live"
-install -m 0755 "$SSH_SRC" "$AIROOT/root/wolf-linux/tests/wolf-enable-ssh-live.sh"
-ln -sfn wolf-enable-ssh-live "$AIROOT/usr/local/bin/wolf-ssh"
-grep -Fxq openssh "$PACKAGES_FILE" || printf '%s\n' openssh >> "$PACKAGES_FILE"
-
-python - "$PROFILEDEF" <<'PYCODE'
-from pathlib import Path
-import re, sys
-p=Path(sys.argv[1]); t=p.read_text()
-required={
- '/usr/local/bin/wolf-enable-ssh-live':'0:0:755',
- '/root/wolf-linux/tests/wolf-enable-ssh-live.sh':'0:0:755',
-}
-m=re.search(r'file_permissions=\\(\\s*(.*?)\\s*\\)',t,flags=re.S)
-if m:
-    block=m.group(0)
-    for path,mode in required.items():
-        pat=re.compile(rf'^\\s*\\["{re.escape(path)}"\\]="[^"]*"\\s*$',flags=re.M)
-        entry=f'  ["{path}"]="{mode}"'
-        block=pat.sub(entry,block) if pat.search(block) else block[:-1].rstrip()+'\\n'+entry+'\\n)'
-    t=t[:m.start()]+block+t[m.end():]
-else:
-    t+='\\nfile_permissions=(\\n'+''.join(f'  ["{p}"]="{m}"\\n' for p,m in required.items())+')\\n'
-p.write_text(t)
-PYCODE
-
-[[ -x "$AIROOT/usr/local/bin/wolf-enable-ssh-live" ]] || { echo '[ERRO] Staging SSH: executável não criado.' >&2; exit 1; }
-[[ -L "$AIROOT/usr/local/bin/wolf-ssh" ]] || { echo '[ERRO] Staging SSH: alias wolf-ssh não criado.' >&2; exit 1; }
-grep -Fxq openssh "$PACKAGES_FILE" || { echo '[ERRO] Staging SSH: openssh ausente.' >&2; exit 1; }
-printf '[OK] SSH live staged: %s\n' "$AIROOT/usr/local/bin/wolf-enable-ssh-live"
-STAGE_SSH_EOF
-    chmod 755 "$dst"
-}
-
-say '============================================================'
-say " WOLF LINUX ${DEVKIT_VERSION} - PREPARAÇÃO LIMPA LXQt/X11"
-say '============================================================'
-say "DevKit : $SELF_DIR"
-say "Projeto: $PROJECT"
-say "Releng : $RELENG"
-say
-
-[[ -f "$SELF_DIR/install/wolf-install.sh" ]] || err 'DevKit incompleto: install/wolf-install.sh ausente.'
-[[ -f "$SELF_DIR/package-profiles/packages.conf" ]] || err 'DevKit incompleto: package-profiles/packages.conf ausente.'
-[[ -f "$SELF_DIR/tests/wolf-customize-iso-profile.sh" ]] || err 'DevKit incompleto: customizador ausente.'
-[[ -f "$SELF_DIR/tests/wolf-enable-ssh-live.sh" ]] || err 'DevKit incompleto: helper SSH live ausente.'
-[[ -f "$SELF_DIR/gerar-iso-2.2.0.sh" ]] || err 'DevKit incompleto: gerador da ISO 2.2.0 ausente.'
-[[ -f "$SELF_DIR/wolf-corrigir-archiver-2.2.0.py" ]] || err 'DevKit incompleto: reparador do LXQt Archiver ausente.'
-# Um único atalho oficial para PCManFM-Qt: origem do branding deve
-# coincidir com a cópia já distribuída em assets/. Impede ISO com atalho velho.
-VSCODE_ACTION='pcmanfm-qt/wolf-open-vscode.desktop'
-[[ -f "$SELF_DIR/branding-assets/$VSCODE_ACTION" ]] || \
-    err "DevKit incompleto: branding-assets/$VSCODE_ACTION ausente."
-[[ -f "$SELF_DIR/assets/$VSCODE_ACTION" ]] || \
-    err "DevKit incompleto: assets/$VSCODE_ACTION ausente."
-cmp -s "$SELF_DIR/branding-assets/pcmanfm-qt/wolf-open-vscode.desktop" \
-       "$SELF_DIR/assets/pcmanfm-qt/wolf-open-vscode.desktop" || \
-    err 'A ação do PCManFM-Qt diverge entre branding-assets/ e assets/.'
-
-# Release metadata is validated BEFORE any optional removal of an existing build.
-# Do not hard-code a previous preview filename: exactly one release candidate
-# must be shipped in this DevKit, or preparation stops safely.
-shopt -s nullglob
-RELEASE_CANDIDATES=("$SELF_DIR"/RELEASE-CANDIDATE-2.2.0-NEXT-PREVIEW*.md)
-shopt -u nullglob
-if (( ${#RELEASE_CANDIDATES[@]} != 1 )); then
-    err "DevKit precisa de exatamente uma nota Next Preview (encontradas: ${#RELEASE_CANDIDATES[@]}). Não alterei o projeto preparado."
-fi
-RELEASE_CANDIDATE_SRC="${RELEASE_CANDIDATES[0]}"
-RELEASE_CANDIDATE_NAME="${RELEASE_CANDIDATE_SRC##*/}"
-[[ -s "$RELEASE_CANDIDATE_SRC" ]] || err 'Nota da release vazia; preparação cancelada.'
-
-if (( SKIP_DEPS == 0 )); then
-    say '[1/8] Instalando/verificando ferramentas de desenvolvimento...'
-    sudo pacman -S --needed --noconfirm \
-        archiso \
-        qemu-desktop \
-        edk2-ovmf \
-        shellcheck \
-        git \
-        python \
-        squashfs-tools \
-        openssh
-else
-    say '[1/8] Dependências: ignoradas por --skip-deps.'
-fi
-
-# Necessário somente DEPOIS de instalar archiso; antes de qualquer remoção
-# do projeto anterior. Se --skip-deps foi solicitado, não instalamos nada.
-if [[ ! -d "$RELENG" ]]; then
-    if (( SKIP_DEPS == 1 )); then
-        err "Perfil releng não encontrado: $RELENG. Retire --skip-deps ou instale archiso manualmente."
-    fi
-    err "O pacote archiso foi verificado/instalado, mas o perfil releng não existe em $RELENG. Confira: pacman -Q archiso; pacman -Ql archiso."
-fi
-[[ -f "$RELENG/profiledef.sh" && -f "$RELENG/packages.x86_64" ]] || \
-    err "Perfil releng incompleto em $RELENG (faltam profiledef.sh ou packages.x86_64)."
-ok "Perfil Archiso releng disponível: $RELENG"
-
-if [[ -e "$PROJECT" ]]; then
-    if (( FORCE == 0 )); then
-        say
-        say "O projeto já existe: $PROJECT"
-        read -r -p 'Apagar completamente e reconstruir do zero? [s/N]: ' answer
-        [[ "$answer" =~ ^[sS]([iI][mM])?$ ]] || err 'Preparação cancelada; projeto existente preservado.'
-    fi
-    say '[2/8] Removendo projeto anterior...'
-    rm -rf -- "$PROJECT"
-else
-    say '[2/8] Nenhum projeto anterior encontrado.'
-fi
-
-say '[3/8] Criando estrutura limpa...'
-mkdir -p \
-    "$PROJECT/install" \
-    "$PROJECT/package-profiles" \
-    "$PROJECT/tests" \
-    "$PROJECT/tools/stable" \
-    "$PROJECT/tools/experimental" \
-    "$PROJECT/docs" \
-    "$PROJECT/live-gui" \
-    "$PROJECT/assets" \
-    "$PROJECT/out" \
-    "$PROJECT/work" \
-    "$PROJECT/vm"
-
-say '[4/8] Copiando perfil Archiso releng NOVO...'
-cp -a "$RELENG" "$PROJECT/iso-profile"
-
-say '[5/8] Copiando baseline LXQt/X11 do DevKit...'
-# Hotfix manual para instalações físicas já existentes (sem sobrescrever o boot).
-cp -f "$SELF_DIR/atualizar-paineis-pastas-control-center.sh" \
-  "$PROJECT/atualizar-paineis-pastas-control-center.sh"
-chmod 755 "$PROJECT/atualizar-paineis-pastas-control-center.sh"
-install -m 0755 "$SELF_DIR/wolf-corrigir-painel-duplo.py" "$PROJECT/wolf-corrigir-painel-duplo.py"
-# O smoke do Archiver importa este módulo a partir da raiz do projeto PREPARADO.
-# Ao copiar os testes, copiar também este reparador (sem modificar o sistema instalado).
-install -m 0755 "$SELF_DIR/wolf-corrigir-archiver-2.2.0.py" "$PROJECT/wolf-corrigir-archiver-2.2.0.py"
-cp -f "$SELF_DIR/install/wolf-install.sh" "$PROJECT/install/wolf-install.sh"
-cp -f "$SELF_DIR/package-profiles/packages.conf" "$PROJECT/package-profiles/packages.conf"
-cp -a "$SELF_DIR/tests/." "$PROJECT/tests/"
-# Falhar no preparo, não após iniciar o build, se a dependência do smoke faltar.
-cmp -s "$SELF_DIR/wolf-corrigir-archiver-2.2.0.py" "$PROJECT/wolf-corrigir-archiver-2.2.0.py" || \
-    err 'Reparador do Archiver ausente ou divergente no projeto preparado.'
-mkdir -p "$PROJECT/experimental"
-cp -a "$SELF_DIR/experimental/." "$PROJECT/experimental/"
-cp -a "$SELF_DIR/tools/." "$PROJECT/tools/"
-mkdir -p "$PROJECT/release-packages"
-cp -a "$SELF_DIR/release-packages/." "$PROJECT/release-packages/"
-cp -a "$SELF_DIR/docs/." "$PROJECT/docs/"
-cp -a "$SELF_DIR/live-gui/." "$PROJECT/live-gui/"
-cp -a "$SELF_DIR/branding-assets/." "$PROJECT/assets/"
-# Na árvore preparada, assets/ é o destino canônico de branding-assets/.
-# Falhar cedo se o atalho do VS Code não foi efetivamente copiado.
-cmp -s "$PROJECT/assets/pcmanfm-qt/wolf-open-vscode.desktop" \
-       "$SELF_DIR/branding-assets/pcmanfm-qt/wolf-open-vscode.desktop" || \
-    err 'Ação PCManFM-Qt não foi copiada corretamente para o projeto preparado.'
-cp -f "$SELF_DIR/README.md" "$PROJECT/README.md"
-cp -f "$SELF_DIR/WOLF-PM-0.3.7-PROTECAO-LIBFM-VM.md" "$PROJECT/WOLF-PM-0.3.7-PROTECAO-LIBFM-VM.md"
-cp -f "$SELF_DIR/RELEASE-2.2.0-PM-0.3.7.md" "$PROJECT/RELEASE-2.2.0-PM-0.3.7.md"
-install -m 0644 "$RELEASE_CANDIDATE_SRC" "$PROJECT/$RELEASE_CANDIDATE_NAME"
-cmp -s "$RELEASE_CANDIDATE_SRC" "$PROJECT/$RELEASE_CANDIDATE_NAME" || \
-    err 'Nota de release ausente ou divergente no projeto preparado.' 
-cp -f "$SELF_DIR/CHANGELOG.md" "$PROJECT/CHANGELOG.md"
-cp -f "$SELF_DIR/RELEASE-NOTES-2.0.0.md" "$PROJECT/RELEASE-NOTES-2.0.0.md"
-cp -f "$SELF_DIR/RELEASE-NOTES-2.1.0.md" "$PROJECT/RELEASE-NOTES-2.1.0.md"
-cp -f "$SELF_DIR/RELEASE-NOTES-2.1.1-rc1.md" "$PROJECT/RELEASE-NOTES-2.1.1-rc1.md"
-cp -f "$SELF_DIR/RELEASE-NOTES-2.1.1-rc2.md" "$PROJECT/RELEASE-NOTES-2.1.1-rc2.md"
-cp -f "$SELF_DIR/RELEASE-NOTES-2.1.1.md" "$PROJECT/RELEASE-NOTES-2.1.1.md"
-cp -f "$SELF_DIR/RELEASE-NOTES-2.1.2.md" "$PROJECT/RELEASE-NOTES-2.1.2.md"
-cp -f "$SELF_DIR/RELEASE-NOTES-2.2.0-rc1.md" "$PROJECT/RELEASE-NOTES-2.2.0-rc1.md"
-cp -f "$SELF_DIR/RELEASE-NOTES-2.2.0.md" "$PROJECT/RELEASE-NOTES-2.2.0.md"
-cp -f "$SELF_DIR/RELEASE-2.2.0-PICOM-GLX.md" "$PROJECT/RELEASE-2.2.0-PICOM-GLX.md"
-cp -f "$SELF_DIR/FIX-2.2.0-PAINEIS-XDG-TEMA-USB-FIX3.md" "$PROJECT/FIX-2.2.0-PAINEIS-XDG-TEMA-USB-FIX3.md"
-cp -f "$SELF_DIR/FIX-2.2.0-PAINEL-DUPLICADO-FIX4.md" "$PROJECT/FIX-2.2.0-PAINEL-DUPLICADO-FIX4.md"
-cp -f "$SELF_DIR/RELEASE-NOTES-2.1.3-rc5.md" "$PROJECT/RELEASE-NOTES-2.1.3-rc5.md"
-cp -f "$SELF_DIR/RELEASE-NOTES-2.1.3-rc4.md" "$PROJECT/RELEASE-NOTES-2.1.3-rc4.md"
-cp -f "$SELF_DIR/RELEASE-NOTES-2.1.3-rc1.md" "$PROJECT/RELEASE-NOTES-2.1.3-rc1.md"
-cp -f "$SELF_DIR/THIRD-PARTY-LICENSES.md" "$PROJECT/THIRD-PARTY-LICENSES.md"
-cp -f "$SELF_DIR/wolf-linux-logo.png" "$PROJECT/wolf-linux-logo.png"
-cp -f "$SELF_DIR/preparar_ambiente_wolf_linux.sh" "$PROJECT/preparar_ambiente_wolf_linux.sh"
-install -m 0755 "$SELF_DIR/corrigir-lxqt-instalado-2.2.0.sh" "$PROJECT/corrigir-lxqt-instalado-2.2.0.sh"
-# O teste de identidade e o fluxo de release precisam do lançador também na
-# árvore de trabalho preparada (não apenas no DevKit de origem).
-install -m 0755 "$SELF_DIR/gerar-iso-2.2.0.sh" "$PROJECT/gerar-iso-2.2.0.sh"
-printf '%s\n' "$DEVKIT_VERSION" > "$PROJECT/VERSION"
-
-chmod 755 "$PROJECT/install/wolf-install.sh" "$PROJECT/preparar_ambiente_wolf_linux.sh"
-find "$PROJECT/tests" -maxdepth 1 -type f -name '*.sh' -exec chmod 755 {} +
-find "$PROJECT/tools" -type f -name '*.sh' -exec chmod 755 {} +
-
-# O preparador é autocontido: se o stager não veio no DevKit por qualquer
-# motivo, recria uma cópia conhecida antes de customizar a ISO.
-if [[ ! -f "$PROJECT/tests/wolf-stage-live-ssh.sh" ]]; then
-    say '[AVISO] stager SSH ausente no DevKit; recriando a partir do preparador.'
-    write_stage_live_ssh "$PROJECT/tests/wolf-stage-live-ssh.sh"
-else
-    chmod 755 "$PROJECT/tests/wolf-stage-live-ssh.sh"
-fi
-
-# Regra da baseline 2.0: nenhum helper legado de desktop deve entrar na árvore ativa.
-if find "$PROJECT/tools" -type f \( -iname '*xfce*' -o -iname '*cinnamon*' -o -iname '*mate*' \) -print -quit | grep -q .; then
-    err 'DevKit contaminado: helper de desktop legado encontrado em tools/.'
-fi
-
-say '[6/8] Personalizando a ISO a partir do releng limpo...'
-WOLF_PROJECT="$PROJECT" WOLF_ISO_PROFILE="$PROJECT/iso-profile" \
-    "$PROJECT/tests/wolf-customize-iso-profile.sh"
-
-# Executa novamente de propósito: o SSH live é crítico para diagnóstico e o
-# staging deve ser idempotente.
-WOLF_PROJECT="$PROJECT" WOLF_ISO_PROFILE="$PROJECT/iso-profile" \
-    "$PROJECT/tests/wolf-stage-live-ssh.sh"
-
-say '[7/8] Validando staging da ISO ANTES do build...'
-SSH_BIN="$PROJECT/iso-profile/airootfs/usr/local/bin/wolf-enable-ssh-live"
-SSH_ALIAS="$PROJECT/iso-profile/airootfs/usr/local/bin/wolf-ssh"
-SSH_COPY="$PROJECT/iso-profile/airootfs/root/wolf-linux/tests/wolf-enable-ssh-live.sh"
-PACKAGES="$PROJECT/iso-profile/packages.x86_64"
-PROFILEDEF="$PROJECT/iso-profile/profiledef.sh"
-
-[[ -x "$SSH_BIN" ]] || err "SSH live não foi criado: $SSH_BIN"
-[[ -L "$SSH_ALIAS" ]] || err "Alias wolf-ssh não foi criado: $SSH_ALIAS"
-[[ "$(readlink "$SSH_ALIAS")" == 'wolf-enable-ssh-live' ]] || err 'Alias wolf-ssh aponta para destino inesperado.'
-[[ -x "$SSH_COPY" ]] || err "Cópia de diagnóstico do SSH ausente: $SSH_COPY"
-grep -Fxq openssh "$PACKAGES" || err 'openssh não foi inserido em iso-profile/packages.x86_64.'
-grep -Fq '/usr/local/bin/wolf-enable-ssh-live' "$PROFILEDEF" || err 'profiledef.sh não contém permissão do SSH live.'
-[[ -f "$PROJECT/iso-profile/airootfs/etc/wolf-linux-live-build" ]] || err 'Marcador da build live ausente.'
-
-# Comparação exata, sem versões duplicadas/hardcoded, e diagnóstico legível.
-LIVE_MARKER="$PROJECT/iso-profile/airootfs/etc/wolf-linux-live-build"
-EXPECTED_MARKER="Wolf Linux ${DEVKIT_VERSION} LXQt/X11 Clean Baseline"
-if ! cmp -s "$LIVE_MARKER" <(printf '%s\n' "$EXPECTED_MARKER"); then
-    printf '[ERRO] Marcador da live diverge da versão do DevKit.\n' >&2
-    printf '  Esperado: %q\n' "$EXPECTED_MARKER" >&2
-    printf '  Encontrado (conteúdo exato): ' >&2
-    sed -n '1,4l' "$LIVE_MARKER" >&2
-    printf '  Arquivo: %s\n' "$LIVE_MARKER" >&2
+# A retomada e permitida apenas para um projeto da mesma versao/DevKit
+# que ja possua o perfil releng; jamais sobrescreve arquivos arbitrarios.
+[[ "$PROJECT" != "$SELF_DIR" && "$PROJECT" != "$SELF_DIR"/* ]] || { echo '[ERRO] Projeto de build não pode ficar dentro do DevKit.' >&2; exit 1; }
+[[ "$PROJECT" != / && "$PROJECT" != "$HOME" ]] || { echo '[ERRO] Diretório de projeto inseguro.' >&2; exit 1; }
+REUSING=0
+if [[ -e "$PROJECT" || -L "$PROJECT" ]]; then
+  if (( ! RESUME )); then
+    echo "[ERRO] Projeto existe e foi preservado: $PROJECT" >&2
+    echo '[DICA] Para retomar um preparador interrompido, use --resume.' >&2
     exit 1
+  fi
+  [[ -d "$PROJECT" && ! -L "$PROJECT" &&
+     -f "$PROJECT/VERSION" && "$(< "$PROJECT/VERSION")" == "$VERSION" &&
+     -f "$PROJECT/iso-profile/profiledef.sh" &&
+     -f "$PROJECT/iso-profile/packages.x86_64" &&
+     -f "$PROJECT/install/wolf-install.sh" &&
+     -f "$PROJECT/package-profiles/packages.conf" &&
+     -f "$PROJECT/tests/wolf-customize-iso-profile.sh" &&
+     -f "$PROJECT/tests/wolf-stage-live-desktop.sh" &&
+     -f "$PROJECT/tests/wolf-stage-live-ssh.sh" &&
+     -f "$PROJECT/tests/wolf-build-iso.sh" &&
+     ! -L "$PROJECT/assets" && ! -L "$PROJECT/assets/wallpapers" &&
+     ! -L "$PROJECT/assets/wallpapers/wolf-linux-wallpaper.png" ]] || {
+    echo '[ERRO] Projeto não reconhecido como staging Wolf 2.3.1 válido; nada foi alterado.' >&2
+    exit 1
+  }
+  cmp -s "$SELF_DIR/install/wolf-install.sh" "$PROJECT/install/wolf-install.sh" || {
+    echo '[ERRO] Instalador no projeto difere deste DevKit; retomada bloqueada.' >&2
+    exit 1
+  }
+  REUSING=1
+  echo "[INFO] Retomando projeto validado: $PROJECT"
 fi
-ok "Marcador da live consistente com VERSION ($DEVKIT_VERSION)."
-
-ok "SSH live presente: $SSH_BIN"
-ok "Alias presente: $SSH_ALIAS -> $(readlink "$SSH_ALIAS")"
-ok 'openssh presente na lista da ISO.'
-ok 'Perfil Archiso criado e customizado a partir do zero.'
-
-say '[8/8] Smoke test...'
-if (( RUN_SMOKE == 1 )); then
-    WOLF_PROJECT="$PROJECT" TERM="${TERM:-xterm}" "$PROJECT/tests/wolf-smoke-test.sh"
-else
-    say '[AVISO] Smoke test pulado por --no-smoke.'
+[[ -f "$SELF_DIR/tools/wolf-first-login-plasma.sh" ]] || { echo '[ERRO] Helper KDE first-login ausente.' >&2; exit 1; }
+# Exec bits of *.sh may be lost by some archive/copy tools. Shell entrypoints are
+# invoked via Bash; the new build tree gets executable permissions normalized.
+for script in wolf-customize-iso-profile.sh wolf-stage-live-ssh.sh wolf-stage-live-desktop.sh wolf-build-iso.sh; do
+  [[ -f "$SELF_DIR/tests/$script" ]] || { echo "[ERRO] Script do build ausente: $script" >&2; exit 1; }
+done
+# Dependências precisam ser instaladas ANTES de verificar releng.
+# Com --needed, um archiso já registrado como instalado pode continuar
+# com arquivos ausentes; reparar só esse pacote se for o caso.
+if (( SKIP_DEPS == 0 )); then
+  command -v pacman >/dev/null 2>&1 || { echo '[ERRO] Requer Arch Linux com pacman.' >&2; exit 1; }
+  echo '[INFO] Instalando/verificando dependências do Archiso...'
+  sudo pacman -S --needed --noconfirm archiso qemu-desktop edk2-ovmf rsync python shellcheck squashfs-tools
+  if [[ ! -f "$RELENG/profiledef.sh" ]] && [[ "$RELENG" == /usr/share/archiso/configs/releng ]]; then
+    echo '[AVISO] Releng ausente mesmo após verificar dependências; reinstalando somente archiso...'
+    sudo pacman -S --noconfirm archiso
+  fi
 fi
-
-say
-say '============================================================'
-say '[OK] AMBIENTE WOLF LINUX PRONTO'
-say '============================================================'
-say "Projeto: $PROJECT"
-say "Versão : $DEVKIT_VERSION"
-say
-say 'Confirmação do SSH antes de gerar a ISO:'
-say "  ls -l '$SSH_BIN' '$SSH_ALIAS'"
-say
-say 'Gerar a ISO:'
-say "  cd '$PROJECT'"
-say '  ./tests/wolf-build-iso.sh'
-say
-say 'Na live bootada:'
-say '  cat /etc/wolf-linux-live-build'
-say '  wolf-enable-ssh-live --version'
-say '  wolf-enable-ssh-live'
-say
+if [[ ! -d "$RELENG" || ! -f "$RELENG/profiledef.sh" ]]; then
+  echo "[ERRO] Perfil Archiso releng ausente/incompleto: $RELENG" >&2
+  if (( SKIP_DEPS )); then
+    echo '[DICA] Retire --skip-deps para instalar/verificar archiso.' >&2
+  else
+    echo '[DICA] Verifique os arquivos de archiso: pacman -Qkk archiso' >&2
+  fi
+  exit 1
+fi
+# O diretório é novo: não remover projetos ou arquivos existentes.
+if (( ! REUSING )); then
+  mkdir -p "$PROJECT"
+  cp -a "$SELF_DIR"/. "$PROJECT"/
+  cp -a "$RELENG" "$PROJECT/iso-profile"
+  mkdir -p "$PROJECT/out" "$PROJECT/work"
+fi
+# Validação geral da identidade Wolf. Um projeto parcial pode faltar com MAIS
+# arquivos além do wallpaper (ex.: SVG de Kickoff). Somente ausências são
+# restauradas a partir das cópias originais, com hash conferido.
+python3 "$SELF_DIR/tests/wolf-reconcile-assets-2.3.0.py" \
+  --source "$SELF_DIR" --project "$PROJECT" --repair
+chmod 755 "$PROJECT/tests/wolf-customize-iso-profile.sh" \
+          "$PROJECT/tests/wolf-stage-live-ssh.sh" \
+          "$PROJECT/tests/wolf-stage-live-desktop.sh" \
+          "$PROJECT/tests/wolf-build-iso.sh"
+chmod 755 "$PROJECT/tools/wolf-thorium"
+WOLF_PROJECT="$PROJECT" WOLF_ISO_PROFILE="$PROJECT/iso-profile" bash "$PROJECT/tests/wolf-customize-iso-profile.sh"
+WOLF_PROJECT="$PROJECT" WOLF_ISO_PROFILE="$PROJECT/iso-profile" bash "$PROJECT/tests/wolf-stage-live-ssh.sh"
+WOLF_PROJECT="$PROJECT" WOLF_ISO_PROFILE="$PROJECT/iso-profile" bash "$PROJECT/tests/wolf-stage-live-desktop.sh"
+# Confirmar que a ISO Live recebeu todos os recursos íntegros.
+python3 "$SELF_DIR/tests/wolf-reconcile-assets-2.3.0.py" \
+  --source "$SELF_DIR" --project "$PROJECT" \
+  --staged "$PROJECT/iso-profile/airootfs/root/wolf-linux/assets"
+if (( RUN_SMOKE )); then
+  python3 "$SELF_DIR/tests/wolf-test-build-assets-2.3.0.py" "$SELF_DIR"
+  python3 "$PROJECT/tests/wolf-test-kde-2.3.0.py" "$PROJECT"
+  python3 "$PROJECT/tests/wolf-test-no-suspend-optional-2.3.0.py" "$PROJECT"
+  python3 "$PROJECT/tests/wolf-test-pm-subtitle-iso.py" "$PROJECT"
+  python3 "$PROJECT/tests/wolf-test-release-2.3.1.py" "$PROJECT"
+fi
+# Marcador de projeto concluído: o gerador só reutiliza builds preparados
+# por este fluxo; nunca executa mkarchiso sobre diretórios arbitrários.
+printf 'wolf-linux-iso-project=2.3.1\n' > "$PROJECT/.wolf-iso-project"
+printf '[OK] Projeto pronto em %s\nPróximo: ./gerar-iso.sh (na pasta do DevKit)\n' "$PROJECT"

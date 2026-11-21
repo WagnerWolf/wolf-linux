@@ -1,3 +1,18 @@
+## Wolf Linux 2.3.1 Release (2026-11-20)
+
+- Promoção do Refinos 3 homologado em VM para release própria (2.3.1).
+- Package Manager 1.0.0 + `yay` e Wolf Subtitle Downloader (Dolphin/Secret Service) incorporados à instalação.
+- Identidade do sistema, Live, gerador e preflight alinhados à versão 2.3.1.
+- Nenhuma mudança no layout gráfico, nas opções de instalação ou nos parâmetros NVIDIA já testados.
+
+---
+
+## 2.3.0 Stable — Refinos 3 (2026-11-20)
+
+- Wolf Package Manager 1.0.0 no perfil KDE; yay e checagens preservados.
+- Wolf Subtitle Downloader para Dolphin; ambiente Subliminal por usuário no primeiro uso.
+- Permanece a suspensão opcional dos Refinos 2.
+
 ## Wolf Linux 2.2.0 — Next Preview 7 (08/11/2026): aparência GTK4/libadwaita
 
 - Fix: GNOME System Monitor recebe preferência de aparência escura `color-scheme=prefer-dark`,

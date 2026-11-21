@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Wolf Linux 2.3.0: caminho estável para o Thorium (AUR pode variar o nome do executável).
+# Não usa Chrome, não altera argumentos nem o perfil do usuário.
+set -Eeuo pipefail
+for binary in /usr/bin/thorium-browser-avx2 /usr/bin/thorium-browser /usr/bin/thorium; do
+    if [[ -x "$binary" ]]; then
+        exec "$binary" "$@"
+    fi
+done
+printf '[ERRO] Thorium AVX2 ausente: verifique thorium-browser-avx2-bin e suporte AVX2 da CPU.\n' >&2
+exit 127

@@ -1,3 +1,11 @@
+# Wolf Package Manager 1.0.0 — versão integrada no KDE 2.3.0
+
+**Esta versão é distribuída com o Wolf Linux KDE 2.3.0 Refinos 3.** A instalação oficial é feita pelo instalador do sistema em `/usr/local/lib/wolf-linux/package-manager`, com monitor na bandeja do Plasma. Mantém `yay`, a interface Wolf e as checagens pós-atualização; a proteção `libfm-qt` é restrita a instalações LXQt.
+
+Os passos abaixo são **históricos da edição 0.3.7** e não devem ser utilizados para instalar o gerenciador de sistema 1.0.0.
+
+---
+
 # Wolf Package Manager 0.3.7
 
 Gerenciador de pacotes do **Wolf Linux**, em PySide6, com pacman + yay, verificação periódica, bandeja e seção Integrações Wolf no LXQt.
